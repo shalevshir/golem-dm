@@ -1,6 +1,6 @@
 import { ExecuteTurn } from "@ai-dm/schemas";
 import type { LanguageModelV1, LanguageModelV1CallOptions, LanguageModelV1StreamPart } from "ai";
-import { APICallError, simulateReadableStream } from "ai";
+import { APICallError, NoObjectGeneratedError, simulateReadableStream } from "ai";
 import { MockLanguageModelV1 } from "ai/test";
 import { beforeEach, describe, expect, it } from "vitest";
 import type { ModelSpec } from "./routing.js";
@@ -35,9 +35,7 @@ function asLanguageModel(mock: MockLanguageModelV1): LanguageModelV1 {
   return mock as LanguageModelV1;
 }
 
-function generatingModel(
-  body: () => ReturnType<LanguageModelV1["doGenerate"]>,
-): LanguageModelV1 {
+function generatingModel(body: () => ReturnType<LanguageModelV1["doGenerate"]>): LanguageModelV1 {
   return asLanguageModel(
     new MockLanguageModelV1({
       defaultObjectGenerationMode: "tool",
@@ -205,6 +203,37 @@ describe("generateStructured", () => {
   });
 });
 
+describe("usage on failed structured calls", () => {
+  it("reports the tokens a no-tool-call attempt was billed", async () => {
+    const port = portFor(
+      asLanguageModel(
+        new MockLanguageModelV1({
+          doGenerate: () => {
+            throw new NoObjectGeneratedError({
+              message: "No object generated.",
+              text: "I think the goblin should charge.",
+              response: { id: "r1", timestamp: new Date(0), modelId: "test" },
+              usage: { promptTokens: 900, completionTokens: 40, totalTokens: 940 },
+              finishReason: "stop",
+            });
+          },
+        }),
+      ),
+    );
+
+    const result = await port.generateStructured(flash, turnRequest);
+
+    expect(result.ok).toBe(false);
+    if (result.ok) throw new Error("expected failure");
+    expect(result.error.code).toBe("no_tool_call");
+    expect(result.error.usage).toEqual({
+      promptTokens: 900,
+      completionTokens: 40,
+      totalTokens: 940,
+    });
+  });
+});
+
 describe("streamText", () => {
   it("yields text deltas in order, then a finish chunk", async () => {
     const port = portFor(
@@ -225,8 +254,9 @@ describe("streamText", () => {
       seen.push(chunk);
     }
 
-    expect(seen.filter((chunk) => chunk.type === "text-delta").map((chunk) => chunk.text))
-      .toStrictEqual(["הגובלין", " נסוג", " לאחור."]);
+    expect(
+      seen.filter((chunk) => chunk.type === "text-delta").map((chunk) => chunk.text),
+    ).toStrictEqual(["הגובלין", " נסוג", " לאחור."]);
     expect(seen.at(-1)?.type).toBe("finish");
   });
 

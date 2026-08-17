@@ -52,3 +52,23 @@ describe("adapterFailure", () => {
     expect(() => adapterFailure("aborted", "Turn timed out.")).not.toThrow();
   });
 });
+
+describe("adapterFailure usage", () => {
+  it("carries usage for an attempt that was billed but produced nothing usable", () => {
+    const failure = adapterFailure("no_tool_call", "The model answered without calling the tool.", {
+      usage: { promptTokens: 900, completionTokens: 40, totalTokens: 940 },
+    });
+
+    expect(failure.error.usage).toEqual({
+      promptTokens: 900,
+      completionTokens: 40,
+      totalTokens: 940,
+    });
+  });
+
+  it("omits the key entirely when the provider reported no usage", () => {
+    const failure = adapterFailure("provider_error", "Provider call failed: boom");
+
+    expect("usage" in failure.error).toBe(false);
+  });
+});

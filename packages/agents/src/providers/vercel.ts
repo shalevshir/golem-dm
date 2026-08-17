@@ -113,7 +113,11 @@ function toCoreMessages(messages: readonly PromptMessage[]): CoreMessage[] {
   });
 }
 
-function toUsage(usage: { promptTokens: number; completionTokens: number; totalTokens: number }): TokenUsage {
+function toUsage(usage: {
+  promptTokens: number;
+  completionTokens: number;
+  totalTokens: number;
+}): TokenUsage {
   return {
     promptTokens: usage.promptTokens,
     completionTokens: usage.completionTokens,
@@ -161,7 +165,23 @@ function typeValidationCauseOf(error: unknown): TypeValidationError | undefined 
   return undefined;
 }
 
-function schemaFailure<T>(schema: ZodType<T>, value: unknown, cause: unknown): AdapterResult<never> {
+/**
+ * Usage the SDK attached to a failure. `NoObjectGeneratedError` carries it for
+ * both the no-tool-call and the schema-violation paths; `APICallError` does not,
+ * which is correct — nothing was billed for output there.
+ */
+function usageFromError(error: unknown): TokenUsage | undefined {
+  return NoObjectGeneratedError.isInstance(error) && error.usage !== undefined
+    ? toUsage(error.usage)
+    : undefined;
+}
+
+function schemaFailure<T>(
+  schema: ZodType<T>,
+  value: unknown,
+  cause: unknown,
+  usage: TokenUsage | undefined,
+): AdapterResult<never> {
   const parsed = schema.safeParse(value);
   return adapterFailure(
     "schema_validation_failed",
@@ -169,6 +189,7 @@ function schemaFailure<T>(schema: ZodType<T>, value: unknown, cause: unknown): A
     {
       ...(parsed.success ? {} : { issues: parsed.error.issues }),
       cause,
+      ...(usage === undefined ? {} : { usage }),
     },
   );
 }
@@ -215,25 +236,22 @@ export function createVercelPort(options: VercelPortOptions = {}): LanguageModel
 
         const validation = typeValidationCauseOf(error);
         if (validation !== undefined) {
-          return schemaFailure(request.schema, validation.value, error);
+          return schemaFailure(request.schema, validation.value, error, usageFromError(error));
         }
 
         if (NoObjectGeneratedError.isInstance(error)) {
-          return adapterFailure(
-            "no_tool_call",
-            "The model answered without calling the tool.",
-            { cause: error },
-          );
+          const usage = usageFromError(error);
+          return adapterFailure("no_tool_call", "The model answered without calling the tool.", {
+            cause: error,
+            ...(usage === undefined ? {} : { usage }),
+          });
         }
 
         return { ok: false, error: classifyProviderError(error, request.abortSignal) };
       }
     },
 
-    async generateText(
-      spec: ModelSpec,
-      request: TextRequest,
-    ): Promise<AdapterResult<TextOutput>> {
+    async generateText(spec: ModelSpec, request: TextRequest): Promise<AdapterResult<TextOutput>> {
       if (isAborted(request.abortSignal)) {
         return adapterFailure("aborted", "The turn budget was spent before the call started.");
       }
@@ -282,7 +300,10 @@ export function createVercelPort(options: VercelPortOptions = {}): LanguageModel
               } else if (part.type === "error") {
                 // Stop here. After an error the stream is over, and a caller
                 // reading the last chunk should find the failure, not a finish.
-                yield { type: "error", error: classifyProviderError(part.error, request.abortSignal) };
+                yield {
+                  type: "error",
+                  error: classifyProviderError(part.error, request.abortSignal),
+                };
                 return;
               } else if (part.type === "finish") {
                 yield { type: "finish", text, usage: toUsage(part.usage) };

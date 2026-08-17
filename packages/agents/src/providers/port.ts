@@ -10,11 +10,8 @@ import type { AdapterError, AdapterResult } from "./errors.js";
 import type { LayeredPrompt } from "./prompt.js";
 import type { ModelSpec } from "./routing.js";
 
-export interface TokenUsage {
-  promptTokens: number;
-  completionTokens: number;
-  totalTokens: number;
-}
+export type { TokenUsage } from "./usage.js";
+import type { TokenUsage } from "./usage.js";
 
 export interface TextRequest {
   prompt: LayeredPrompt;

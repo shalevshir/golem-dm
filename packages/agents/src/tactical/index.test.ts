@@ -261,6 +261,22 @@ describe("createTacticalAgent — the single retry", () => {
 
     expect(result.usage).toStrictEqual([usage]);
   });
+
+  it("counts tokens billed on a rejected attempt", async () => {
+    const { agent } = agentWith(
+      adapterFailure("no_tool_call", "The model answered without calling the tool.", {
+        usage: { promptTokens: 900, completionTokens: 40, totalTokens: 940 },
+      }),
+      adapterSuccess({ value: legalTurn, usage }),
+    );
+
+    const result = await agent.proposeTurn({ world, actorId: "gob-1" });
+
+    if (!result.ok) throw new Error("expected a proposal");
+    expect(result.source).toBe("retry");
+    expect(result.usage).toHaveLength(2);
+    expect(result.usage[0]).toEqual({ promptTokens: 900, completionTokens: 40, totalTokens: 940 });
+  });
 });
 
 describe("createTacticalAgent — terminal outcomes", () => {

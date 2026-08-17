@@ -4,6 +4,7 @@
 // resilience loop in step 7 can log the code straight into an
 // `action_rejected` event.
 import type { ZodIssue } from "zod";
+import type { TokenUsage } from "./usage.js";
 
 /**
  * Every way a model call can fail to produce something usable. Each code maps
@@ -15,10 +16,7 @@ import type { ZodIssue } from "zod";
  * - `aborted`                  — the turn budget is gone; abandon it.
  */
 export type AdapterErrorCode =
-  | "no_tool_call"
-  | "schema_validation_failed"
-  | "provider_error"
-  | "aborted";
+  "no_tool_call" | "schema_validation_failed" | "provider_error" | "aborted";
 
 export interface AdapterError {
   code: AdapterErrorCode;
@@ -28,6 +26,13 @@ export interface AdapterError {
   issues?: readonly ZodIssue[];
   /** The originating SDK error, kept for logs. Never rendered. */
   cause?: unknown;
+  /**
+   * What the attempt cost, when the provider reported it. A rejected tool call
+   * was still billed; without this the retry paths — exactly the ones a model
+   * comparison wants to price — are invisible in `TurnProposalResult.usage`.
+   * Absent when the provider surfaced no usage, which is not the same as zero.
+   */
+  usage?: TokenUsage;
 }
 
 export interface AdapterSuccess<T> {
@@ -49,7 +54,7 @@ export function adapterSuccess<T>(value: T): AdapterSuccess<T> {
 export function adapterFailure(
   code: AdapterErrorCode,
   message: string,
-  diagnostics: { issues?: readonly ZodIssue[]; cause?: unknown } = {},
+  diagnostics: { issues?: readonly ZodIssue[]; cause?: unknown; usage?: TokenUsage } = {},
 ): AdapterFailure {
   // Spread conditionally: `exactOptionalPropertyTypes` distinguishes an absent
   // key from one explicitly set to undefined, and the tests assert absence.
@@ -60,6 +65,7 @@ export function adapterFailure(
       message,
       ...(diagnostics.issues === undefined ? {} : { issues: diagnostics.issues }),
       ...(diagnostics.cause === undefined ? {} : { cause: diagnostics.cause }),
+      ...(diagnostics.usage === undefined ? {} : { usage: diagnostics.usage }),
     },
   };
 }

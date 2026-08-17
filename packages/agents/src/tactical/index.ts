@@ -145,6 +145,10 @@ export function createTacticalAgent({ runtime }: TacticalAgentOptions): Tactical
 
         if (!result.ok) {
           rejections.push(adapterRejection(input.actorId, number, result.error, spec));
+          // A rejected attempt was billed too. Pushing it here is what keeps
+          // cost-per-turn from under-reporting exactly the retry paths a model
+          // comparison is trying to price.
+          if (result.error.usage !== undefined) usage.push(result.error.usage);
           switch (result.error.code) {
             case "aborted":
               return { kind: "aborted" };
