@@ -48,14 +48,6 @@ export const ARMS: readonly Arm[] = CANDIDATES.flatMap((candidate) =>
   })),
 );
 
-export function armById(armId: string): Arm {
-  const found = ARMS.find((arm) => arm.armId === armId);
-  if (found === undefined) {
-    throw new Error(`Unknown arm ${armId}; known: ${ARMS.map((arm) => arm.armId).join(", ")}`);
-  }
-  return found;
-}
-
 /** Five seeds is enough to see variance without making a live sweep expensive. */
 export const DEFAULT_SEEDS: readonly number[] = [1, 2, 3, 4, 5];
 
@@ -64,6 +56,23 @@ export const SMOKE_ARM: Arm = {
   armId: "scripted-fake@medium",
   spec: { provider: "google", modelId: "scripted-fake", reasoningEffort: "medium" },
 };
+
+/**
+ * `ARMS` holds only the 12 live candidates, but `SMOKE_ARM.armId` names a real
+ * arm too — the one the smoke run always uses. Resolving it here (rather than
+ * leaving it a lookup miss) means `--arms scripted-fake@medium` behaves like
+ * every other arm id instead of throwing a "known:" list that omits the one
+ * arm every non-`--live` run actually exercises.
+ */
+export function armById(armId: string): Arm {
+  if (armId === SMOKE_ARM.armId) return SMOKE_ARM;
+  const found = ARMS.find((arm) => arm.armId === armId);
+  if (found === undefined) {
+    const known = [...ARMS.map((arm) => arm.armId), SMOKE_ARM.armId].join(", ");
+    throw new Error(`Unknown arm ${armId}; known: ${known}`);
+  }
+  return found;
+}
 
 export interface BenchmarkConfig {
   mode: "probe" | "encounter" | "both";
