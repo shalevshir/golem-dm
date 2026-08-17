@@ -95,10 +95,39 @@ describe("findPath", () => {
       .....
     `);
     const result = findPath(grid, [0, 0], [0, 2]);
-    expect(result?.costFeet).toBe(30);
+    // 40 ft, not 30: rounding the end of the wall costs two orthogonal steps
+    // because the diagonals at (2,0)->(3,1) and (3,1)->(2,2) would each cut the
+    // corner of a wall square, which SRD 5.2.1 forbids.
+    expect(result?.costFeet).toBe(40);
     for (const [x, y] of result?.path ?? []) {
       expect(grid.tiles[y]?.[x]).not.toBe("blocking");
     }
+  });
+
+  it("cannot cut the corner of a wall diagonally", () => {
+    // SRD 5.2.1, Combat/Grid: "Diagonal movement can't cross the corner of a
+    // wall, a large tree, or another terrain feature that fills its space."
+    const grid = parseGrid(`
+      ..
+      #.
+    `);
+    // (0,0) -> (1,1) would slip past the corner of the wall at (0,1).
+    // The legal route is (0,0) -> (1,0) -> (1,1): two steps, 10 ft.
+    const result = findPath(grid, [0, 0], [1, 1]);
+    expect(result?.costFeet).toBe(10);
+    expect(result?.path).toStrictEqual([
+      [0, 0],
+      [1, 0],
+      [1, 1],
+    ]);
+  });
+
+  it("still allows a diagonal when both flanking squares are open", () => {
+    const grid = parseGrid(`
+      ..
+      ..
+    `);
+    expect(findPath(grid, [0, 0], [1, 1])?.costFeet).toBe(5);
   });
 
   it("returns null when the goal is unreachable", () => {

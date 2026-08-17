@@ -69,8 +69,8 @@ Status: POC phase · Supersedes `dm-plan.md` (see `dm-plan-review.md` for the fa
 |---|---|---|---|---|
 | 1 | **Decisions:** edition (rec: 2024/SRD 5.2.1), solo vs party (rec: solo), spatial house rules → ADRs | ADRs 0001–0003 accepted | 1 | ✅ done |
 | 2 | **Scaffold:** pnpm workspaces, tsconfig, ESLint/Prettier, Vitest, CI | `pnpm typecheck && lint && test` green in CI | 1 | ✅ done |
-| 3 | **Schemas:** character, actions (`ExecuteTurn`), events, world in zod; JSON-schema export | Fixtures parse; tool schema generated | 1 | 🟡 partial — no `Combatant` schema |
-| 4 | **Rules engine:** dice → checks → combat resolution → action economy → grid/A*/LoS | Golden tests pass, ≥90% coverage | 1–2 | 🟡 partial — no action economy / `ExecuteTurn` validation |
+| 3 | **Schemas:** character, actions (`ExecuteTurn`), events, world in zod; JSON-schema export | Fixtures parse; tool schema generated | 1 | ✅ done |
+| 4 | **Rules engine:** dice → checks → combat resolution → action economy → grid/A*/LoS | Golden tests pass, ≥90% coverage | 1–2 | ✅ done |
 | 5 | **SRD data:** ~10 monsters, conditions, 4 classes as validated JSON | Loads + validates | 2 | ⬜ not started |
 | 6 | **Provider adapter:** Vercel AI SDK wrapper, `ModelRouting` config | Mocked-provider tests pass | 3 | ⬜ not started |
 | 7 | **Tactical agent + sim:** validate→retry→fallback loop; benchmark Flash vs nano/mini | Legality ≥95% after retry on fixture scenarios; model chosen from data | 3–4 | ⬜ not started |
@@ -82,21 +82,27 @@ Status: POC phase · Supersedes `dm-plan.md` (see `dm-plan-review.md` for the fa
 ### Status as of 2026-08-17
 
 Toolchain bootstrapped and verified: `pnpm typecheck`, `pnpm lint`, `pnpm test`
-all green (132 tests). Rules-engine coverage 98.2% stmts / 94.15% branch / 100%
+all green (236 tests). Rules-engine coverage 99.15% stmts / 96.01% branch / 100%
 funcs, above the ≥90% bar.
 
 **Built:** `dice` (notation parser, 2024 crit doubling, replay determinism),
 `checks` (modifiers, proficiency/expertise, saves, passive scores, contests),
 `combat` (attack vs AC with cover, temp-HP ordering, massive-damage death,
-death saves, 2024 unified exhaustion), `spatial` (Chebyshev distance, A* with
-difficult terrain, Bresenham LoS behind a swappable interface, cover).
+death saves, 2024 unified exhaustion, action-economy state machine,
+`ExecuteTurn` validation), `spatial` (Chebyshev distance, A* with difficult
+terrain, Bresenham LoS behind a swappable interface, cover).
 
-**Blocked:** `ExecuteTurn` validation and the action-economy state machine —
-the agent-retry gate described in `packages/rules-engine/CLAUDE.md`. Both need a
-`Combatant` schema (position, speed, reach, remaining action economy, conditions)
-that does not exist yet; `packages/schemas/src/world.ts` currently has only
-`GridMap`, `EntityStatus`, `TerrainType`, and `FactionRelation`. **This is the
-next task**, and it reopens steps 3 and 4 before step 5 can start.
+Steps 3 and 4 closed with `Combatant` (`packages/schemas/src/world.ts`) and
+`validateExecuteTurn` (`packages/rules-engine/src/combat/validate-turn.ts`) —
+the agent-retry gate named in `packages/rules-engine/CLAUDE.md`. It returns a
+discriminated result: either a `TurnPlan` (resolved paths, movement cost,
+resulting action economy and spell slots) or a list of rejections, each with a
+stable `TurnRejectionReason` code for the tactical agent's single retry and the
+`action_rejected` event.
+
+**Known gap:** weapon and spell ranges come from the caller via
+`CombatWorld.actionRangesFeet`; an absent entry falls back to the actor's melee
+reach. Populate it in step 5 with the SRD data pass, which is the next task.
 
 ## 5. Open Risks
 

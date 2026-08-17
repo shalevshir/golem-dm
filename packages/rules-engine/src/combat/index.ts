@@ -4,6 +4,10 @@ import { d20 } from "../dice/index.js";
 import type { Rng } from "../dice/index.js";
 import type { RollMode } from "../checks/index.js";
 
+export * from "./exhaustion.js";
+export * from "./action-economy.js";
+export * from "./validate-turn.js";
+
 export type CoverLevel = "none" | "half" | "three_quarters" | "full";
 
 export interface AttackInput {
@@ -137,18 +141,4 @@ export function rollDeathSave(state: DeathSaveState, rng: Rng): DeathSaveResult 
   else if (successes >= 3) outcome = "stable";
 
   return { state: { successes, failures }, naturalRoll: result, outcome };
-}
-
-/** 2024 unified exhaustion (ADR-0001): −2 per level to every d20 test. */
-export function exhaustionD20Penalty(level: number): number {
-  return 0 - 2 * level;
-}
-
-/** 2024 unified exhaustion (ADR-0001): −5 ft of speed per level. */
-export function exhaustionSpeedPenaltyFeet(level: number): number {
-  return 0 - 5 * level;
-}
-
-export function isDeadFromExhaustion(level: number): boolean {
-  return level >= 6;
 }

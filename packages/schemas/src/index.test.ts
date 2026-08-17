@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
+import { ZodError } from "zod";
 import { zodToJsonSchema } from "zod-to-json-schema";
-import { CharacterSheet, ExecuteTurn, GameEvent, GridMap } from "./index.js";
+import { CharacterSheet, Combatant, ExecuteTurn, GameEvent, GridMap } from "./index.js";
 
 const validSheet = {
   characterId: "pc-1",
@@ -109,6 +110,87 @@ describe("GameEvent", () => {
         payload: {},
       }),
     ).toThrow();
+  });
+});
+
+const validCombatant = {
+  combatantId: "gob-2",
+  faction: "hostile",
+  position: [4, 7],
+  speedFeet: 30,
+  maxHp: 7,
+  currentHp: 7,
+  armorClass: 15,
+};
+
+describe("Combatant", () => {
+  it("parses a minimal fixture and defaults the optional state", () => {
+    const parsed = Combatant.parse(validCombatant);
+    expect(parsed.position).toStrictEqual([4, 7]);
+    expect(parsed.tempHp).toBe(0);
+    expect(parsed.reachFeet).toBe(5);
+    expect(parsed.exhaustionLevel).toBe(0);
+    expect(parsed.attacksPerAction).toBe(1);
+    expect(parsed.conditions).toStrictEqual([]);
+    expect(parsed.spellSlots).toStrictEqual({});
+    expect(parsed.status).toBe("alive");
+  });
+
+  it("defaults an untouched action economy to nothing spent", () => {
+    expect(Combatant.parse(validCombatant).actionEconomy).toStrictEqual({
+      actionUsed: false,
+      bonusActionUsed: false,
+      reactionUsed: false,
+      movementUsedFeet: 0,
+      attacksMade: 0,
+    });
+  });
+
+  it("parses a fully specified combatant", () => {
+    const parsed = Combatant.parse({
+      ...validCombatant,
+      characterId: "pc-1",
+      faction: "party",
+      reachFeet: 10,
+      tempHp: 4,
+      conditions: [{ condition: "restrained", durationRounds: 2 }],
+      exhaustionLevel: 2,
+      attacksPerAction: 2,
+      spellSlots: { "1": { max: 4, current: 3 } },
+      actionEconomy: { actionUsed: true, movementUsedFeet: 15 },
+      status: "alive",
+    });
+    expect(parsed.conditions[0]?.condition).toBe("restrained");
+    expect(parsed.spellSlots["1"]?.current).toBe(3);
+    expect(parsed.actionEconomy.actionUsed).toBe(true);
+    expect(parsed.actionEconomy.bonusActionUsed).toBe(false);
+  });
+
+  it("rejects a speed that is not a multiple of 5", () => {
+    expect(() => Combatant.parse({ ...validCombatant, speedFeet: 32 })).toThrow(ZodError);
+  });
+
+  it("rejects an exhaustion level above the 2024 six-level track", () => {
+    expect(() => Combatant.parse({ ...validCombatant, exhaustionLevel: 7 })).toThrow(ZodError);
+  });
+
+  it("rejects an unknown condition", () => {
+    const bad = { ...validCombatant, conditions: [{ condition: "cursed", durationRounds: 1 }] };
+    expect(() => Combatant.parse(bad)).toThrow(ZodError);
+  });
+
+  it("rejects a fractional grid position", () => {
+    expect(() => Combatant.parse({ ...validCombatant, position: [1.5, 2] })).toThrow(ZodError);
+  });
+
+  it("rejects an unknown faction", () => {
+    expect(() => Combatant.parse({ ...validCombatant, faction: "chaotic" })).toThrow(ZodError);
+  });
+
+  it("exports a JSON schema usable as an LLM tool definition", () => {
+    const jsonSchema = zodToJsonSchema(Combatant, "Combatant");
+    expect(jsonSchema).toHaveProperty("$ref", "#/definitions/Combatant");
+    expect(JSON.stringify(jsonSchema)).toContain("actionEconomy");
   });
 });
 

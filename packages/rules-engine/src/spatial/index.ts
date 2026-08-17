@@ -86,11 +86,31 @@ function key(tile: Tile): string {
   return `${String(tile[0])},${String(tile[1])}`;
 }
 
+/**
+ * SRD 5.2.1 (Combat, "Squares"): "Diagonal movement can't cross the corner of a
+ * wall, a large tree, or another terrain feature that fills its space." A square
+ * counts as filling its space when it blocks line of sight — cover-granting
+ * scenery is low enough to move diagonally past.
+ */
+function cutsWallCorner(grid: GridMap, tile: Tile, dx: number, dy: number): boolean {
+  if (dx === 0 || dy === 0) return false;
+  const flanks: Tile[] = [
+    [tile[0] + dx, tile[1]],
+    [tile[0], tile[1] + dy],
+  ];
+  return flanks.some((flank) => {
+    const terrain = terrainAt(grid, flank);
+    return terrain !== undefined && blocksLineOfSight(terrain);
+  });
+}
+
 function neighbors(grid: GridMap, tile: Tile): Tile[] {
   const found: Tile[] = [];
   for (const [dx, dy] of NEIGHBOR_OFFSETS) {
     const next: Tile = [tile[0] + dx, tile[1] + dy];
-    if (terrainAt(grid, next) !== undefined) found.push(next);
+    if (terrainAt(grid, next) === undefined) continue;
+    if (cutsWallCorner(grid, tile, dx, dy)) continue;
+    found.push(next);
   }
   return found;
 }
