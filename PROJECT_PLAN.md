@@ -82,7 +82,7 @@ Status: POC phase · Supersedes `dm-plan.md` (see `dm-plan-review.md` for the fa
 ### Status as of 2026-08-17
 
 Toolchain bootstrapped and verified: `pnpm typecheck`, `pnpm lint`, `pnpm test`
-all green (473 tests). Rules-engine coverage 99.31% stmts / 97.25% branch / 100%
+all green (489 tests). Rules-engine coverage 99.31% stmts / 97.25% branch / 100%
 funcs, above the ≥90% bar.
 
 **Built:** `dice` (notation parser, 2024 crit doubling, replay determinism),
@@ -149,6 +149,29 @@ Two things there are **deliberately unmeasured**: the tactical row still points
 at Gemini 3 Flash by default, and `REASONING_BUDGET_TOKENS` (0 / 4096 / 16384)
 is a plausible scale rather than an observed one. Step 7b's benchmark is what
 should set both.
+
+Two follow-ups landed after 7a's review, both of which exist for 7b's sake:
+
+- **`promptVersion`** on every `action_rejected` payload, sourced from
+  `TACTICAL_PROMPT_VERSION` (`packages/agents/src/tactical/prompt-text.ts`).
+  Without it, a prompt edited between two benchmark runs pools the two runs
+  silently. A guard test pins a hash of every prompt string that reaches a
+  model, so the version cannot go stale unnoticed — editing a prompt fails
+  `prompt-text.test.ts` until the version is bumped and the hash re-pinned.
+- **`createTimingPort`** (`packages/agents/src/providers/timing.ts`), an
+  optional decorator recording `durationMs` per call and `firstChunkMs` for
+  streams. Timing at the port rather than inside an agent is what makes step
+  9's "first token < 1.5s" measurable at all, and lets `apps/server` reuse the
+  same numbers without depending on `tools/sim`.
+
+**One known gap 7b must handle before publishing any cost figure:** token usage
+is under-reported on retry paths. `TurnProposalResult.usage` accumulates only on
+adapter calls that produced output, but a `schema_validation_failed` or
+`no_tool_call` attempt was still billed — and `AdapterError`
+(`packages/agents/src/providers/errors.ts`) carries no `usage` field, so that
+spend is invisible. The bias is downward and lands on exactly the paths a model
+comparison most wants to price. Either add `usage?` to `AdapterError` (a step-6
+contract change) or state the bias explicitly alongside the results.
 
 **Known gaps** are tracked in [`RULES_REFERENCE.md`](RULES_REFERENCE.md) §8,
 which is the canonical record of what the engine does and does not implement.
