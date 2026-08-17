@@ -90,7 +90,7 @@ describe("createTacticalAgent — a legal proposal", () => {
     // Nothing else asserts this, and without it the server's 10s turn budget
     // stops being enforced the moment someone drops the spread.
     const { port, agent } = agentWith(adapterSuccess({ value: legalTurn, usage }));
-    const signal = AbortSignal.timeout(10_000);
+    const { signal } = new AbortController();
 
     await agent.proposeTurn({ world, actorId: "gob-1", abortSignal: signal });
 

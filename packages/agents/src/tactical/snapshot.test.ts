@@ -143,10 +143,11 @@ describe("buildCapabilityCard", () => {
   // range from the world. If the two ever disagree, the model is told a lie it
   // cannot recover from: propose in range, get target_out_of_reach, retry with
   // feedback contradicting the card, get rejected again, fall back.
-  it("gives an action the world configures the configured range, which the validator enforces", () => {
+  it("gives a configured action the range the validator will enforce", () => {
     const card = buildCapabilityCard(goblin, bowWorld, actions);
 
-    // pc-1 is 20 ft away: within the 80 ft the card advertises.
+    // pc-1 is 20 ft away: within the 80 ft the card advertises, and the engine
+    // agrees, because both read the same `actionRangesFeet` entry.
     expect(card.actions[1]?.rangeFeet).toBe(80);
     expect(validateExecuteTurn(shoot("shortbow"), goblin, bowWorld).valid).toBe(true);
   });
@@ -158,6 +159,9 @@ describe("buildCapabilityCard", () => {
     // the card, which is why it must not advertise 20 ft of scimitar.
     expect(card.actions[0]?.rangeFeet).toBe(goblin.reachFeet);
     const rejected = validateExecuteTurn(shoot("scimitar"), goblin, bowWorld);
-    expect(rejected.valid).toBe(false);
+    if (rejected.valid) throw new Error("expected 5 ft of reach not to cover 20 ft");
+    expect(rejected.rejections.map((rejection) => rejection.reason)).toContain(
+      "target_out_of_reach",
+    );
   });
 });
