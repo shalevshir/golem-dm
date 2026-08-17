@@ -130,6 +130,24 @@ describe("findPath", () => {
     expect(findPath(grid, [0, 0], [1, 1])?.costFeet).toBe(5);
   });
 
+  // SRD 5.2.1, "Crawling": each foot of movement costs 1 extra foot, and
+  // 2 extra feet in Difficult Terrain — so a crawled difficult square is 15 ft,
+  // not the 20 ft that doubling an already-doubled cost would give.
+  it("charges a crawling creature double on open ground", () => {
+    const grid = parseGrid(`.....`);
+    expect(findPath(grid, [0, 0], [3, 0], { crawling: true })?.costFeet).toBe(30);
+  });
+
+  it("charges a crawling creature triple in difficult terrain, not quadruple", () => {
+    const grid = parseGrid(`~~~~~`);
+    expect(findPath(grid, [0, 0], [1, 0], { crawling: true })?.costFeet).toBe(15);
+  });
+
+  it("leaves costs alone for a creature that is not crawling", () => {
+    const grid = parseGrid(`.~...`);
+    expect(findPath(grid, [0, 0], [1, 0], { crawling: false })?.costFeet).toBe(10);
+  });
+
   it("returns null when the goal is unreachable", () => {
     const grid = parseGrid(`
       ...

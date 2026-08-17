@@ -19,6 +19,7 @@ import { coverBetween, findPath, tileDistanceFeet } from "../spatial/index.js";
 import {
   isImmobilised,
   isIncapacitated,
+  isProne,
   movementBudgetFeet,
   spendAction,
   spendAttack,
@@ -157,6 +158,9 @@ export function validateExecuteTurn(
   const segments: MovementSegmentPlan[] = [];
   let totalMovementFeet = 0;
   let position = actor.position;
+  // A prone creature's only movement option is to crawl, unless it stands up —
+  // which `ExecuteTurn` has no way to propose yet.
+  const movementOptions = { crawling: isProne(actor) };
 
   if (movement.length > 0 && isImmobilised(actor)) {
     rejections.push({
@@ -188,7 +192,7 @@ export function validateExecuteTurn(
         break;
       }
 
-      const route = findPath(world.grid, position, destination);
+      const route = findPath(world.grid, position, destination, movementOptions);
       if (route === null) {
         rejections.push({
           reason: "movement_path_blocked",

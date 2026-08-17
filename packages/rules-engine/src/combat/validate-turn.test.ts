@@ -346,7 +346,7 @@ describe("validateExecuteTurn — movement", () => {
     expect(reasons(result)).toStrictEqual(["movement_exceeds_speed"]);
   });
 
-  it("lets a prone actor cover half its speed", () => {
+  it("lets a prone actor crawl half its speed", () => {
     const prone = combatant({
       combatantId: "hero",
       faction: "party",
@@ -361,7 +361,30 @@ describe("validateExecuteTurn — movement", () => {
       world({ combatants: [prone] }),
     );
     expect(result.valid).toBe(true);
-    expect(result.valid && result.plan.movementBudgetFeet).toBe(15);
+    // 15 ft of ground, charged at the crawling rate of 10 ft per square.
+    expect(result.valid && result.plan.totalMovementFeet).toBe(30);
+    expect(result.valid && result.plan.movementBudgetFeet).toBe(30);
+  });
+
+  // Crawling adds 2 extra feet per foot in Difficult Terrain, not 1 — so a
+  // difficult square costs 15 ft to crawl, and a 30 ft Speed buys two of them.
+  it("charges a prone actor 15 ft per difficult square, not 20", () => {
+    const grid = parseGrid(`~~~~~`);
+    const prone = combatant({
+      combatantId: "hero",
+      faction: "party",
+      conditions: [{ condition: "prone", durationRounds: null }],
+    });
+    const result = validateExecuteTurn(
+      turn({
+        movement: [{ destinationTile: [2, 0], pathType: "direct" }],
+        mainAction: { actionType: "dodge" },
+      }),
+      prone,
+      { grid, combatants: [prone] },
+    );
+    expect(result.valid).toBe(true);
+    expect(result.valid && result.plan.totalMovementFeet).toBe(30);
   });
 
   it("reduces the budget by 5 ft per level of exhaustion", () => {

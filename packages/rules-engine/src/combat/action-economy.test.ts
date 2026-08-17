@@ -158,22 +158,17 @@ describe("movementBudgetFeet", () => {
     expect(movementBudgetFeet(actor, { dashed: true })).toBe(50);
   });
 
-  it("halves the budget while prone — crawling costs an extra foot per foot", () => {
+  // Prone does not shrink the budget — it raises the per-square cost, which
+  // findPath charges. Halving here would double-count and would also get
+  // Difficult Terrain wrong (SRD: 2 extra feet crawling, not 2x the doubling).
+  it("is unchanged while prone — crawling raises cost, not the budget", () => {
     const actor = combatant({
       combatantId: "a",
       speedFeet: 30,
       conditions: [{ condition: "prone", durationRounds: null }],
     });
-    expect(movementBudgetFeet(actor)).toBe(15);
-  });
-
-  it("halves a prone actor's Dash budget too", () => {
-    const actor = combatant({
-      combatantId: "a",
-      speedFeet: 30,
-      conditions: [{ condition: "prone", durationRounds: null }],
-    });
-    expect(movementBudgetFeet(actor, { dashed: true })).toBe(30);
+    expect(movementBudgetFeet(actor)).toBe(30);
+    expect(movementBudgetFeet(actor, { dashed: true })).toBe(60);
   });
 });
 

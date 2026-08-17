@@ -45,6 +45,9 @@ success. Death saves are the one exception (§4). `abilityCheck` and
 | Natural 1 | Misses regardless of modifiers or AC. | `combat/` `resolveAttack` |
 | Critical hit damage | Roll the attack's damage **dice** twice; add modifiers **once**, as normal. | `dice/` `roll(..., {critical:true})` |
 | Base AC | `10 + Dexterity modifier`, then modified by armor etc. | not yet — comes with SRD data (step 5) |
+| Attack action | Grants **one attack roll** with a weapon or an Unarmed Strike. Each target named is a separate roll, so two targets cost two attacks. | `combat/` `validateExecuteTurn` |
+| Extra Attack | "Attack twice instead of once whenever you take the Attack action." | `Combatant.attacksPerAction` |
+| Reach | 5 ft unless a rule says otherwise. | `Combatant.reachFeet` |
 
 ---
 
@@ -93,6 +96,8 @@ house rule. Chebyshev distance is therefore correct.
 | Square size | 5 ft. Speed ÷ 5 = squares. | `spatial/` `FEET_PER_TILE` |
 | Entering a square | Costs 1 square, orthogonally **or** diagonally. | `spatial/` `findPath` |
 | Difficult terrain | Costs **2** squares to enter. | `spatial/` `movementCostFeet` |
+| Crawling | Each foot costs **1 extra foot**, or **2 extra feet** in Difficult Terrain — so 10 ft per open square and **15 ft** per difficult square. Note the difficult case is *not* twice the ordinary difficult cost. | `spatial/` `movementCostFeet(t, {crawling})` |
+| Dash | Extra movement equal to your Speed, i.e. the budget doubles. | `combat/` `movementBudgetFeet` |
 | Corners | Diagonal movement **cannot cross the corner** of a wall or anything filling its space. | `spatial/` `cutsWallCorner` |
 | Range | Count squares from a square adjacent to one thing, stopping in the other's space; shortest route. Equivalent to Chebyshev. | `spatial/` `tileDistanceFeet` |
 
@@ -111,8 +116,23 @@ can be swapped (ADR-0003).
 - Speed is reduced by **5 ft × level**.
 - A Long Rest removes one level.
 
-Implemented in `combat/exhaustion.ts`. The other 14 conditions are enumerated in
-`schemas` `Condition` but their mechanical effects are largely not implemented.
+Implemented in `combat/exhaustion.ts`.
+
+**Conditions the turn validator enforces** (`combat/action-economy.ts`):
+
+- **Incapacitated** — no Action, Bonus Action, or Reaction. Paralyzed,
+  Petrified, Stunned and Unconscious each *include* Incapacitated, so all five
+  block acting.
+- **Speed 0** — Grappled, Restrained, Paralyzed, Petrified, Stunned,
+  Unconscious. Distinguished from an empty budget by the `actor_cannot_move`
+  rejection.
+- **Prone** — "your only movement options are to crawl or to spend an amount of
+  movement equal to half your Speed (round down) to right yourself." Modelled as
+  crawling, since `ExecuteTurn` has no way to propose standing up. Prone raises
+  movement *cost*; it does not reduce Speed.
+
+The remaining conditions are enumerated in `schemas` `Condition`, but their
+mechanical effects are not implemented.
 
 ---
 
@@ -143,7 +163,17 @@ Not yet implemented, roughly in dependency order:
 - Damage taken at 0 HP → death-save failures (§4)
 - Stabilising, and the 1d4-hour natural recovery (§4)
 - HP maximum reduced to 0 (§4)
-- Condition mechanical effects beyond exhaustion (§6)
-- Weapon mastery, base AC from armor, weapon/spell ranges — all need SRD data
+- Condition mechanical effects beyond those listed in §6
+- Weapon mastery, base AC from armor, weapon/spell ranges — all need SRD data.
+  Ranges are injected meanwhile via `CombatWorld.actionRangesFeet`, defaulting
+  to the actor's melee reach.
 - Opportunity attacks, concentration checks
 - Corner-to-corner RAW line of sight (currently the Bresenham house rule)
+- **Creature-aware pathing.** `findPath` routes through occupied squares; only a
+  movement segment's *destination* is checked for occupancy. RAW you may move
+  through an ally freely but through an enemy only if it is Tiny or two size
+  categories apart — which needs a `size` field on `Combatant`.
+- **Creatures granting cover.** `coverBetween` reads terrain only; RAW another
+  creature in the line can give Half Cover.
+- **Standing up from Prone.** `ExecuteTurn` cannot express it, so a prone actor
+  is always costed as crawling (§6).

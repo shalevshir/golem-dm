@@ -39,13 +39,27 @@ const COVER_RANK: Record<CoverLevel, number> = {
   full: 3,
 };
 
+export interface MovementOptions {
+  /**
+   * SRD 5.2.1 ("Crawling"): each foot of movement costs 1 extra foot, or
+   * 2 extra feet in Difficult Terrain. Per 5 ft square that is 10 ft on open
+   * ground and 15 ft in Difficult Terrain — note the latter is *not* twice the
+   * ordinary difficult cost. Prone creatures crawl unless they stand up.
+   */
+  crawling?: boolean;
+}
+
 /** Cost to enter a tile, or null when it cannot be entered at all. */
-export function movementCostFeet(terrain: TerrainType): number | null {
+export function movementCostFeet(
+  terrain: TerrainType,
+  options: MovementOptions = {},
+): number | null {
+  const crawling = options.crawling === true;
   switch (terrain) {
     case "normal":
-      return FEET_PER_TILE;
+      return crawling ? FEET_PER_TILE * 2 : FEET_PER_TILE;
     case "difficult":
-      return FEET_PER_TILE * 2;
+      return crawling ? FEET_PER_TILE * 3 : FEET_PER_TILE * 2;
     // Walls and cover-granting scenery are physical obstacles: you shoot over
     // them or around them, you do not walk through them.
     case "blocking":
@@ -128,17 +142,23 @@ function reconstruct(cameFrom: Map<string, Tile>, goal: Tile, costFeet: number):
 }
 
 /**
- * A* over the grid. Diagonals cost the same as orthogonal steps (ADR-0003) and
- * difficult terrain costs double. Returns null when no route exists.
+ * A* over the grid. Diagonals cost the same as orthogonal steps (ADR-0003),
+ * difficult terrain costs double, and a crawling creature pays the surcharge in
+ * `movementCostFeet`. Returns null when no route exists.
  */
-export function findPath(grid: GridMap, start: Tile, goal: Tile): PathResult | null {
+export function findPath(
+  grid: GridMap,
+  start: Tile,
+  goal: Tile,
+  options: MovementOptions = {},
+): PathResult | null {
   const startTerrain = terrainAt(grid, start);
   const goalTerrain = terrainAt(grid, goal);
   if (startTerrain === undefined || goalTerrain === undefined) return null;
   if (start[0] === goal[0] && start[1] === goal[1]) {
     return { path: [[start[0], start[1]]], costFeet: 0 };
   }
-  if (movementCostFeet(goalTerrain) === null) return null;
+  if (movementCostFeet(goalTerrain, options) === null) return null;
 
   const goalKey = key(goal);
   const open = new Map<string, Tile>([[key(start), start]]);
@@ -171,7 +191,7 @@ export function findPath(grid: GridMap, start: Tile, goal: Tile): PathResult | n
     for (const neighbor of neighbors(grid, current)) {
       const terrain = terrainAt(grid, neighbor);
       if (terrain === undefined) continue;
-      const stepCost = movementCostFeet(terrain);
+      const stepCost = movementCostFeet(terrain, options);
       if (stepCost === null) continue;
 
       const neighborKey = key(neighbor);

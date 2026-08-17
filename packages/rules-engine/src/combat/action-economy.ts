@@ -102,15 +102,15 @@ export function effectiveSpeedFeet(actor: Combatant): number {
 }
 
 /**
- * Feet of ground the creature may cover this turn. Dash grants extra movement
+ * Feet of movement the creature may spend this turn. Dash grants extra movement
  * equal to its Speed, so the budget doubles.
  *
- * Prone halves the ground covered. A prone creature either crawls, which costs
- * an extra foot per foot, or spends half its Speed standing up and walks with
- * what is left; both land on half the budget, so one halving models the pair.
+ * Prone does not appear here: crawling raises the *cost* of each square rather
+ * than shrinking the budget, and `findPath` charges it. Halving the budget
+ * instead would over-charge Difficult Terrain, which costs 2 extra feet per
+ * foot to crawl rather than twice the ordinary difficult rate.
  */
 export function movementBudgetFeet(actor: Combatant, options?: { dashed?: boolean }): number {
   const speed = effectiveSpeedFeet(actor);
-  const budget = options?.dashed === true ? speed * 2 : speed;
-  return isProne(actor) ? Math.floor(budget / 2) : budget;
+  return options?.dashed === true ? speed * 2 : speed;
 }
