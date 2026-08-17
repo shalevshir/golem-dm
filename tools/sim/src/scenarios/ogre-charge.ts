@@ -1,11 +1,12 @@
-// A Large creature (2x2 footprint, 10 ft reach) crossing difficult terrain,
-// which costs double. Discriminates movement-budget arithmetic and whether the
-// model accounts for a footprint bigger than one square.
+// A Large creature (2x2 footprint, 5 ft reach) crossing difficult terrain,
+// which costs double. The mud spans the full grid height so there is no way
+// around it. Discriminates movement-budget arithmetic and whether the model
+// accounts for a footprint bigger than one square.
 import type { ScenarioDefinition, TerrainOverride } from "./types.js";
 
-/** A band of mud the ogre must cross or go around. */
+/** A band of mud spanning the full grid height; the ogre must cross it. */
 const MUD: readonly TerrainOverride[] = [6, 7].flatMap((x) =>
-  [3, 4, 5, 6, 7, 8].map((y): TerrainOverride => ({ tile: [x, y], terrain: "difficult" })),
+  Array.from({ length: 12 }, (_, y): TerrainOverride => ({ tile: [x, y], terrain: "difficult" })),
 );
 
 export const OGRE_CHARGE: ScenarioDefinition = {
