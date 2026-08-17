@@ -2,7 +2,7 @@
 // LoS algorithm is intentionally swappable (Bresenham for POC — documented
 // house rule; RAW corner-to-corner may replace it later). See docs/decisions.
 // Diagonal rule: PHB default 5 ft/diagonal (ADR-0003).
-import type { GridMap, TerrainType, Tile } from "@ai-dm/schemas";
+import type { CreatureSize, GridMap, TerrainType, Tile } from "@ai-dm/schemas";
 import type { CoverLevel } from "../combat/index.js";
 
 export const FEET_PER_TILE = 5;
@@ -39,6 +39,78 @@ const COVER_RANK: Record<CoverLevel, number> = {
   full: 3,
 };
 
+/** A creature's space on the grid: `anchor` is its north-west square. */
+export interface Footprint {
+  anchor: Tile;
+  size: CreatureSize;
+}
+
+/** SRD Creature Size and Space: Large fills 2x2, Huge 3x3, Gargantuan 4x4. */
+export function footprintEdgeSquares(size: CreatureSize): number {
+  switch (size) {
+    // Tiny creatures share a square four to a square; modelled as one square.
+    case "tiny":
+    case "small":
+    case "medium":
+      return 1;
+    case "large":
+      return 2;
+    case "huge":
+      return 3;
+    case "gargantuan":
+      return 4;
+  }
+}
+
+/** Every square the creature's space covers, in row-major order. */
+export function occupiedTiles(footprint: Footprint): Tile[] {
+  const edge = footprintEdgeSquares(footprint.size);
+  const tiles: Tile[] = [];
+  for (let dy = 0; dy < edge; dy += 1) {
+    for (let dx = 0; dx < edge; dx += 1) {
+      tiles.push([footprint.anchor[0] + dx, footprint.anchor[1] + dy]);
+    }
+  }
+  return tiles;
+}
+
+/** Gap along one axis between two spans, in squares; 0 when they touch or overlap. */
+function axisGap(aStart: number, aEdge: number, bStart: number, bEdge: number): number {
+  return Math.max(0, aStart - (bStart + bEdge - 1), bStart - (aStart + aEdge - 1));
+}
+
+/**
+ * SRD range on a grid: "count squares from a square adjacent to one of them and
+ * stop in the other's space" — i.e. measure to the nearest square of each
+ * space. Reduces to Chebyshev distance when both creatures fill one square.
+ */
+export function footprintDistanceFeet(a: Footprint, b: Footprint): number {
+  const aEdge = footprintEdgeSquares(a.size);
+  const bEdge = footprintEdgeSquares(b.size);
+  return (
+    Math.max(
+      axisGap(a.anchor[0], aEdge, b.anchor[0], bEdge),
+      axisGap(a.anchor[1], aEdge, b.anchor[1], bEdge),
+    ) * FEET_PER_TILE
+  );
+}
+
+/** The closest pair of squares between two spaces — where a line is traced from. */
+export function nearestSquares(a: Footprint, b: Footprint): [Tile, Tile] {
+  let best: [Tile, Tile] = [a.anchor, b.anchor];
+  let bestDistance = Number.POSITIVE_INFINITY;
+  for (const from of occupiedTiles(a)) {
+    for (const to of occupiedTiles(b)) {
+      const distance = tileDistanceFeet(from, to);
+      if (distance < bestDistance) {
+        bestDistance = distance;
+        best = [from, to];
+      }
+    }
+  }
+  return best;
+}
+
 /**
  * How a tile's occupant affects a creature moving through it. Whether an
  * occupant blocks or merely hinders depends on factions, conditions and
@@ -58,6 +130,12 @@ export interface MovementOptions {
   crawling?: boolean;
   /** Creatures standing in the way. Absent means an empty battlefield. */
   occupancy?: OccupancyLookup;
+  /**
+   * The mover's size. Its whole space must fit in every position it enters, so
+   * a Large creature cannot pass through a one-square gap — 2024 has no
+   * squeezing rule. Absent means a single square.
+   */
+  size?: CreatureSize;
 }
 
 /** Cost to enter a tile, or null when it cannot be entered at all. */
@@ -129,15 +207,41 @@ function cutsWallCorner(grid: GridMap, tile: Tile, dx: number, dy: number): bool
   });
 }
 
-function neighbors(grid: GridMap, tile: Tile): Tile[] {
+function spaceAt(anchor: Tile, options: MovementOptions): Tile[] {
+  return occupiedTiles({ anchor, size: options.size ?? "medium" });
+}
+
+function neighbors(grid: GridMap, tile: Tile, options: MovementOptions): Tile[] {
   const found: Tile[] = [];
+  const space = spaceAt(tile, options);
   for (const [dx, dy] of NEIGHBOR_OFFSETS) {
     const next: Tile = [tile[0] + dx, tile[1] + dy];
     if (terrainAt(grid, next) === undefined) continue;
-    if (cutsWallCorner(grid, tile, dx, dy)) continue;
+    // No part of the creature's body may cut a wall corner.
+    if (space.some((part) => cutsWallCorner(grid, part, dx, dy))) continue;
     found.push(next);
   }
   return found;
+}
+
+/**
+ * Cost of moving the mover's whole space so that it is anchored at `anchor`, or
+ * null when it cannot stand there — any square off the grid, impassable, or
+ * blocked by a creature rules the position out. Difficult Terrain never stacks,
+ * so one difficult or hindered square makes the whole step difficult.
+ */
+function stepCostFeet(grid: GridMap, anchor: Tile, options: MovementOptions): number | null {
+  let difficult = false;
+  for (const tile of spaceAt(anchor, options)) {
+    const terrain = terrainAt(grid, tile);
+    if (terrain === undefined) return null;
+    if (movementCostFeet(terrain, options) === null) return null;
+
+    const passability = options.occupancy?.(tile) ?? "clear";
+    if (passability === "blocked") return null;
+    if (terrain === "difficult" || passability === "hindered") difficult = true;
+  }
+  return movementCostFeet(difficult ? "difficult" : "normal", options);
 }
 
 function reconstruct(cameFrom: Map<string, Tile>, goal: Tile, costFeet: number): PathResult {
@@ -153,8 +257,9 @@ function reconstruct(cameFrom: Map<string, Tile>, goal: Tile, costFeet: number):
 }
 
 /**
- * A* over the grid. Diagonals cost the same as orthogonal steps (ADR-0003),
- * difficult terrain costs double, and a crawling creature pays the surcharge in
+ * A* over the grid, moving the creature's whole space (`options.size`).
+ * Diagonals cost the same as orthogonal steps (ADR-0003), difficult terrain
+ * costs double, and a crawling creature pays the surcharge in
  * `movementCostFeet`. Returns null when no route exists.
  */
 export function findPath(
@@ -169,7 +274,7 @@ export function findPath(
   if (start[0] === goal[0] && start[1] === goal[1]) {
     return { path: [[start[0], start[1]]], costFeet: 0 };
   }
-  if (movementCostFeet(goalTerrain, options) === null) return null;
+  if (stepCostFeet(grid, goal, options) === null) return null;
 
   const goalKey = key(goal);
   const open = new Map<string, Tile>([[key(start), start]]);
@@ -199,18 +304,8 @@ export function findPath(
     open.delete(currentKey);
     const currentG = gScore.get(currentKey) ?? Number.POSITIVE_INFINITY;
 
-    for (const neighbor of neighbors(grid, current)) {
-      const terrain = terrainAt(grid, neighbor);
-      if (terrain === undefined) continue;
-      const passability = options.occupancy?.(neighbor) ?? "clear";
-      if (passability === "blocked") continue;
-
-      // A creature's space is Difficult Terrain, and difficult terrain never
-      // stacks — "1 extra foot, even if multiple things in a space count as
-      // Difficult Terrain" — so a hindered difficult square is still doubled.
-      const effective: TerrainType =
-        passability === "hindered" && terrain === "normal" ? "difficult" : terrain;
-      const stepCost = movementCostFeet(effective, options);
+    for (const neighbor of neighbors(grid, current, options)) {
+      const stepCost = stepCostFeet(grid, neighbor, options);
       if (stepCost === null) continue;
 
       const neighborKey = key(neighbor);

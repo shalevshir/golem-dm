@@ -335,10 +335,30 @@ describe("validateExecuteTurn — movement", () => {
     });
 
     it("squeezes past an enemy two sizes larger, paying difficult terrain", () => {
+      const grid = parseGrid(`
+        .......
+        .......
+        .......
+      `);
+      // The giant's space is [2,0]..[4,2], so the only way east is through it.
       const giant = combatant({ combatantId: "giant", position: [2, 0], size: "huge" });
-      const result = walkPast(giant);
+      const strider = combatant({
+        combatantId: "hero",
+        faction: "party",
+        position: [0, 0],
+        speedFeet: 60,
+      });
+      const result = validateExecuteTurn(
+        turn({
+          movement: [{ destinationTile: [5, 0], pathType: "direct" }],
+          mainAction: { actionType: "dodge" },
+        }),
+        strider,
+        { grid, combatants: [strider, giant] },
+      );
       expect(result.valid).toBe(true);
-      expect(result.valid && result.plan.totalMovementFeet).toBe(25);
+      // 5 clear, then three squares of the giant's space at 10 each, then 5.
+      expect(result.valid && result.plan.totalMovementFeet).toBe(40);
     });
 
     it("refuses an enemy only one size larger", () => {
@@ -380,6 +400,76 @@ describe("validateExecuteTurn — movement", () => {
       );
       expect(result.valid).toBe(true);
       expect(result.valid && result.plan.segments[0]?.path).not.toContainEqual([2, 0]);
+    });
+
+    // A Large creature fills 2x2, so every square of its space is occupied and
+    // its own move needs 2x2 of clear ground.
+    it("treats every square of a Large creature's space as occupied", () => {
+      const grid = parseGrid(`
+        ....
+        ....
+      `);
+      // The ogre anchors at [1,0] and so also fills [2,0], [1,1] and [2,1].
+      const ogre = combatant({ combatantId: "ogre", position: [1, 0], size: "large" });
+      const result = validateExecuteTurn(
+        turn({
+          movement: [{ destinationTile: [2, 1], pathType: "direct" }],
+          mainAction: { actionType: "dodge" },
+        }),
+        hero,
+        { grid, combatants: [hero, ogre] },
+      );
+      expect(reasons(result)).toContain("destination_occupied");
+    });
+
+    it("needs the mover's whole space to be clear at the destination", () => {
+      const grid = parseGrid(`
+        .....
+        .....
+        .....
+      `);
+      const ogre = combatant({
+        combatantId: "ogre",
+        faction: "party",
+        position: [0, 0],
+        size: "large",
+      });
+      // Anchoring at [3,0] would also fill [4,0], where the goblin stands.
+      const blocker = combatant({ combatantId: "gob", position: [4, 0] });
+      const result = validateExecuteTurn(
+        turn({
+          actorId: "ogre",
+          movement: [{ destinationTile: [3, 0], pathType: "direct" }],
+          mainAction: { actionType: "dodge" },
+        }),
+        ogre,
+        { grid, combatants: [ogre, blocker] },
+      );
+      expect(reasons(result)).toContain("destination_occupied");
+    });
+
+    it("keeps the mover's whole space on the grid", () => {
+      const grid = parseGrid(`
+        ...
+        ...
+        ...
+      `);
+      const ogre = combatant({
+        combatantId: "ogre",
+        faction: "party",
+        position: [0, 0],
+        size: "large",
+      });
+      const result = validateExecuteTurn(
+        turn({
+          actorId: "ogre",
+          movement: [{ destinationTile: [2, 2], pathType: "direct" }],
+          mainAction: { actionType: "dodge" },
+        }),
+        ogre,
+        { grid, combatants: [ogre] },
+      );
+      expect(reasons(result)).toStrictEqual(["destination_off_grid"]);
     });
 
     it("still refuses to end a move on a passable creature's tile", () => {
@@ -728,6 +818,49 @@ describe("validateExecuteTurn — targeting", () => {
       world({ combatants: [hero, target] }),
     );
     expect(reasons(result)).toStrictEqual(["target_out_of_reach"]);
+  });
+
+  // Range is counted to the nearest square of the target's space, so a big
+  // creature is reachable from further out than its anchor suggests.
+  it("reaches a Huge target by its nearest square, not its anchor", () => {
+    // The dragon anchors at [2,0] and fills [2,0]..[4,2], so [1,0] is adjacent.
+    const dragon = combatant({ combatantId: "wyrm", position: [2, 0], size: "huge" });
+    const result = validateExecuteTurn(
+      turn({ mainAction: { actionType: "attack", actionId: "longsword", targetIds: ["wyrm"] } }),
+      combatant({ combatantId: "hero", faction: "party", position: [1, 0] }),
+      world({ combatants: [dragon] }),
+    );
+    expect(result.valid).toBe(true);
+  });
+
+  it("still rejects a Huge target that is out of reach of its nearest square", () => {
+    const dragon = combatant({ combatantId: "wyrm", position: [4, 0], size: "huge" });
+    const result = validateExecuteTurn(
+      turn({ mainAction: { actionType: "attack", actionId: "longsword", targetIds: ["wyrm"] } }),
+      hero,
+      world({ combatants: [hero, dragon] }),
+    );
+    expect(reasons(result)).toStrictEqual(["target_out_of_reach"]);
+  });
+
+  it("measures a Large attacker's reach from its own nearest square", () => {
+    // The ogre fills [0,0]..[1,1]; the goblin at [2,0] is adjacent to its edge.
+    const ogre = combatant({
+      combatantId: "ogre",
+      faction: "party",
+      position: [0, 0],
+      size: "large",
+    });
+    const target = combatant({ combatantId: "gob", position: [2, 0] });
+    const result = validateExecuteTurn(
+      turn({
+        actorId: "ogre",
+        mainAction: { actionType: "attack", actionId: "greatclub", targetIds: ["gob"] },
+      }),
+      ogre,
+      world({ combatants: [ogre, target] }),
+    );
+    expect(result.valid).toBe(true);
   });
 
   it("accepts a reach weapon against a target 10 ft away", () => {

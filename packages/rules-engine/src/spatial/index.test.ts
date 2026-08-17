@@ -1,10 +1,13 @@
 import { describe, expect, it } from "vitest";
-import type { GridMap, TerrainType, Tile } from "@ai-dm/schemas";
+import type { CreatureSize, GridMap, TerrainType, Tile } from "@ai-dm/schemas";
 import {
   bresenhamLineOfSight,
   coverBetween,
   findPath,
+  footprintDistanceFeet,
+  footprintEdgeSquares,
   hasLineOfSight,
+  occupiedTiles,
   tileDistanceFeet,
 } from "./index.js";
 
@@ -230,6 +233,120 @@ describe("findPath", () => {
     const result = findPath(grid, start, goal);
     expect(result).not.toBeNull();
     expect(result?.costFeet).toBeGreaterThanOrEqual(tileDistanceFeet(start, goal));
+  });
+});
+
+// SRD "Creature Size and Space": Large fills 4 squares (2x2), Huge 9 (3x3),
+// Gargantuan 16 (4x4). The anchor is the north-west square of that space.
+describe("footprints", () => {
+  it.each<[CreatureSize, number]>([
+    ["tiny", 1],
+    ["small", 1],
+    ["medium", 1],
+    ["large", 2],
+    ["huge", 3],
+    ["gargantuan", 4],
+  ])("%s spans %i square(s) per edge", (size, expected) => {
+    expect(footprintEdgeSquares(size)).toBe(expected);
+  });
+
+  it("lists the four squares a Large creature fills", () => {
+    expect(occupiedTiles({ anchor: [1, 1], size: "large" })).toStrictEqual([
+      [1, 1],
+      [2, 1],
+      [1, 2],
+      [2, 2],
+    ]);
+  });
+
+  it("lists nine squares for a Huge creature", () => {
+    expect(occupiedTiles({ anchor: [0, 0], size: "huge" })).toHaveLength(9);
+  });
+
+  describe("footprintDistanceFeet", () => {
+    it("matches Chebyshev distance for two single-square creatures", () => {
+      const a = { anchor: [0, 0] as Tile, size: "medium" as const };
+      const b = { anchor: [3, 0] as Tile, size: "medium" as const };
+      expect(footprintDistanceFeet(a, b)).toBe(tileDistanceFeet([0, 0], [3, 0]));
+    });
+
+    it("is 5 ft between adjacent single-square creatures", () => {
+      expect(
+        footprintDistanceFeet(
+          { anchor: [0, 0], size: "medium" },
+          { anchor: [1, 0], size: "medium" },
+        ),
+      ).toBe(5);
+    });
+
+    it("measures from the edge of a Large creature, not its anchor", () => {
+      // Large fills [0,0]..[1,1], so [2,0] is adjacent to it.
+      expect(
+        footprintDistanceFeet({ anchor: [0, 0], size: "large" }, { anchor: [2, 0], size: "medium" }),
+      ).toBe(5);
+    });
+
+    it("counts the gap beyond a Large creature's edge", () => {
+      expect(
+        footprintDistanceFeet({ anchor: [0, 0], size: "large" }, { anchor: [3, 0], size: "medium" }),
+      ).toBe(10);
+    });
+
+    it("is zero for overlapping spaces", () => {
+      expect(
+        footprintDistanceFeet({ anchor: [0, 0], size: "huge" }, { anchor: [1, 1], size: "medium" }),
+      ).toBe(0);
+    });
+
+    it("is symmetric", () => {
+      const a = { anchor: [0, 0] as Tile, size: "large" as const };
+      const b = { anchor: [4, 2] as Tile, size: "huge" as const };
+      expect(footprintDistanceFeet(a, b)).toBe(footprintDistanceFeet(b, a));
+    });
+  });
+
+  describe("findPath with a footprint", () => {
+    // Row 2 leaves a single-square gap: wide enough for Medium, not for Large.
+    const PINCH = parseGrid(`
+      ......
+      ......
+      ##.###
+      ......
+      ......
+    `);
+
+    it("lets a Medium creature through a one-square gap", () => {
+      expect(findPath(PINCH, [0, 0], [0, 3], { size: "medium" })).not.toBeNull();
+    });
+
+    it("refuses to squeeze a Large creature through a one-square gap", () => {
+      expect(findPath(PINCH, [0, 0], [0, 3], { size: "large" })).toBeNull();
+    });
+
+    it("keeps the whole footprint on the grid", () => {
+      const grid = parseGrid(`
+        ...
+        ...
+        ...
+      `);
+      // A Large creature anchored at [2,2] would hang off the south-east edge.
+      expect(findPath(grid, [0, 0], [2, 2], { size: "large" })).toBeNull();
+      expect(findPath(grid, [0, 0], [1, 1], { size: "large" })).not.toBeNull();
+    });
+
+    it("charges difficult terrain when any square of the footprint is difficult", () => {
+      const grid = parseGrid(`
+        ....
+        ...~
+      `);
+      // Entering anchor [2,0] puts the creature's corner on the difficult square.
+      const result = findPath(grid, [0, 0], [2, 0], { size: "large" });
+      expect(result?.costFeet).toBe(15);
+    });
+
+    it("defaults to a single square when no size is given", () => {
+      expect(findPath(PINCH, [0, 0], [0, 3])).not.toBeNull();
+    });
   });
 });
 

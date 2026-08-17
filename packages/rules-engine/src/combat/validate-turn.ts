@@ -16,7 +16,13 @@ import type {
   Tile,
 } from "@ai-dm/schemas";
 import type { LineOfSightAlgorithm, OccupancyLookup, TilePassability } from "../spatial/index.js";
-import { coverBetween, findPath, tileDistanceFeet } from "../spatial/index.js";
+import {
+  coverBetween,
+  findPath,
+  footprintDistanceFeet,
+  nearestSquares,
+  occupiedTiles,
+} from "../spatial/index.js";
 import {
   isImmobilised,
   isIncapacitated,
@@ -101,12 +107,22 @@ function sameTile(a: Tile, b: Tile): boolean {
   return a[0] === b[0] && a[1] === b[1];
 }
 
+/** The creature's space — one square for Medium and smaller, 2x2 for Large, etc. */
+function spaceOf(combatant: Combatant): Tile[] {
+  return occupiedTiles({ anchor: combatant.position, size: combatant.size });
+}
+
+/** Where the mover's space would sit if it were anchored at `anchor`. */
+function spaceAnchoredAt(mover: Combatant, anchor: Tile): Tile[] {
+  return occupiedTiles({ anchor, size: mover.size });
+}
+
 function occupantOf(world: CombatWorld, tile: Tile, exceptId: string): Combatant | undefined {
   return world.combatants.find(
     (other) =>
       other.combatantId !== exceptId &&
       OCCUPYING_STATUSES.includes(other.status) &&
-      sameTile(other.position, tile),
+      spaceOf(other).some((part) => sameTile(part, tile)),
   );
 }
 
@@ -189,7 +205,7 @@ export function validateExecuteTurn(
     const occupant = occupantOf(world, tile, actor.combatantId);
     return occupant === undefined ? "clear" : passabilityThrough(actor, occupant);
   };
-  const movementOptions = { crawling: isProne(actor), occupancy };
+  const movementOptions = { crawling: isProne(actor), occupancy, size: actor.size };
 
   if (movement.length > 0 && isImmobilised(actor)) {
     rejections.push({
@@ -203,19 +219,24 @@ export function validateExecuteTurn(
     for (const segment of movement) {
       const destination = segment.destinationTile;
 
-      if (!isOnGrid(world.grid, destination)) {
+      // The creature's whole space has to fit, not just its anchor square.
+      const wouldOccupy = spaceAnchoredAt(actor, destination);
+
+      if (!wouldOccupy.every((tile) => isOnGrid(world.grid, tile))) {
         rejections.push({
           reason: "destination_off_grid",
-          message: `Destination ${String(destination)} is outside the ${String(world.grid.width)}x${String(world.grid.height)} map`,
+          message: `A ${actor.size} creature anchored at ${String(destination)} does not fit inside the ${String(world.grid.width)}x${String(world.grid.height)} map`,
         });
         break;
       }
 
-      const occupant = occupantOf(world, destination, actor.combatantId);
+      const occupant = wouldOccupy
+        .map((tile) => occupantOf(world, tile, actor.combatantId))
+        .find((found) => found !== undefined);
       if (occupant !== undefined) {
         rejections.push({
           reason: "destination_occupied",
-          message: `${occupant.combatantId} already occupies ${String(destination)}`,
+          message: `${occupant.combatantId} already occupies part of the space at ${String(destination)}`,
           subjectId: occupant.combatantId,
         });
         break;
@@ -316,8 +337,13 @@ export function validateExecuteTurn(
       return;
     }
 
+    // Range is counted between the nearest squares of the two spaces, so a
+    // Huge creature is reachable from anywhere along its edge.
+    const actorSpace = { anchor: position, size: actor.size };
+    const targetSpace = { anchor: target.position, size: target.size };
+
     const reachFeet = rangeFeetFor(actor, world, actionId);
-    const distanceFeet = tileDistanceFeet(position, target.position);
+    const distanceFeet = footprintDistanceFeet(actorSpace, targetSpace);
     if (distanceFeet > reachFeet) {
       rejections.push({
         reason: "target_out_of_reach",
@@ -327,7 +353,8 @@ export function validateExecuteTurn(
       return;
     }
 
-    if (coverBetween(world.grid, position, target.position, world.lineOfSight) === "full") {
+    const [from, to] = nearestSquares(actorSpace, targetSpace);
+    if (coverBetween(world.grid, from, to, world.lineOfSight) === "full") {
       rejections.push({
         reason: "target_behind_full_cover",
         message: `${targetId} is behind full cover and cannot be targeted`,

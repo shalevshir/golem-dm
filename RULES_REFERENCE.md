@@ -100,11 +100,13 @@ house rule. Chebyshev distance is therefore correct.
 | Dash | Extra movement equal to your Speed, i.e. the budget doubles. | `combat/` `movementBudgetFeet` |
 | Difficult terrain never stacks | "1 extra foot, **even if multiple things in a space count as Difficult Terrain**." A creature's space that is also difficult is still just doubled. | `spatial/` `findPath` |
 | Creature size | Tiny 2½ ft · Small/Medium 5 ft · Large 10 ft (2×2) · Huge 15 ft (3×3) · Gargantuan 20 ft (4×4). Order matters — pass-through is stated in categories apart. | `schemas` `CreatureSize` |
+| Creature space | A creature fills its whole space, anchored at the north-west square. Every square of it counts as occupied. | `spatial/` `occupiedTiles` |
+| Moving a large creature | The **whole space** must fit in each position entered. 2024 has **no squeezing rule**, so a Large creature cannot pass a one-square gap. | `spatial/` `findPath({size})` |
 | Passing through a creature | Allowed through an **ally**, an **Incapacitated** creature, a **Tiny** creature, or one **two sizes** larger or smaller. Otherwise blocked. | `combat/` `passabilityThrough` |
 | Cost of a creature's space | **Difficult Terrain**, unless that creature is Tiny or your ally. | `combat/` `passabilityThrough` → `hindered` |
 | Ending a move | You can't willingly end a move in a space occupied by another creature. | `combat/` `destination_occupied` |
 | Corners | Diagonal movement **cannot cross the corner** of a wall or anything filling its space. | `spatial/` `cutsWallCorner` |
-| Range | Count squares from a square adjacent to one thing, stopping in the other's space; shortest route. Equivalent to Chebyshev. | `spatial/` `tileDistanceFeet` |
+| Range | Count squares from a square adjacent to one thing, stopping in the other's space; shortest route. Measured between the **nearest squares** of the two spaces, so a Huge creature is reachable all along its edge. Reduces to Chebyshev for two single-square creatures. | `spatial/` `footprintDistanceFeet`, `tileDistanceFeet` |
 
 **House rule (the only one):** line of sight uses Bresenham centre-to-centre.
 RAW is corner-to-corner. Kept behind the `LineOfSightAlgorithm` interface so it
@@ -174,13 +176,14 @@ Not yet implemented, roughly in dependency order:
   to the actor's melee reach.
 - Opportunity attacks, concentration checks
 - Corner-to-corner RAW line of sight (currently the Bresenham house rule)
-- **Multi-square footprints.** `Combatant.position` is a single anchor tile, so
-  a Large creature occupies one square rather than the 2×2 the SRD gives it.
-  Size *is* modelled, and drives pass-through (§5), but reach, cover and
-  occupancy are all measured from the anchor. This is the largest remaining
-  divergence on the grid.
+- **Tiny creatures sharing a square.** The SRD fits four Tiny creatures in one
+  square; `occupiedTiles` gives every creature at least a full square, so two
+  Tiny creatures cannot share one. Needs fractional occupancy to fix.
 - **Creatures granting cover.** `coverBetween` reads terrain only; RAW another
   creature in the line can give Half Cover.
+- **Cover for a large creature** is traced between the nearest squares of the
+  two spaces. RAW lets the attacker pick any square of its space, which can
+  find a cleaner line.
 - **"Ally" is faction equality.** `passabilityThrough` treats same-faction as
   allied. A `FactionRelation` score exists in `schemas` but is not consulted.
 - **Standing up from Prone.** `ExecuteTurn` cannot express it, so a prone actor
