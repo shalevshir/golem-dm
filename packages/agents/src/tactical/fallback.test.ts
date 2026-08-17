@@ -90,7 +90,7 @@ describe("deterministicFallback", () => {
     };
 
     const fallback = deterministicFallback(goblin, bowWorld, {
-      availableActions: [{ actionId: "shortbow", name: "Shortbow", rangeFeet: 80 }],
+      availableActions: [{ actionId: "shortbow", name: "Shortbow" }],
     });
 
     expect(fallback?.turn.mainAction.actionType).toBe("attack");

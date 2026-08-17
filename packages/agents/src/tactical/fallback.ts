@@ -5,10 +5,10 @@
 import type { CombatWorld, TurnPlan } from "@ai-dm/rules-engine";
 import { footprintDistanceFeet, validateExecuteTurn } from "@ai-dm/rules-engine";
 import type { Combatant, ExecuteTurn, Faction } from "@ai-dm/schemas";
-import type { SnapshotAction } from "./snapshot.js";
+import type { AvailableAction } from "./snapshot.js";
 
 export interface FallbackOptions {
-  availableActions?: readonly SnapshotAction[];
+  availableActions?: readonly AvailableAction[];
 }
 
 /** The turn and the plan it validated to, so the caller never validates twice. */

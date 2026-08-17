@@ -16,10 +16,20 @@ import type {
   Tile,
 } from "@ai-dm/schemas";
 
-/** An action the actor may take, with the range the validator will enforce. */
-export interface SnapshotAction {
+/**
+ * An action the actor may take, as the caller supplies it. Deliberately carries
+ * no range: the validator resolves range from `CombatWorld.actionRangesFeet`
+ * and never reads anything the caller passes here, so a `rangeFeet` on the input
+ * would be a second source of truth that the model believes and the engine
+ * ignores. `CardAction.rangeFeet` is derived from the world instead.
+ */
+export interface AvailableAction {
   actionId: string;
   name: string;
+}
+
+/** An action as the model reads it, with the range the validator will enforce. */
+export interface CardAction extends AvailableAction {
   rangeFeet: number;
 }
 
@@ -74,7 +84,7 @@ export interface CapabilityCard {
   speedFeet: number;
   reachFeet: number;
   attacksPerAction: number;
-  actions: readonly SnapshotAction[];
+  actions: readonly CardAction[];
 }
 
 /** A corpse is scenery and a fled creature has left the map; neither is a target. */
@@ -141,15 +151,29 @@ export function buildSnapshot(input: SnapshotInput): CombatSnapshot {
   };
 }
 
+/**
+ * The rule `rangeFeetFor` applies in the validator
+ * (`packages/rules-engine/src/combat/validate-turn.ts`), restated here because
+ * the card has to promise the model exactly what the engine will enforce. A
+ * disagreement is not a bad answer, it is a rejection loop the model cannot win.
+ */
+function rangeFeetFor(actor: Combatant, world: CombatWorld, actionId: string): number {
+  return world.actionRangesFeet?.[actionId] ?? actor.reachFeet;
+}
+
 export function buildCapabilityCard(
   actor: Combatant,
-  actions: readonly SnapshotAction[],
+  world: CombatWorld,
+  actions: readonly AvailableAction[],
 ): CapabilityCard {
   return {
     combatantId: actor.combatantId,
     speedFeet: actor.speedFeet,
     reachFeet: actor.reachFeet,
     attacksPerAction: actor.attacksPerAction,
-    actions,
+    actions: actions.map((action) => ({
+      ...action,
+      rangeFeet: rangeFeetFor(actor, world, action.actionId),
+    })),
   };
 }

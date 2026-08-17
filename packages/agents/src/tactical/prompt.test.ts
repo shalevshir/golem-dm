@@ -15,8 +15,8 @@ const world = {
 };
 
 const snapshot = buildSnapshot({ world, actorId: "gob-1" });
-const card = buildCapabilityCard(world.combatants[0] ?? combatant({ combatantId: "gob-1" }), [
-  { actionId: "scimitar", name: "Scimitar", rangeFeet: 5 },
+const card = buildCapabilityCard(world.combatants[0] ?? combatant({ combatantId: "gob-1" }), world, [
+  { actionId: "scimitar", name: "Scimitar" },
 ]);
 
 const feedback = {

@@ -143,10 +143,21 @@ the prompt omits the section.
 ### Available actions come from the caller
 
 `Combatant` carries no action list — `MonsterStatBlock.actions` does. Loading SRD
-data inside `@ai-dm/agents` would cross a package boundary for no reason, so
-`SnapshotInput` takes `availableActions?: readonly { actionId, name, rangeFeet }[]`,
-which the server or sim derives from stat blocks (`actionRangesFeetFrom` already
-exists for the validator's half of this).
+data inside `@ai-dm/agents` would cross a package boundary for no reason, so the
+caller passes `availableActions?: readonly AvailableAction[]`, i.e.
+`{ actionId, name }`, derived from stat blocks by the server or sim.
+
+**Range is not among them.** The validator resolves range as
+`world.actionRangesFeet[actionId] ?? actor.reachFeet` (`rangeFeetFor`,
+`validate-turn.ts:192`) and never reads anything the caller hands the agent. A
+caller-supplied `rangeFeet` would therefore be a second source of truth that the
+model believes and the engine ignores — advertise an 80 ft bow with no
+`actionRangesFeet` entry and every shot beyond 5 ft is rejected, retried against
+feedback that contradicts the capability card, rejected again, and lost to the
+fallback, with the `action_rejected` log blaming the model. So
+`buildCapabilityCard` takes the `CombatWorld` and derives each `CardAction`'s
+`rangeFeet` with the validator's own rule. `AvailableAction` is what comes in;
+`CardAction` is what the model reads.
 
 ## Prompt tiers
 

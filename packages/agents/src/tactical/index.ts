@@ -24,7 +24,7 @@ import { deterministicFallback } from "./fallback.js";
 import type { RetryFeedback } from "./prompt.js";
 import { buildTacticalPrompt } from "./prompt.js";
 import { TACTICAL_TOOL_DESCRIPTION, TACTICAL_TOOL_NAME } from "./prompt-text.js";
-import type { SnapshotAction } from "./snapshot.js";
+import type { AvailableAction } from "./snapshot.js";
 import { buildCapabilityCard, buildSnapshot } from "./snapshot.js";
 
 export * from "./action-rejected.js";
@@ -42,7 +42,8 @@ export interface TacticalAgentOptions {
 export interface ProposeTurnInput {
   world: CombatWorld;
   actorId: string;
-  availableActions?: readonly SnapshotAction[];
+  /** Ranges come from `world.actionRangesFeet`, not from the caller. */
+  availableActions?: readonly AvailableAction[];
   turnOrder?: readonly string[];
   /** The server's 10s turn budget. */
   abortSignal?: AbortSignal;
@@ -122,7 +123,7 @@ export function createTacticalAgent({ runtime, routing }: TacticalAgentOptions):
         actorId: input.actorId,
         ...(input.turnOrder === undefined ? {} : { turnOrder: input.turnOrder }),
       });
-      const card = buildCapabilityCard(actor, input.availableActions ?? []);
+      const card = buildCapabilityCard(actor, input.world, input.availableActions ?? []);
 
       const rejections: ActionRejectedPayload[] = [];
       const usage: TokenUsage[] = [];
