@@ -202,3 +202,93 @@ describe("createTacticalAgent — the single retry", () => {
     expect(result.usage).toStrictEqual([usage]);
   });
 });
+
+describe("createTacticalAgent — terminal outcomes", () => {
+  it("falls back after a second failure, and never makes a third call", async () => {
+    const { port, agent } = agentWith(
+      adapterSuccess({ value: illegalTurn, usage }),
+      adapterSuccess({ value: illegalTurn, usage }),
+    );
+
+    const result = await agent.proposeTurn({ world, actorId: "gob-1" });
+
+    if (!result.ok) throw new Error("expected a fallback proposal");
+    expect(port.calls).toHaveLength(2);
+    expect(result.source).toBe("fallback");
+    expect(result.turn.mainAction.targetIds).toStrictEqual(["pc-1"]);
+  });
+
+  it("logs both rejections, one per attempt", async () => {
+    const { agent } = agentWith(
+      adapterSuccess({ value: illegalTurn, usage }),
+      adapterSuccess({ value: illegalTurn, usage }),
+    );
+
+    const result = await agent.proposeTurn({ world, actorId: "gob-1" });
+
+    expect(result.rejections.map((rejection) => rejection.attempt)).toStrictEqual([1, 2]);
+  });
+
+  it("falls back immediately on a provider error, without a second call", async () => {
+    const { port, agent } = agentWith(adapterFailure("provider_error", "429 rate limited"));
+
+    const result = await agent.proposeTurn({ world, actorId: "gob-1" });
+
+    if (!result.ok) throw new Error("expected a fallback proposal");
+    // Retrying transport is the SDK's job and its budget is already spent.
+    expect(port.calls).toHaveLength(1);
+    expect(result.source).toBe("fallback");
+    expect(result.rejections[0]?.adapterErrorCode).toBe("provider_error");
+  });
+
+  it("abandons the turn when the caller aborted, with no retry and no fallback", async () => {
+    const { port, agent } = agentWith(adapterFailure("aborted", "The turn budget is gone."));
+
+    const result = await agent.proposeTurn({ world, actorId: "gob-1" });
+
+    if (result.ok) throw new Error("expected the turn to be abandoned");
+    expect(port.calls).toHaveLength(1);
+    expect(result.kind).toBe("aborted");
+    // The rejection is still logged: every failure reaches the event stream.
+    expect(result.rejections[0]?.adapterErrorCode).toBe("aborted");
+  });
+
+  it("dodges as its fallback when nothing is in reach", async () => {
+    const distantHero = combatant({ combatantId: "pc-1", faction: "party", position: [5, 1] });
+    const distantWorld = { grid, combatants: [goblin, distantHero] };
+    const { agent } = agentWith(
+      adapterSuccess({ value: illegalTurn, usage }),
+      adapterSuccess({ value: illegalTurn, usage }),
+    );
+
+    const result = await agent.proposeTurn({ world: distantWorld, actorId: "gob-1" });
+
+    if (!result.ok) throw new Error("expected a fallback proposal");
+    expect(result.turn.mainAction.actionType).toBe("dodge");
+  });
+
+  it("reports no legal turn when even the fallback is illegal", async () => {
+    const stunned = combatant({
+      combatantId: "gob-1",
+      conditions: [{ condition: "stunned", durationRounds: 1 }],
+    });
+    const stunnedWorld = { grid, combatants: [stunned, hero] };
+    const { agent } = agentWith(
+      adapterSuccess({ value: illegalTurn, usage }),
+      adapterSuccess({ value: illegalTurn, usage }),
+    );
+
+    const result = await agent.proposeTurn({ world: stunnedWorld, actorId: "gob-1" });
+
+    if (result.ok) throw new Error("expected no legal turn");
+    expect(result.kind).toBe("no_legal_turn");
+  });
+
+  it("throws when asked to act for a combatant that is not in the encounter", async () => {
+    const { agent } = agentWith(adapterSuccess({ value: legalTurn, usage }));
+
+    await expect(agent.proposeTurn({ world, actorId: "nobody" })).rejects.toThrow(
+      /No combatant nobody/,
+    );
+  });
+});
