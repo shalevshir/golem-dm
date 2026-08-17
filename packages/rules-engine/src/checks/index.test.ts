@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   abilityCheck,
   abilityModifier,
-  contest,
+  imposedSaveDc,
   passiveScore,
   proficiencyBonusForLevel,
   savingThrow,
@@ -152,23 +152,23 @@ describe("passiveScore", () => {
   });
 });
 
-describe("contest", () => {
-  it("the higher total wins", () => {
-    const result = contest(
-      { abilityScore: 18 },
-      { abilityScore: 10 },
-      scripted([d20Exactly(10), d20Exactly(10)]),
-    );
-    expect(result.initiatorWins).toBe(true);
+describe("imposedSaveDc", () => {
+  // SRD 5.2.1, Unarmed Strike (Grapple/Shove): the DC for the saving throw and
+  // any escape attempts equals 8 plus your Strength modifier and Proficiency
+  // Bonus. The 2024 rules have no opposed-check ("contest") mechanic at all.
+  it("is 8 plus the ability modifier plus the proficiency bonus", () => {
+    expect(imposedSaveDc({ abilityScore: 16, proficiencyBonus: 2 })).toBe(13);
   });
 
-  it("a tie leaves the situation unchanged", () => {
-    const result = contest(
-      { abilityScore: 10 },
-      { abilityScore: 10 },
-      scripted([d20Exactly(10), d20Exactly(10)]),
-    );
-    expect(result.initiatorTotal).toBe(result.defenderTotal);
-    expect(result.initiatorWins).toBe(false);
+  it("handles a negative ability modifier", () => {
+    expect(imposedSaveDc({ abilityScore: 8, proficiencyBonus: 2 })).toBe(9);
+  });
+
+  it("scales with a higher proficiency bonus", () => {
+    expect(imposedSaveDc({ abilityScore: 20, proficiencyBonus: 6 })).toBe(19);
+  });
+
+  it("defaults the proficiency bonus to zero when absent", () => {
+    expect(imposedSaveDc({ abilityScore: 10 })).toBe(8);
   });
 });

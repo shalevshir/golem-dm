@@ -153,6 +153,30 @@ describe("applyDamage", () => {
     expect(applyDamage({ currentHp: 10, maxHp: 10, tempHp: 0 }, 1).status).toBe("alive");
   });
 
+  // SRD 5.2.1, Instant Death: "Monster Death. A monster dies the instant it
+  // drops to 0 Hit Points." Only characters fall Unconscious and roll death
+  // saves, so the caller states which rule applies.
+  it("kills a monster outright at 0 hit points instead of knocking it out", () => {
+    const result = applyDamage({ currentHp: 5, maxHp: 20, tempHp: 0 }, 10, {
+      diesAtZeroHp: true,
+    });
+    expect(result.hitPoints.currentHp).toBe(0);
+    expect(result.status).toBe("dead");
+    // Not massive damage — it died by the monster rule, not the remainder rule.
+    expect(result.instantDeath).toBe(false);
+  });
+
+  it("still knocks out a character at 0 hit points by default", () => {
+    expect(applyDamage({ currentHp: 5, maxHp: 20, tempHp: 0 }, 10).status).toBe("unconscious");
+  });
+
+  it("does not kill a monster that survives above zero", () => {
+    const result = applyDamage({ currentHp: 10, maxHp: 10, tempHp: 0 }, 1, {
+      diesAtZeroHp: true,
+    });
+    expect(result.status).toBe("alive");
+  });
+
   it("rejects negative damage", () => {
     expect(() => applyDamage({ currentHp: 10, maxHp: 10, tempHp: 0 }, -1)).toThrow();
   });

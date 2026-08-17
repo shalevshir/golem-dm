@@ -31,10 +31,9 @@ export interface D20TestResult {
   success: boolean;
 }
 
-export interface ContestResult {
-  initiatorTotal: number;
-  defenderTotal: number;
-  initiatorWins: boolean;
+export interface ImposedSaveDcInput {
+  abilityScore: number;
+  proficiencyBonus?: number;
 }
 
 export function abilityModifier(score: number): number {
@@ -80,15 +79,14 @@ export function passiveScore(modifiers: D20Modifiers): number {
   return 10 + totalModifier(modifiers) + swing - penalty;
 }
 
-/** Opposed check. Ties leave the situation unchanged, so the initiator loses. */
-export function contest(
-  initiator: D20Modifiers,
-  defender: D20Modifiers,
-  rng: Rng,
-): ContestResult {
-  const initiatorRoll = d20(rng, initiator.mode ?? "normal");
-  const defenderRoll = d20(rng, defender.mode ?? "normal");
-  const initiatorTotal = initiatorRoll.result + totalModifier(initiator);
-  const defenderTotal = defenderRoll.result + totalModifier(defender);
-  return { initiatorTotal, defenderTotal, initiatorWins: initiatorTotal > defenderTotal };
+/**
+ * The DC of a saving throw one creature forces on another — Grapple and Shove
+ * from an Unarmed Strike, and monster abilities built the same way.
+ * SRD 5.2.1: 8 + the relevant ability modifier + Proficiency Bonus.
+ *
+ * The 2024 rules removed 2014's opposed "contest" checks entirely, replacing
+ * them with this fixed DC. There is deliberately no `contest()` helper.
+ */
+export function imposedSaveDc(input: ImposedSaveDcInput): number {
+  return 8 + abilityModifier(input.abilityScore) + (input.proficiencyBonus ?? 0);
 }

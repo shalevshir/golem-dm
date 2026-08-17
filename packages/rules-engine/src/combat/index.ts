@@ -45,6 +45,15 @@ export interface DamageResult {
   instantDeath: boolean;
 }
 
+export interface DamageOptions {
+  /**
+   * SRD 5.2.1 (Instant Death): a monster dies the instant it drops to 0 Hit
+   * Points, whereas a character falls Unconscious and rolls death saves. Pass
+   * true for monsters. A `Combatant` without a `characterId` is a monster.
+   */
+  diesAtZeroHp?: boolean;
+}
+
 export interface DeathSaveState {
   successes: number;
   failures: number;
@@ -92,7 +101,11 @@ export function resolveAttack(input: AttackInput, rng: Rng): AttackResult {
   return { naturalRoll: result, rolls, total, effectiveArmorClass, outcome, hit };
 }
 
-export function applyDamage(hitPoints: HitPoints, amount: number): DamageResult {
+export function applyDamage(
+  hitPoints: HitPoints,
+  amount: number,
+  options: DamageOptions = {},
+): DamageResult {
   if (amount < 0) throw new Error(`Damage must not be negative: ${String(amount)}`);
 
   const absorbedByTempHp = Math.min(hitPoints.tempHp, amount);
@@ -103,7 +116,7 @@ export function applyDamage(hitPoints: HitPoints, amount: number): DamageResult 
 
   let status: LifeStatus = "alive";
   if (instantDeath) status = "dead";
-  else if (currentHp === 0) status = "unconscious";
+  else if (currentHp === 0) status = options.diesAtZeroHp === true ? "dead" : "unconscious";
 
   return {
     hitPoints: { currentHp, maxHp: hitPoints.maxHp, tempHp: hitPoints.tempHp - absorbedByTempHp },
