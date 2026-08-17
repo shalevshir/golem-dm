@@ -101,3 +101,68 @@ describe("renderMarkdown", () => {
     expect(markdown).toContain("unpriced");
   });
 });
+
+// Each caveat below is pinned to a substring distinctive enough that it
+// cannot be satisfied by unrelated text elsewhere in the document — a plain
+// "smoke" or "encounter-only" alone is too easy to keep alive by accident
+// (e.g. the header's `- Mode: **smoke ...**` line already contains "smoke").
+// If a later edit deletes the sentence carrying a caveat, one of these should
+// fail even if some other, unrelated word happens to survive nearby.
+describe("renderMarkdown — fidelity caveats", () => {
+  it("names the exact legality column, not its position, next to the 95% bar", () => {
+    const markdown = renderMarkdown(buildReport({ ...BASE, probeRecords: [record()] }));
+
+    expect(markdown).toContain('Read it from the "Legal after retry" column');
+  });
+
+  it("warns that probe-mode legality is measured on the scripted baseline's distribution", () => {
+    const markdown = renderMarkdown(buildReport({ ...BASE, probeRecords: [record()] }));
+
+    expect(markdown).toContain("not from the states a model would actually drive itself into");
+  });
+
+  it("says smoke numbers verify the pipeline, not a model's tactical quality", () => {
+    const markdown = renderMarkdown(buildReport({ ...BASE, probeRecords: [record()] }));
+
+    expect(markdown).toContain("scripted policy with a seeded defect");
+  });
+
+  it("labels unresolved-action data as encounter-only when encounter mode ran", () => {
+    const markdown = renderMarkdown(
+      buildReport({ ...BASE, probeRecords: [record()], encounterRecords: [record()] }),
+    );
+
+    expect(markdown).toContain('"Unresolved actions" is **encounter-only**');
+  });
+
+  it("states Dodge has no mechanical effect when encounter mode ran", () => {
+    const markdown = renderMarkdown(
+      buildReport({ ...BASE, probeRecords: [record()], encounterRecords: [record()] }),
+    );
+
+    expect(markdown).toContain("**Dodge has no mechanical effect**");
+  });
+
+  it("declares the resolver's normal-mode-only and dropped-swing gaps when encounter mode ran", () => {
+    const markdown = renderMarkdown(
+      buildReport({ ...BASE, probeRecords: [record()], encounterRecords: [record()] }),
+    );
+
+    expect(markdown).toContain("condition-driven advantage or disadvantage is never applied");
+    expect(markdown).toContain("dropped rather than redirected to a new target");
+  });
+
+  it("suppresses the encounter table rather than inventing zeros for a probe-only run", () => {
+    const markdown = renderMarkdown(buildReport({ ...BASE, probeRecords: [record()] }));
+
+    expect(markdown).toContain("Encounter mode was not run in this session");
+    expect(markdown).not.toContain("Unresolved actions |");
+  });
+
+  it("suppresses the probe table rather than inventing zeros for an encounter-only run", () => {
+    const markdown = renderMarkdown(buildReport({ ...BASE, encounterRecords: [record()] }));
+
+    expect(markdown).toContain("Probe mode was not run in this session");
+    expect(markdown).not.toContain("Tokens/turn |");
+  });
+});

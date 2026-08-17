@@ -164,6 +164,21 @@ function unresolvedActionsCell(ids: readonly string[]): string {
   return ids.length === 0 ? "none" : ids.join(", ");
 }
 
+/**
+ * `RunReport` carries no `mode` field, so "never ran" is inferred from the
+ * data: no arm has a turn in this mode, and (for encounter mode) no encounter
+ * results were recorded either. This is a report-level check, not per-arm —
+ * an individual arm legitimately scoring 0 turns while its siblings have data
+ * is a different, real finding that a suppressed section would hide.
+ */
+function probeRan(report: RunReport): boolean {
+  return report.arms.some((arm) => arm.probe.turns > 0);
+}
+
+function encounterRan(report: RunReport): boolean {
+  return report.encounters.length > 0 || report.arms.some((arm) => arm.encounter.turns > 0);
+}
+
 export function renderMarkdown(report: RunReport): string {
   const lines: string[] = [];
 
@@ -201,65 +216,81 @@ export function renderMarkdown(report: RunReport): string {
 
   lines.push("## Probe mode — paired, picks the model");
   lines.push("");
-  lines.push(
-    "| Arm | Turns | First try | Legal after retry | Fallback | p50 ms | p95 ms | Tokens/turn | $/turn | $/30-turn session | Missing usage |",
-  );
-  lines.push("|---|---|---|---|---|---|---|---|---|---|---|");
-  for (const arm of report.arms) {
-    const { probe } = arm;
+  if (probeRan(report)) {
     lines.push(
-      `| \`${arm.armId}\` | ${String(probe.turns)} | ${percent(probe.legality.firstTryRate)} | ` +
-        `${percent(probe.legality.legalAfterRetryRate)} | ${String(probe.legality.fallback)} | ` +
-        `${probe.latency.p50Ms.toFixed(0)} | ${probe.latency.p95Ms.toFixed(0)} | ` +
-        `${probe.usage.tokensPerTurn.toFixed(0)} | ${money(probe.costPerTurnUsd)} | ` +
-        `${money(probe.costPer30TurnSessionUsd)} | ${String(probe.usage.attemptsMissingUsage)} |`,
+      "| Arm | Turns | First try | Legal after retry | Fallback | p50 ms | p95 ms | Tokens/turn | $/turn | $/30-turn session | Missing usage |",
+    );
+    lines.push("|---|---|---|---|---|---|---|---|---|---|---|");
+    for (const arm of report.arms) {
+      const { probe } = arm;
+      lines.push(
+        `| \`${arm.armId}\` | ${String(probe.turns)} | ${percent(probe.legality.firstTryRate)} | ` +
+          `${percent(probe.legality.legalAfterRetryRate)} | ${String(probe.legality.fallback)} | ` +
+          `${probe.latency.p50Ms.toFixed(0)} | ${probe.latency.p95Ms.toFixed(0)} | ` +
+          `${probe.usage.tokensPerTurn.toFixed(0)} | ${money(probe.costPerTurnUsd)} | ` +
+          `${money(probe.costPer30TurnSessionUsd)} | ${String(probe.usage.attemptsMissingUsage)} |`,
+      );
+    }
+    lines.push("");
+    lines.push(
+      "Step 7's exit criterion is **legality >= 95% after retry**. Read it from the " +
+        '"Legal after retry" column: that is the fraction of turns the engine accepted ' +
+        "without the deterministic fallback having to step in.",
+    );
+    lines.push("");
+    lines.push(
+      "This legality figure is measured on the scripted baseline's state " +
+        "distribution: the probe corpus is snapshotted from a scripted-both-sides " +
+        "control encounter, not from the states a model would actually drive itself " +
+        "into. That is the right comparison for a paired, apples-to-apples read across " +
+        "arms — encounter mode below covers the model-driven distribution — but do not " +
+        'over-read this column as "legality in the wild".',
+    );
+  } else {
+    lines.push(
+      "Probe mode was not run in this session — no probe records were supplied, so " +
+        "there are no legality, latency or cost figures to show rather than a table " +
+        "of misleading zeros.",
     );
   }
-  lines.push("");
-  lines.push(
-    "Step 7's exit criterion is **legality >= 95% after retry**. Read it from the " +
-      "third column: that is the fraction of turns the engine accepted without the " +
-      "deterministic fallback having to step in.",
-  );
-  lines.push("");
-  lines.push(
-    "This legality figure is measured on the scripted baseline's state " +
-      "distribution: the probe corpus is snapshotted from a scripted-both-sides " +
-      "control encounter, not from the states a model would actually drive itself " +
-      "into. That is the right comparison for a paired, apples-to-apples read across " +
-      "arms — encounter mode below covers the model-driven distribution — but do not " +
-      'over-read this column as "legality in the wild".',
-  );
   lines.push("");
 
   lines.push("## Encounter mode — unpaired, win rate only");
   lines.push("");
-  lines.push("| Arm | Encounters | Win rate | Turns | Legal after retry | Unresolved actions |");
-  lines.push("|---|---|---|---|---|---|");
-  for (const arm of report.arms) {
-    const played = report.encounters.filter((each) => each.armId === arm.armId).length;
+  if (encounterRan(report)) {
+    lines.push("| Arm | Encounters | Win rate | Turns | Legal after retry | Unresolved actions |");
+    lines.push("|---|---|---|---|---|---|");
+    for (const arm of report.arms) {
+      const played = report.encounters.filter((each) => each.armId === arm.armId).length;
+      lines.push(
+        `| \`${arm.armId}\` | ${String(played)} | ${percent(arm.winRate)} | ` +
+          `${String(arm.encounter.turns)} | ${percent(arm.encounter.legality.legalAfterRetryRate)} | ` +
+          `${unresolvedActionsCell(arm.encounter.unresolvedActionIds)} |`,
+      );
+    }
+    lines.push("");
     lines.push(
-      `| \`${arm.armId}\` | ${String(played)} | ${percent(arm.winRate)} | ` +
-        `${String(arm.encounter.turns)} | ${percent(arm.encounter.legality.legalAfterRetryRate)} | ` +
-        `${unresolvedActionsCell(arm.encounter.unresolvedActionIds)} |`,
+      '"Unresolved actions" is **encounter-only**: probe mode resolves nothing by ' +
+        "design, so that field is structurally always empty there and is omitted from " +
+        "the probe table above rather than shown as a false-clean empty list.",
+    );
+    lines.push("");
+    lines.push(
+      "Win rate is measured against the scripted baseline. Read it with the resolver's " +
+        "declared gaps in view. **Dodge has no mechanical effect** in this harness, so a " +
+        "model that Dodges wisely is penalised, as is the deterministic fallback. Attacks " +
+        'are also always resolved at `"normal"` mode — condition-driven advantage or ' +
+        "disadvantage is never applied (currently unreachable, since nothing in the sim " +
+        "inflicts conditions) — and a swing at a target that already died earlier in the " +
+        "same turn is dropped rather than redirected to a new target.",
+    );
+  } else {
+    lines.push(
+      "Encounter mode was not run in this session — no encounter records or results " +
+        "were supplied, so there is no win rate, legality or unresolved-action figure " +
+        "to show rather than a table of misleading zeros.",
     );
   }
-  lines.push("");
-  lines.push(
-    '"Unresolved actions" is **encounter-only**: probe mode resolves nothing by ' +
-      "design, so that field is structurally always empty there and is omitted from " +
-      "the probe table above rather than shown as a false-clean empty list.",
-  );
-  lines.push("");
-  lines.push(
-    "Win rate is measured against the scripted baseline. Read it with the resolver's " +
-      "declared gaps in view. **Dodge has no mechanical effect** in this harness, so a " +
-      "model that Dodges wisely is penalised, as is the deterministic fallback. Attacks " +
-      'are also always resolved at `"normal"` mode — condition-driven advantage or ' +
-      "disadvantage is never applied (currently unreachable, since nothing in the sim " +
-      "inflicts conditions) — and a swing at a target that already died earlier in the " +
-      "same turn is dropped rather than redirected to a new target.",
-  );
   lines.push("");
 
   return lines.join("\n");
