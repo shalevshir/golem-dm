@@ -19,13 +19,22 @@ Pure, deterministic D&D 5e mechanics: dice, checks/saves, attack resolution, act
 
 ## Rule references
 
-Cover: +2 AC & Dex saves (half), +5 (three-quarters), untargetable (full). 30 ft = 6 tiles. Check ADR-0001 (2014 vs 2024 edition) before implementing edition-sensitive rules (hiding, surprise, exhaustion).
+**Read `RULES_REFERENCE.md` at the repo root before writing or changing any rule.** It maps every implemented rule to its SRD 5.2.1 source and code location, flags where 2024 differs from 2014, and lists the known gaps. Verify there rather than from memory.
+
+Quick recall: cover is +2 AC & Dex saves (half), +5 (three-quarters), untargetable (full); 30 ft = 6 tiles. ADR-0001 is settled — **2024 rules, SRD 5.2.1** — so edition-sensitive rules (hiding, surprise, exhaustion, weapon mastery) follow 2024 wording. Note that 2024 removed opposed "contest" checks entirely; use `imposedSaveDc` instead.
 
 ## Testing — highest bar in the repo
 
 - Golden tests from SRD worked examples for every resolution path (attack math, cover stacking, difficult-terrain pathfinding, condition interactions). A rules module without golden tests is not done.
 - Property tests where cheap (e.g., A* path cost ≤ movement budget; LoS symmetry).
 - Coverage target: ≥90% lines for this package.
+
+## Deterministic RNG in tests
+
+- `scripted([0.5, 0.9])` feeds exact `[0,1)` values so each roll is pinned; throws when exhausted.
+- `d20Exactly(n)` = `(n - 1) / 20 + 0.0001` — the rng value that makes `rollDie(20)` return exactly `n`.
+- `seeded(n)` (mulberry32) for property tests over long streams.
+- Shared combat fixtures live in `src/combat/test-fixtures.ts`.
 
 ## Commands
 
