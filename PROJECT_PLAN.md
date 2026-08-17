@@ -82,7 +82,7 @@ Status: POC phase · Supersedes `dm-plan.md` (see `dm-plan-review.md` for the fa
 ### Status as of 2026-08-17
 
 Toolchain bootstrapped and verified: `pnpm typecheck`, `pnpm lint`, `pnpm test`
-all green (408 tests). Rules-engine coverage 99.31% stmts / 97.25% branch / 100%
+all green (473 tests). Rules-engine coverage 99.31% stmts / 97.25% branch / 100%
 funcs, above the ≥90% bar.
 
 **Built:** `dice` (notation parser, 2024 crit doubling, replay determinism),
