@@ -122,6 +122,22 @@ describe("generateStructured", () => {
     expect(typeof result.error.message).toBe("string");
   });
 
+  // Pins that usage survives the nested-error unwrap: the SDK raises a schema
+  // violation as a `NoObjectGeneratedError` wrapping a `TypeValidationError`,
+  // and `usageFromError` reads the outer error, not the inner one.
+  it("reports the tokens a schema-violating attempt was billed", async () => {
+    const port = portFor(returningToolCall({ ...legalTurn, actorId: 7 }));
+
+    const result = await port.generateStructured(flash, turnRequest);
+
+    if (result.ok) throw new Error("expected failure");
+    expect(result.error.usage).toEqual({
+      promptTokens: 120,
+      completionTokens: 30,
+      totalTokens: 150,
+    });
+  });
+
   it("carries the zod issues the step 7 retry quotes back to the model", async () => {
     const port = portFor(returningToolCall({ ...legalTurn, actorId: 7 }));
 
