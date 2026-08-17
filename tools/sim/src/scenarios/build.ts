@@ -30,7 +30,33 @@ export function buildScenario(definition: ScenarioDefinition): BuiltScenario {
   const availableActions = new Map<string, readonly AvailableAction[]>();
   const combatants: Combatant[] = [];
 
+  const seenCombatantIds = new Set<string>();
+  // Anchor-tile collisions only, not full footprints: a Large creature's real
+  // occupancy is the rules engine's authority (see `occupiedTiles`), and
+  // reimplementing that here would duplicate it. This still catches the
+  // realistic fixture typo of two spawns sharing a tile.
+  const claimedTiles = new Set<string>();
+
   for (const spawn of definition.spawns) {
+    const [x, y] = spawn.position;
+    if (x < 0 || x >= definition.width || y < 0 || y >= definition.height) {
+      throw new Error(
+        `Spawn ${spawn.combatantId} at ${JSON.stringify(spawn.position)} is off the grid`,
+      );
+    }
+    if (seenCombatantIds.has(spawn.combatantId)) {
+      throw new Error(`Duplicate combatantId in spawns: ${spawn.combatantId}`);
+    }
+    seenCombatantIds.add(spawn.combatantId);
+
+    const tileKey = `${String(x)},${String(y)}`;
+    if (claimedTiles.has(tileKey)) {
+      throw new Error(
+        `Spawn ${spawn.combatantId} at ${JSON.stringify(spawn.position)} collides with another spawn's tile`,
+      );
+    }
+    claimedTiles.add(tileKey);
+
     const statBlock = loadMonster(spawn.monsterId);
     statBlocks.set(spawn.combatantId, statBlock);
     availableActions.set(

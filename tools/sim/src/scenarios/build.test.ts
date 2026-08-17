@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { Combatant, GridMap } from "@ai-dm/schemas";
 import { buildScenario } from "./build.js";
 import { MELEE_BRAWL } from "./melee-brawl.js";
+import type { ScenarioDefinition } from "./types.js";
 
 describe("buildScenario", () => {
   const built = buildScenario(MELEE_BRAWL);
@@ -42,5 +43,74 @@ describe("buildScenario", () => {
 
   it("is pure — two builds produce equal worlds", () => {
     expect(buildScenario(MELEE_BRAWL).world).toEqual(buildScenario(MELEE_BRAWL).world);
+  });
+});
+
+describe("buildScenario spawn validation", () => {
+  const base: ScenarioDefinition = {
+    scenarioId: "spawn-validation",
+    descriptionEnglish: "Fixtures for spawn validation tests, not a real scenario.",
+    width: 12,
+    height: 12,
+    spawns: [
+      {
+        combatantId: "goblin_1",
+        monsterId: "goblin_warrior",
+        faction: "hostile",
+        position: [4, 5],
+      },
+      { combatantId: "guard_1", monsterId: "guard", faction: "party", position: [5, 5] },
+    ],
+    turnOrder: ["goblin_1", "guard_1"],
+    maxRounds: 5,
+  };
+
+  it("throws when a spawn position is off the grid", () => {
+    const definition: ScenarioDefinition = {
+      ...base,
+      spawns: [
+        {
+          combatantId: "goblin_1",
+          monsterId: "goblin_warrior",
+          faction: "hostile",
+          position: [12, 5],
+        },
+        { combatantId: "guard_1", monsterId: "guard", faction: "party", position: [5, 5] },
+      ],
+    };
+    expect(() => buildScenario(definition)).toThrow(/goblin_1/);
+  });
+
+  it("throws when two spawns share a combatantId", () => {
+    const definition: ScenarioDefinition = {
+      ...base,
+      spawns: [
+        {
+          combatantId: "goblin_1",
+          monsterId: "goblin_warrior",
+          faction: "hostile",
+          position: [4, 5],
+        },
+        { combatantId: "goblin_1", monsterId: "guard", faction: "party", position: [5, 5] },
+      ],
+      turnOrder: ["goblin_1"],
+    };
+    expect(() => buildScenario(definition)).toThrow(/goblin_1/);
+  });
+
+  it("throws when two spawns share a tile", () => {
+    const definition: ScenarioDefinition = {
+      ...base,
+      spawns: [
+        {
+          combatantId: "goblin_1",
+          monsterId: "goblin_warrior",
+          faction: "hostile",
+          position: [4, 5],
+        },
+        { combatantId: "guard_1", monsterId: "guard", faction: "party", position: [4, 5] },
+      ],
+    };
+    expect(() => buildScenario(definition)).toThrow(/guard_1/);
   });
 });
