@@ -41,6 +41,13 @@ export interface SnapshotCombatant {
   currentHp: number;
   maxHp: number;
   armorClass: number;
+  /**
+   * `alive` or `unconscious` — the snapshot admits no other status. The
+   * deterministic fallback filters on this, so omitting it would leave the
+   * expensive model with less tactical information than the dumb backstop, and
+   * `currentHp` is no proxy: nothing forces a downed creature to 0 HP.
+   */
+  status: EntityStatus;
   /** Reused from `@ai-dm/schemas` rather than flattened to names: a duration is
    *  tactically relevant, and a parallel shape would violate invariant 4. */
   conditions: readonly ActiveCondition[];
@@ -99,6 +106,7 @@ function baseOf(source: Combatant): SnapshotCombatant {
     currentHp: source.currentHp,
     maxHp: source.maxHp,
     armorClass: source.armorClass,
+    status: source.status,
     conditions: source.conditions,
     exhaustionLevel: source.exhaustionLevel,
   };

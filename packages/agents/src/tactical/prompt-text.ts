@@ -28,6 +28,10 @@ Reading the combat state:
 - Positions are [x, y] tiles. One tile is 5 feet.
 - Every other combatant carries a precomputed distanceFeet from you. Use it
   rather than computing distance from coordinates yourself.
+- status is alive or unconscious. An unconscious creature is prone and helpless:
+  attacks against it have advantage, and a hit from within 5 feet is a critical
+  hit. It is also no longer a threat, so a standing enemy is usually the better
+  use of your turn.
 - Your capabilities list every action available to you and its range in feet.
   An action whose rangeFeet is less than a target's distanceFeet cannot reach
   that target this turn unless you move first.

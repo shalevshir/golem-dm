@@ -45,6 +45,23 @@ describe("buildSnapshot", () => {
     expect(snapshot.others.map((other) => other.combatantId)).toStrictEqual(["pc-1", "pc-2"]);
   });
 
+  it("tells the model which of the combatants it can see are down", () => {
+    // Without this the model cannot tell a downed foe from a standing one,
+    // while the deterministic fallback can — the dumb backstop would know more
+    // than the model. HP is no substitute: nothing puts a downed creature at 0.
+    const downed = combatant({
+      combatantId: "pc-2",
+      position: [3, 0],
+      status: "unconscious",
+      currentHp: 4,
+    });
+
+    const snapshot = buildSnapshot({ world: world(goblin, hero, downed), actorId: "gob-1" });
+
+    expect(snapshot.others.map((other) => other.status)).toStrictEqual(["alive", "unconscious"]);
+    expect(snapshot.actor.status).toBe("alive");
+  });
+
   it("emits only the non-normal terrain, not the whole matrix", () => {
     const snapshot = buildSnapshot({ world: world(goblin), actorId: "gob-1" });
 

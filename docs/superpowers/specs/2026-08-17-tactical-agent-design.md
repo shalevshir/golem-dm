@@ -97,6 +97,9 @@ export interface SnapshotCombatant {
   currentHp: number;
   maxHp: number;
   armorClass: number;
+  /** `alive` or `unconscious`; nothing else is admitted. The fallback filters on
+   *  it, so hiding it would leave the model knowing less than the backstop. */
+  status: EntityStatus;
   /** Reused from `@ai-dm/schemas`, not flattened to names — `durationRounds` is
    *  tactically relevant, and inventing a parallel shape violates invariant 4. */
   conditions: readonly ActiveCondition[];
@@ -115,7 +118,10 @@ the arithmetic and the disagreement at once.
 
 Combatants whose `status` is `dead` or `fled` are excluded — they are not on the
 board for targeting, and `validate-turn.ts:102` already treats them as
-non-occupying.
+non-occupying. The surviving two statuses are kept rather than collapsed: in 5e
+a melee hit on an unconscious creature is an automatic critical, and spending a
+turn on a downed foe while one is still upright is a real mistake, so the model
+needs the distinction the fallback already has.
 
 The actor carries what the action economy depends on: `speedFeet`, `reachFeet`,
 `attacksPerAction`, `spellSlots`, and the remaining `actionEconomy`.
