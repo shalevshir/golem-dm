@@ -278,8 +278,6 @@ belong in this package. The server wraps and appends.
 ```ts
 export interface TacticalAgentOptions {
   runtime: AgentRuntime;
-  /** For the provider/modelId stamped on rejection payloads. */
-  routing: ModelRouting;
 }
 
 export type TurnProposalResult =
@@ -298,6 +296,14 @@ export type TurnProposalResult =
       usage: readonly TokenUsage[];
     };
 ```
+
+The agent takes **no `ModelRouting` of its own.** The provider and model id it
+stamps on every rejection come from `runtime.specFor("tactical")` — added to
+`AgentRuntime` for this — so they are by construction the spec that was called.
+A second routing passed alongside the runtime would let the two disagree, and
+every `action_rejected` event would then name a model nobody called, in an
+append-only log, silently poisoning the one dataset step 7b is built from. Step
+8 is the first caller that constructs the two separately.
 
 A successful result always carries a real `TurnPlan` whatever the `source`,
 because the fallback is validated like everything else — the caller never has to

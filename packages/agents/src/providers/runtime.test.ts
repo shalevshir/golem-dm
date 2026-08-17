@@ -85,6 +85,23 @@ describe("createAgentRuntime", () => {
     expect(result.value.value.actorId).toBe("gob-2");
   });
 
+  it("reports the same spec through specFor that it calls the port with", async () => {
+    // A caller that has to name the model — `action_rejected` payloads carry
+    // the provider and model id — must read it from the runtime making the
+    // call, or the log can name a model nobody called.
+    const routing: ModelRouting = {
+      ...DEFAULT_MODEL_ROUTING,
+      tactical: { provider: "openai", modelId: "gpt-5.4-mini", reasoningEffort: "medium" },
+    };
+    const port = portWithOneStructuredResult();
+    const runtime = createAgentRuntime({ routing, port });
+
+    await runtime.structured("tactical", turnRequest);
+
+    expect(runtime.specFor("tactical")).toStrictEqual(port.calls[0]?.spec);
+    expect(runtime.specFor("narrative").modelId).toBe("claude-sonnet-5");
+  });
+
   it("streams from the role's configured model", async () => {
     const port = createFakePort({
       stream: [[{ type: "text-delta", text: "הגובלין" }, { type: "finish", text: "הגובלין", usage }]],

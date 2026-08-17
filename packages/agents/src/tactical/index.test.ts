@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { ExecuteTurn as ExecuteTurnSchema } from "@ai-dm/schemas";
 import { adapterFailure, adapterSuccess } from "../providers/errors.js";
+import type { ModelRouting } from "../providers/routing.js";
 import { DEFAULT_MODEL_ROUTING } from "../providers/routing.js";
 import { createAgentRuntime } from "../providers/runtime.js";
 import { createFakePort } from "../providers/testing/fake-port.js";
@@ -29,7 +30,7 @@ const legalTurn = {
 function agentWith(...structured: AdapterResult<StructuredOutput<unknown>>[]) {
   const port = createFakePort({ structured });
   const runtime = createAgentRuntime({ routing: DEFAULT_MODEL_ROUTING, port });
-  return { port, agent: createTacticalAgent({ runtime, routing: DEFAULT_MODEL_ROUTING }) };
+  return { port, agent: createTacticalAgent({ runtime }) };
 }
 
 describe("createTacticalAgent — a legal proposal", () => {
@@ -179,6 +180,29 @@ describe("createTacticalAgent — the single retry", () => {
     expect(result.rejections[0]?.attempt).toBe(1);
     expect(result.rejections[0]?.reasons).toStrictEqual(["target_not_found"]);
     expect(result.rejections[0]?.modelId).toBe("gemini-3-flash");
+  });
+
+  it("stamps the rejection with the model the runtime actually called", async () => {
+    // The agent takes no routing of its own, so it cannot name a model that was
+    // not called. That matters because the payload goes into an append-only log
+    // and is step 7b's only way to group rejections by model.
+    const routing: ModelRouting = {
+      ...DEFAULT_MODEL_ROUTING,
+      tactical: { provider: "openai", modelId: "gpt-5.4-mini" },
+    };
+    const port = createFakePort({
+      structured: [
+        adapterSuccess({ value: illegalTurn, usage }),
+        adapterSuccess({ value: legalTurn, usage }),
+      ],
+    });
+    const agent = createTacticalAgent({ runtime: createAgentRuntime({ routing, port }) });
+
+    const result = await agent.proposeTurn({ world, actorId: "gob-1" });
+
+    expect(port.calls[0]?.spec.modelId).toBe("gpt-5.4-mini");
+    expect(result.rejections[0]?.provider).toBe("openai");
+    expect(result.rejections[0]?.modelId).toBe("gpt-5.4-mini");
   });
 
   it("retries plainly when the model answered in prose", async () => {

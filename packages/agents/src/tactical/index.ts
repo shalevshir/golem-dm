@@ -15,8 +15,6 @@ import type { ActionRejectedPayload, ExecuteTurn } from "@ai-dm/schemas";
 import { ExecuteTurn as ExecuteTurnSchema } from "@ai-dm/schemas";
 import type { AdapterError } from "../providers/errors.js";
 import type { TokenUsage } from "../providers/port.js";
-import type { ModelRouting } from "../providers/routing.js";
-import { resolveModelSpec } from "../providers/routing.js";
 import type { AgentRuntime } from "../providers/runtime.js";
 import type { AttemptNumber } from "./action-rejected.js";
 import { adapterRejection, engineRejection } from "./action-rejected.js";
@@ -35,8 +33,6 @@ export * from "./snapshot.js";
 
 export interface TacticalAgentOptions {
   runtime: AgentRuntime;
-  /** Read for the provider and model id stamped onto rejection payloads. */
-  routing: ModelRouting;
 }
 
 export interface ProposeTurnInput {
@@ -110,8 +106,11 @@ function adapterFeedback(error: AdapterError): RetryFeedback {
   };
 }
 
-export function createTacticalAgent({ runtime, routing }: TacticalAgentOptions): TacticalAgent {
-  const spec = resolveModelSpec(routing, "tactical");
+export function createTacticalAgent({ runtime }: TacticalAgentOptions): TacticalAgent {
+  // Asked of the runtime rather than resolved from a routing of our own: the
+  // provider and model id go into an append-only log, and a payload naming a
+  // model that was never called poisons the only dataset step 7b has.
+  const spec = runtime.specFor("tactical");
 
   return {
     async proposeTurn(input: ProposeTurnInput): Promise<TurnProposalResult> {
