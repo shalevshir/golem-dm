@@ -8,6 +8,16 @@
 //
 // English only (invariant 2). Hebrew exists solely in narrative output.
 
+/**
+ * Identifies which prompt produced a given rejection, so step 7b can separate
+ * benchmark runs taken either side of a prompt edit instead of pooling them.
+ *
+ * **Bump this whenever you change any prompt string in this file.** A guard test
+ * pins the content hash of every prompt constant and fails if you forget, so
+ * this cannot silently go stale — see `prompt-text.test.ts`.
+ */
+export const TACTICAL_PROMPT_VERSION = "2026-08-17.1";
+
 export const TACTICAL_TOOL_NAME = "execute_turn";
 
 export const TACTICAL_TOOL_DESCRIPTION =

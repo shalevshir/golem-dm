@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { ActionRejectedPayload } from "@ai-dm/schemas";
 import { adapterRejection, engineRejection } from "./action-rejected.js";
+import { TACTICAL_PROMPT_VERSION } from "./prompt-text.js";
 
 const spec = { provider: "google" as const, modelId: "gemini-3-flash" };
 
@@ -80,5 +81,47 @@ describe("adapterRejection", () => {
 
     expect(payload.proposedTurn).toBeUndefined();
     expect(ActionRejectedPayload.safeParse(payload).success).toBe(true);
+  });
+});
+
+describe("prompt version stamping", () => {
+  // Step 7b compares models across benchmark runs. If the prompt is edited
+  // between two runs and nothing in the event records which prompt produced
+  // which rejection, the two runs pool silently and the comparison is wrong.
+  //
+  // Every assertion below also checks the value is a non-empty string. Without
+  // that, an absent export and an absent field are both `undefined` and the
+  // comparison passes while nothing exists — which is exactly how these tests
+  // first passed before either was implemented.
+  it("exports a non-empty prompt version", () => {
+    expect(TACTICAL_PROMPT_VERSION).toMatch(/\S/);
+  });
+
+  it("stamps the prompt version on an engine rejection", () => {
+    const payload = engineRejection("gob-1", 1, [], proposedTurn, spec);
+
+    expect(payload.promptVersion).toMatch(/\S/);
+    expect(payload.promptVersion).toBe(TACTICAL_PROMPT_VERSION);
+  });
+
+  it("stamps the prompt version on an adapter rejection too", () => {
+    const payload = adapterRejection(
+      "gob-1",
+      1,
+      { code: "no_tool_call", message: "The model answered in prose." },
+      spec,
+    );
+
+    expect(payload.promptVersion).toMatch(/\S/);
+    expect(payload.promptVersion).toBe(TACTICAL_PROMPT_VERSION);
+  });
+
+  it("survives the round trip through the persisted schema", () => {
+    const payload = engineRejection("gob-1", 1, [], proposedTurn, spec);
+    const parsed = ActionRejectedPayload.safeParse(payload);
+
+    if (!parsed.success) throw new Error("expected the payload to parse");
+    expect(parsed.data.promptVersion).toMatch(/\S/);
+    expect(parsed.data.promptVersion).toBe(TACTICAL_PROMPT_VERSION);
   });
 });

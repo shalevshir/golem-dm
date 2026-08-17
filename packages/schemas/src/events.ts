@@ -48,6 +48,11 @@ export const ActionRejectedPayload = z.object({
   /** Both stamped so step 7b can group a log of rejections by model. */
   provider: z.string(),
   modelId: z.string(),
+  /**
+   * Which prompt produced this. Optional because events written before the
+   * field existed cannot be back-filled, and this log is append-only.
+   */
+  promptVersion: z.string().optional(),
 });
 
 export type ActionRejectedPayload = z.infer<typeof ActionRejectedPayload>;
