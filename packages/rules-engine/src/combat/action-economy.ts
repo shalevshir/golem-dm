@@ -91,13 +91,26 @@ export function isImmobilised(actor: Combatant): boolean {
   return hasAnyCondition(actor, IMMOBILISING_CONDITIONS);
 }
 
+export function isProne(actor: Combatant): boolean {
+  return hasAnyCondition(actor, ["prone"]);
+}
+
+/** The creature's Speed after modifiers. Prone does not change Speed — see below. */
 export function effectiveSpeedFeet(actor: Combatant): number {
   if (isImmobilised(actor)) return 0;
   return Math.max(0, actor.speedFeet + exhaustionSpeedPenaltyFeet(actor.exhaustionLevel));
 }
 
-/** Feet the creature may cover this turn; Dash doubles the *effective* speed. */
+/**
+ * Feet of ground the creature may cover this turn. Dash grants extra movement
+ * equal to its Speed, so the budget doubles.
+ *
+ * Prone halves the ground covered. A prone creature either crawls, which costs
+ * an extra foot per foot, or spends half its Speed standing up and walks with
+ * what is left; both land on half the budget, so one halving models the pair.
+ */
 export function movementBudgetFeet(actor: Combatant, options?: { dashed?: boolean }): number {
   const speed = effectiveSpeedFeet(actor);
-  return options?.dashed === true ? speed * 2 : speed;
+  const budget = options?.dashed === true ? speed * 2 : speed;
+  return isProne(actor) ? Math.floor(budget / 2) : budget;
 }

@@ -100,9 +100,28 @@ resulting action economy and spell slots) or a list of rejections, each with a
 stable `TurnRejectionReason` code for the tactical agent's single retry and the
 `action_rejected` event.
 
-**Known gap:** weapon and spell ranges come from the caller via
-`CombatWorld.actionRangesFeet`; an absent entry falls back to the actor's melee
-reach. Populate it in step 5 with the SRD data pass, which is the next task.
+**Known gaps vs SRD 5.2.1**, in rough priority order. None of these accept an
+illegal turn on their own; each is a check the validator cannot yet make.
+
+1. **Ranges.** Weapon and spell ranges come from the caller via
+   `CombatWorld.actionRangesFeet`; an absent entry falls back to the actor's
+   melee reach. Populate it in step 5 with the SRD data pass.
+2. **Pathing ignores creatures.** Only a movement segment's *destination* is
+   checked for occupancy. `findPath` routes straight through occupied squares,
+   so it will not reject a path that walks through an enemy. RAW you may move
+   through an ally freely but through an enemy only if it is Tiny or two size
+   categories apart — which needs a `size` field on `Combatant`.
+3. **Creatures grant no cover.** `coverBetween` reads terrain only; RAW another
+   creature in the line can give Half Cover.
+4. **Standing up is not distinguishable from crawling.** `ExecuteTurn` has no
+   stand-up flag. Both cost half the budget and so come out numerically
+   identical, but the event log cannot tell the two apart.
+5. **Concentration, weapon mastery, and opportunity attacks** are unmodelled.
+   The action economy tracks a reaction, but no `ExecuteTurn` field proposes
+   one — triggering an opportunity attack is server orchestration.
+
+Deliberately *not* implemented, because 2024 dropped it: the 2014 restriction
+limiting a turn to one levelled spell plus a cantrip (ADR-0001).
 
 ## 5. Open Risks
 

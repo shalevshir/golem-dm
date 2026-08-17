@@ -121,6 +121,15 @@ describe("effectiveSpeedFeet", () => {
     expect(effectiveSpeedFeet(actor)).toBe(0);
   });
 
+  it("is unchanged by Prone, which raises movement cost rather than lowering Speed", () => {
+    const actor = combatant({
+      combatantId: "a",
+      speedFeet: 30,
+      conditions: [{ condition: "prone", durationRounds: null }],
+    });
+    expect(effectiveSpeedFeet(actor)).toBe(30);
+  });
+
   it.each(["grappled", "restrained", "paralyzed", "stunned", "unconscious", "petrified"] as const)(
     "is zero while %s",
     (condition) => {
@@ -147,6 +156,24 @@ describe("movementBudgetFeet", () => {
   it("doubles the exhaustion-reduced speed, not the base speed", () => {
     const actor = combatant({ combatantId: "a", speedFeet: 30, exhaustionLevel: 1 });
     expect(movementBudgetFeet(actor, { dashed: true })).toBe(50);
+  });
+
+  it("halves the budget while prone — crawling costs an extra foot per foot", () => {
+    const actor = combatant({
+      combatantId: "a",
+      speedFeet: 30,
+      conditions: [{ condition: "prone", durationRounds: null }],
+    });
+    expect(movementBudgetFeet(actor)).toBe(15);
+  });
+
+  it("halves a prone actor's Dash budget too", () => {
+    const actor = combatant({
+      combatantId: "a",
+      speedFeet: 30,
+      conditions: [{ condition: "prone", durationRounds: null }],
+    });
+    expect(movementBudgetFeet(actor, { dashed: true })).toBe(30);
   });
 });
 

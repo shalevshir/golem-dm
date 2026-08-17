@@ -318,8 +318,12 @@ export function validateExecuteTurn(
       subjectId: actor.combatantId,
     });
   } else {
-    // The Attack action grants the first swing; each extra attack costs another.
-    const proposedAttacks = isAttack ? extraAttacks.length + 1 : 0;
+    // Each target the Attack action names is a separate attack roll, and each
+    // extra attack costs another. Only the Attack action spends this budget —
+    // a spell may name many targets and still costs one action.
+    const namedTargets = turn.mainAction.targetIds ?? [];
+    const mainAttacks = isAttack ? Math.max(1, namedTargets.length) : 0;
+    const proposedAttacks = isAttack ? mainAttacks + extraAttacks.length : 0;
     const overBudget = (): void => {
       rejections.push({
         reason: "extra_attacks_exceed_budget",
@@ -329,7 +333,7 @@ export function validateExecuteTurn(
     };
 
     let budgetLeft = true;
-    if (isAttack) {
+    for (let swings = 0; swings < mainAttacks && budgetLeft; swings += 1) {
       const swing = spendAttack(economy, actor.attacksPerAction);
       if (swing.ok) economy = swing.economy;
       else {

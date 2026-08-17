@@ -329,6 +329,41 @@ describe("validateExecuteTurn — movement", () => {
     expect(reasons(result)).toStrictEqual(["actor_cannot_move"]);
   });
 
+  it("halves the distance a prone actor covers — crawling costs an extra foot per foot", () => {
+    const prone = combatant({
+      combatantId: "hero",
+      faction: "party",
+      conditions: [{ condition: "prone", durationRounds: null }],
+    });
+    const result = validateExecuteTurn(
+      turn({
+        movement: [{ destinationTile: [6, 0], pathType: "direct" }],
+        mainAction: { actionType: "dodge" },
+      }),
+      prone,
+      world({ combatants: [prone] }),
+    );
+    expect(reasons(result)).toStrictEqual(["movement_exceeds_speed"]);
+  });
+
+  it("lets a prone actor cover half its speed", () => {
+    const prone = combatant({
+      combatantId: "hero",
+      faction: "party",
+      conditions: [{ condition: "prone", durationRounds: null }],
+    });
+    const result = validateExecuteTurn(
+      turn({
+        movement: [{ destinationTile: [3, 0], pathType: "direct" }],
+        mainAction: { actionType: "dodge" },
+      }),
+      prone,
+      world({ combatants: [prone] }),
+    );
+    expect(result.valid).toBe(true);
+    expect(result.valid && result.plan.movementBudgetFeet).toBe(15);
+  });
+
   it("reduces the budget by 5 ft per level of exhaustion", () => {
     const tired = combatant({ combatantId: "hero", faction: "party", exhaustionLevel: 2 });
     const result = validateExecuteTurn(
@@ -458,6 +493,65 @@ describe("validateExecuteTurn — action economy", () => {
       world({ combatants: [spent, goblin] }),
     );
     expect(reasons(result)).toStrictEqual(["extra_attacks_exceed_budget"]);
+  });
+
+  it("counts one attack per target the Attack action names", () => {
+    const left = combatant({ combatantId: "left", position: [0, 0] });
+    const right = combatant({ combatantId: "right", position: [2, 0] });
+    const middle = combatant({ combatantId: "hero", faction: "party", position: [1, 0] });
+    const result = validateExecuteTurn(
+      turn({
+        mainAction: { actionType: "attack", actionId: "longsword", targetIds: ["left", "right"] },
+      }),
+      middle,
+      world({ combatants: [middle, left, right] }),
+    );
+    expect(reasons(result)).toStrictEqual(["extra_attacks_exceed_budget"]);
+  });
+
+  it("accepts two named targets when the actor has Extra Attack", () => {
+    const left = combatant({ combatantId: "left", position: [0, 0] });
+    const right = combatant({ combatantId: "right", position: [2, 0] });
+    const middle = combatant({
+      combatantId: "hero",
+      faction: "party",
+      position: [1, 0],
+      attacksPerAction: 2,
+    });
+    const result = validateExecuteTurn(
+      turn({
+        mainAction: { actionType: "attack", actionId: "longsword", targetIds: ["left", "right"] },
+      }),
+      middle,
+      world({ combatants: [middle, left, right] }),
+    );
+    expect(result.valid).toBe(true);
+    expect(result.valid && result.plan.economyAfter.attacksMade).toBe(2);
+  });
+
+  it("does not count targets of a spell against the attack budget", () => {
+    const caster = combatant({
+      combatantId: "hero",
+      faction: "party",
+      position: [1, 0],
+      spellSlots: { "1": { max: 2, current: 2 } },
+    });
+    const left = combatant({ combatantId: "left", position: [0, 0] });
+    const right = combatant({ combatantId: "right", position: [2, 0] });
+    const result = validateExecuteTurn(
+      turn({
+        mainAction: {
+          actionType: "cast_spell",
+          actionId: "magic_missile",
+          slotLevel: 1,
+          targetIds: ["left", "right"],
+        },
+      }),
+      caster,
+      world({ combatants: [caster, left, right], actionRangesFeet: { magic_missile: 120 } }),
+    );
+    expect(result.valid).toBe(true);
+    expect(result.valid && result.plan.economyAfter.attacksMade).toBe(0);
   });
 
   it("rejects extra attacks appended to something other than the Attack action", () => {
