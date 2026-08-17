@@ -123,6 +123,31 @@ describe("createTacticalAgent — the single retry", () => {
     expect(dynamicOf(port, 1)).toContain("target_not_found");
   });
 
+  it("tells the model the engine rejected its proposal when the engine did", async () => {
+    const { port, agent } = agentWith(
+      adapterSuccess({ value: illegalTurn, usage }),
+      adapterSuccess({ value: legalTurn, usage }),
+    );
+
+    await agent.proposeTurn({ world, actorId: "gob-1" });
+
+    expect(dynamicOf(port, 1)).toContain("rejected by the rules engine");
+  });
+
+  it("tells the model to call the tool when no proposal ever reached the engine", async () => {
+    const { port, agent } = agentWith(
+      adapterFailure("no_tool_call", "The model answered in prose."),
+      adapterSuccess({ value: legalTurn, usage }),
+    );
+
+    await agent.proposeTurn({ world, actorId: "gob-1" });
+
+    // It proposed nothing, so "the rules engine rejected your proposal" would be
+    // a falsehood, and the correction it asks for is the wrong one.
+    expect(dynamicOf(port, 1)).toContain("must call the execute_turn tool");
+    expect(dynamicOf(port, 1)).not.toContain("rejected by the rules engine");
+  });
+
   it("leaves the cached prompt tiers byte-identical across the retry", async () => {
     const { port, agent } = agentWith(
       adapterSuccess({ value: illegalTurn, usage }),

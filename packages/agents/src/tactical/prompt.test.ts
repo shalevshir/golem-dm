@@ -20,9 +20,10 @@ const card = buildCapabilityCard(world.combatants[0] ?? combatant({ combatantId:
 ]);
 
 const feedback = {
+  stage: "engine",
   codes: ["target_out_of_reach"],
   messages: ["pc-1 is 20 ft away, beyond the 5 ft reach of this action"],
-};
+} as const;
 
 function joined(tier: readonly string[] | undefined): string {
   return (tier ?? []).join("\n");
@@ -63,6 +64,17 @@ describe("buildTacticalPrompt", () => {
 
     expect(joined(retry.dynamic)).toContain("target_out_of_reach");
     expect(joined(retry.dynamic)).toContain("beyond the 5 ft reach");
+  });
+
+  it("frames an adapter-stage retry as a missing tool call, not an illegal turn", () => {
+    const retry = buildTacticalPrompt({
+      snapshot,
+      card,
+      feedback: { stage: "adapter", codes: ["no_tool_call"], messages: ["Answered in prose."] },
+    });
+
+    expect(joined(retry.dynamic)).toContain("must call the execute_turn tool");
+    expect(joined(retry.dynamic)).not.toContain("rejected by the rules engine");
   });
 
   it("adds no feedback section when there is no feedback", () => {

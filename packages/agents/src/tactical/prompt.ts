@@ -3,11 +3,21 @@
 // to a cached tier destroys the prefix match for every later call.
 import type { ExecuteTurn } from "@ai-dm/schemas";
 import type { LayeredPrompt } from "../providers/prompt.js";
-import { RETRY_PREAMBLE, TACTICAL_SYSTEM_PROMPT } from "./prompt-text.js";
+import {
+  ADAPTER_RETRY_PREAMBLE,
+  ENGINE_RETRY_PREAMBLE,
+  TACTICAL_SYSTEM_PROMPT,
+} from "./prompt-text.js";
 import type { CapabilityCard, CombatSnapshot } from "./snapshot.js";
 
 /** Why the previous attempt failed. Rendered into the dynamic tier on a retry. */
 export interface RetryFeedback {
+  /**
+   * Which gate rejected it. `engine` means a proposal was made and found
+   * illegal; `adapter` means none arrived at all. They need opposite
+   * instructions, so this picks the preamble rather than only labelling it.
+   */
+  stage: "adapter" | "engine";
   /** Stable codes — a `TurnRejectionReason` or an `AdapterErrorCode`. */
   codes: readonly string[];
   messages: readonly string[];
@@ -23,7 +33,7 @@ export interface TacticalPromptInput {
 
 function renderFeedback(feedback: RetryFeedback): string {
   const lines = [
-    RETRY_PREAMBLE,
+    feedback.stage === "engine" ? ENGINE_RETRY_PREAMBLE : ADAPTER_RETRY_PREAMBLE,
     `Rejection codes: ${feedback.codes.join(", ")}`,
     ...feedback.messages.map((message) => `- ${message}`),
   ];

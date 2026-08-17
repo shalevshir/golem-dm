@@ -86,6 +86,7 @@ function engineFeedback(
   proposedTurn: ExecuteTurn,
 ): RetryFeedback {
   return {
+    stage: "engine",
     codes: rejections.map((rejection) => rejection.reason),
     messages: rejections.map((rejection) => rejection.message),
     proposedTurn,
@@ -95,6 +96,9 @@ function engineFeedback(
 function adapterFeedback(error: AdapterError): RetryFeedback {
   const issues = error.issues ?? [];
   return {
+    // No proposal ever reached the engine on this path, so the model must be
+    // told to call the tool — not to correct a turn it never proposed.
+    stage: "adapter",
     codes: [error.code],
     // Quoting the zod issues is the whole reason schema_validation_failed is a
     // separate code from no_tool_call.

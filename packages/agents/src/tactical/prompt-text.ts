@@ -37,6 +37,17 @@ Reading the combat state:
 
 Write tacticalRationaleEnglish in English, in one short sentence.`;
 
-export const RETRY_PREAMBLE =
+// Two preambles, because the two retry stages are different failures and the
+// wrong one is a lie the model then has to reason around. `engine` means it made
+// a proposal and the proposal was illegal; `adapter` means no proposal ever
+// reached the engine, because the answer was prose or the tool call did not
+// match the schema. Telling the second case its "proposal was rejected by the
+// rules engine" is exactly the wrong instruction.
+export const ENGINE_RETRY_PREAMBLE =
   "Your previous proposal was rejected by the rules engine. " +
   "Correct the specific problems below and propose a legal turn.";
+
+export const ADAPTER_RETRY_PREAMBLE =
+  `Your previous response produced no usable ${TACTICAL_TOOL_NAME} tool call, so the rules ` +
+  `engine never saw a proposal. You must call the ${TACTICAL_TOOL_NAME} tool, and its ` +
+  "arguments must match the tool schema exactly. The problems were:";
