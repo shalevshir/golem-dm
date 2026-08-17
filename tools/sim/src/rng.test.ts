@@ -24,6 +24,19 @@ describe("seeded", () => {
       expect(value).toBeLessThan(1);
     }
   });
+
+  // Literals captured by running seeded(1234) via the rules-engine's OWN local
+  // helper in packages/rules-engine/src/dice/index.test.ts (not via this
+  // file's copy), so this test proves the two streams actually agree rather
+  // than just pinning whatever this copy happens to compute. If these ever
+  // need regenerating, re-capture them from the rules-engine helper again,
+  // never from rng.ts.
+  it("matches the rules-engine stream for a known seed", () => {
+    const rng = seeded(1234);
+    expect(Array.from({ length: 4 }, () => rng())).toEqual([
+      0.07329497812315822, 0.7034119898453355, 0.9028560190927237, 0.9705493662040681,
+    ]);
+  });
 });
 
 describe("scripted", () => {
