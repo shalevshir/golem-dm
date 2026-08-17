@@ -1,7 +1,14 @@
 import { describe, expect, it } from "vitest";
 import { ZodError } from "zod";
 import { zodToJsonSchema } from "zod-to-json-schema";
-import { CharacterSheet, Combatant, ExecuteTurn, GameEvent, GridMap } from "./index.js";
+import {
+  ActionRejectedPayload,
+  CharacterSheet,
+  Combatant,
+  ExecuteTurn,
+  GameEvent,
+  GridMap,
+} from "./index.js";
 
 const validSheet = {
   characterId: "pc-1",
@@ -217,5 +224,51 @@ describe("GridMap", () => {
       ],
     });
     expect(map.tiles[1]?.[0]).toBe("blocking");
+  });
+});
+
+describe("ActionRejectedPayload", () => {
+  it("parses an engine rejection with its machine-readable reasons", () => {
+    const payload = ActionRejectedPayload.parse({
+      actorId: "gob-1",
+      attempt: 1,
+      stage: "engine",
+      reasons: ["target_out_of_reach"],
+      messages: ["pc-1 is 30 ft away, beyond the 5 ft reach of this action"],
+      provider: "google",
+      modelId: "gemini-3-flash",
+    });
+
+    expect(payload.reasons).toStrictEqual(["target_out_of_reach"]);
+    expect(payload.stage).toBe("engine");
+  });
+
+  it("parses an adapter rejection, which has a code instead of reasons", () => {
+    const payload = ActionRejectedPayload.parse({
+      actorId: "gob-1",
+      attempt: 2,
+      stage: "adapter",
+      adapterErrorCode: "no_tool_call",
+      messages: ["The model answered in prose."],
+      provider: "google",
+      modelId: "gemini-3-flash",
+    });
+
+    expect(payload.adapterErrorCode).toBe("no_tool_call");
+    expect(payload.reasons).toBeUndefined();
+  });
+
+  it("rejects a third attempt, because the loop only ever makes two", () => {
+    const result = ActionRejectedPayload.safeParse({
+      actorId: "gob-1",
+      attempt: 3,
+      stage: "engine",
+      messages: [],
+      provider: "google",
+      modelId: "gemini-3-flash",
+    });
+
+    if (result.success) throw new Error("expected the parse to fail");
+    expect(result.error.issues[0]?.path).toStrictEqual(["attempt"]);
   });
 });

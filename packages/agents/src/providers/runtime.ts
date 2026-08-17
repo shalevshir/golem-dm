@@ -10,7 +10,7 @@ import type {
   TextOutput,
   TextRequest,
 } from "./port.js";
-import type { AgentRole, ModelRouting } from "./routing.js";
+import type { AgentRole, ModelRouting, ModelSpec } from "./routing.js";
 import { resolveModelSpec } from "./routing.js";
 
 export interface AgentRuntimeOptions {
@@ -19,6 +19,17 @@ export interface AgentRuntimeOptions {
 }
 
 export interface AgentRuntime {
+  /**
+   * The spec this runtime will actually call for a role. Exposed so a caller
+   * that has to *name* the model — the tactical agent stamps it onto every
+   * `action_rejected` payload — reads it from the thing making the call instead
+   * of resolving a routing of its own. Two routings that disagree would put a
+   * model that was never called into an append-only log, which is the one
+   * dataset step 7b's benchmark is built from and is unrepairable after the
+   * fact.
+   */
+  specFor(role: AgentRole): ModelSpec;
+
   structured<T>(
     role: AgentRole,
     request: StructuredRequest<T>,
@@ -31,6 +42,7 @@ export interface AgentRuntime {
 
 export function createAgentRuntime({ routing, port }: AgentRuntimeOptions): AgentRuntime {
   return {
+    specFor: (role) => resolveModelSpec(routing, role),
     structured: (role, request) => port.generateStructured(resolveModelSpec(routing, role), request),
     text: (role, request) => port.generateText(resolveModelSpec(routing, role), request),
     stream: (role, request) => port.streamText(resolveModelSpec(routing, role), request),

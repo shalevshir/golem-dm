@@ -73,7 +73,7 @@ Status: POC phase · Supersedes `dm-plan.md` (see `dm-plan-review.md` for the fa
 | 4 | **Rules engine:** dice → checks → combat resolution → action economy → grid/A*/LoS | Golden tests pass, ≥90% coverage | 1–2 | ✅ done |
 | 5 | **SRD data:** ~10 monsters, conditions, 4 classes as validated JSON | Loads + validates | 2 | ✅ done |
 | 6 | **Provider adapter:** Vercel AI SDK wrapper, `ModelRouting` config | Mocked-provider tests pass | 3 | ✅ done |
-| 7 | **Tactical agent + sim:** validate→retry→fallback loop; benchmark Flash vs nano/mini | Legality ≥95% after retry on fixture scenarios; model chosen from data | 3–4 | ⬜ not started |
+| 7 | **Tactical agent + sim:** validate→retry→fallback loop; benchmark Flash vs nano/mini | Legality ≥95% after retry on fixture scenarios; model chosen from data | 3–4 | 🟡 7a done, 7b pending |
 | 8 | **Server + web:** Fastify+WS, event log, replay-on-reconnect, clickable canvas grid | Full combat playable E2E vs scripted enemy | 4–5 | ⬜ not started |
 | 9 | **Narrative agent:** Sonnet 5 streaming, Hebrew glossary, gendered narration, cache-stable prefix | First token <1.5s p50; Hebrew reviewed by native speaker | 5–6 | ⬜ not started |
 | 10 | **Memory:** pgvector episodic store, scene summarization, quest DAG | Replay test + top-k retrieval test pass | 6 | ⬜ not started |
@@ -82,7 +82,7 @@ Status: POC phase · Supersedes `dm-plan.md` (see `dm-plan-review.md` for the fa
 ### Status as of 2026-08-17
 
 Toolchain bootstrapped and verified: `pnpm typecheck`, `pnpm lint`, `pnpm test`
-all green (408 tests). Rules-engine coverage 99.31% stmts / 97.25% branch / 100%
+all green (473 tests). Rules-engine coverage 99.31% stmts / 97.25% branch / 100%
 funcs, above the ≥90% bar.
 
 **Built:** `dice` (notation parser, 2024 crit doubling, replay determinism),
@@ -121,9 +121,33 @@ schema-violating tool call carries the zod issues to quote back at the model.
 convention. 62 tests, no network: behaviour runs against a scripted fake, SDK
 wiring against `MockLanguageModelV1`.
 
+Step 7a built the tactical agent on that adapter. `proposeTurn` projects the
+`CombatWorld` into a compact JSON snapshot — positions, HP, conditions, action
+economy, and a *precomputed* `distanceFeet` to every other combatant, which
+removes the coordinate arithmetic that produces most out-of-reach proposals —
+puts it in the `dynamic` prompt tier only, and asks the tactical model for an
+`ExecuteTurn`. The rules engine validates it. On rejection the agent retries
+exactly once, carrying the stable `TurnRejectionReason` codes back to the model;
+a second failure yields the deterministic fallback (attack the nearest legal
+target, else Dodge, without moving). Every rejection becomes an
+`ActionRejectedPayload` — new in `@ai-dm/schemas`, stamped with the provider and
+model id so step 7b can group a log of rejections by the model that produced it.
+
+The loop is straight-line rather than a counted one, so "never a third model
+call" is visible in the source rather than enforced by a bound; a test asserts
+`port.calls` never exceeds two on any failure path, and another asserts the
+cached prompt tiers are byte-identical across the retry.
+
+Two things step 7a deliberately does not do: it never moves the fallback (a
+pathfinding fallback would re-implement the judgement the model owes us, in the
+one path that must be trivially correct), and on `aborted` it abandons the turn
+rather than falling back, because the abort signal is the caller's.
+`deterministicFallback` is exported so the server can choose otherwise at no
+cost.
+
 Two things there are **deliberately unmeasured**: the tactical row still points
 at Gemini 3 Flash by default, and `REASONING_BUDGET_TOKENS` (0 / 4096 / 16384)
-is a plausible scale rather than an observed one. Step 7's benchmark is what
+is a plausible scale rather than an observed one. Step 7b's benchmark is what
 should set both.
 
 **Known gaps** are tracked in [`RULES_REFERENCE.md`](RULES_REFERENCE.md) §8,
