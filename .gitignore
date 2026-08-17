@@ -1,6 +1,7 @@
 node_modules/
 dist/
 coverage/
+tools/sim/runs/
 .env
 .env.*
 !.env.example
