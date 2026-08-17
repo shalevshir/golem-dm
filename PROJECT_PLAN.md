@@ -72,7 +72,7 @@ Status: POC phase · Supersedes `dm-plan.md` (see `dm-plan-review.md` for the fa
 | 3 | **Schemas:** character, actions (`ExecuteTurn`), events, world in zod; JSON-schema export | Fixtures parse; tool schema generated | 1 | ✅ done |
 | 4 | **Rules engine:** dice → checks → combat resolution → action economy → grid/A*/LoS | Golden tests pass, ≥90% coverage | 1–2 | ✅ done |
 | 5 | **SRD data:** ~10 monsters, conditions, 4 classes as validated JSON | Loads + validates | 2 | ✅ done |
-| 6 | **Provider adapter:** Vercel AI SDK wrapper, `ModelRouting` config | Mocked-provider tests pass | 3 | ⬜ not started |
+| 6 | **Provider adapter:** Vercel AI SDK wrapper, `ModelRouting` config | Mocked-provider tests pass | 3 | ✅ done |
 | 7 | **Tactical agent + sim:** validate→retry→fallback loop; benchmark Flash vs nano/mini | Legality ≥95% after retry on fixture scenarios; model chosen from data | 3–4 | ⬜ not started |
 | 8 | **Server + web:** Fastify+WS, event log, replay-on-reconnect, clickable canvas grid | Full combat playable E2E vs scripted enemy | 4–5 | ⬜ not started |
 | 9 | **Narrative agent:** Sonnet 5 streaming, Hebrew glossary, gendered narration, cache-stable prefix | First token <1.5s p50; Hebrew reviewed by native speaker | 5–6 | ⬜ not started |
@@ -82,7 +82,7 @@ Status: POC phase · Supersedes `dm-plan.md` (see `dm-plan-review.md` for the fa
 ### Status as of 2026-08-17
 
 Toolchain bootstrapped and verified: `pnpm typecheck`, `pnpm lint`, `pnpm test`
-all green (236 tests). Rules-engine coverage 99.15% stmts / 96.01% branch / 100%
+all green (408 tests). Rules-engine coverage 99.31% stmts / 97.25% branch / 100%
 funcs, above the ≥90% bar.
 
 **Built:** `dice` (notation parser, 2024 crit doubling, replay determinism),
@@ -109,6 +109,22 @@ stat block into a `Combatant` and into the validator's range lookup.
 The pass paid for itself immediately: it caught that **Stunned does not set
 Speed 0** in 2024, which the action-economy state machine had wrong (see
 `RULES_REFERENCE.md` §7).
+
+Step 6 put `@ai-dm/agents` behind one `LanguageModelPort` — structured tool
+calls, plain completion, token streaming — with `vercel.ts` the only file that
+imports the SDK. `ModelRouting` is now `role → ModelSpec` (model id plus
+temperature, token cap and reasoning effort), defaulting to the §3 table.
+Failures come back as discriminated results with four stable codes rather than
+thrown SDK exceptions, which is what step 7's retry loop branches on; a
+schema-violating tool call carries the zod issues to quote back at the model.
+`LayeredPrompt` makes the cache-stable prefix ordering a type instead of a
+convention. 62 tests, no network: behaviour runs against a scripted fake, SDK
+wiring against `MockLanguageModelV1`.
+
+Two things there are **deliberately unmeasured**: the tactical row still points
+at Gemini 3 Flash by default, and `REASONING_BUDGET_TOKENS` (0 / 4096 / 16384)
+is a plausible scale rather than an observed one. Step 7's benchmark is what
+should set both.
 
 **Known gaps** are tracked in [`RULES_REFERENCE.md`](RULES_REFERENCE.md) §8,
 which is the canonical record of what the engine does and does not implement.

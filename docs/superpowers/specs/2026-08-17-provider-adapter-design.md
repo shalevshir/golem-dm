@@ -184,10 +184,18 @@ implementation is testable without any notion of roles.
 and exercise the real adapter code path with no network and no API keys.
 
 Structured output uses `generateObject({ mode: "tool", schema, schemaName })`.
-The result is then re-validated with our own `schema.safeParse`, so a malformed
-proposal becomes `schema_validation_failed` carrying zod issues rather than an
-SDK exception. Double validation is intentional: the SDK's guarantee is not our
-guarantee, and the retry prompt in step 7 needs the zod issues.
+
+**Revised during implementation.** The design called for re-validating the
+result with our own `schema.safeParse` as defence in depth. A mutation check
+showed that branch is unreachable — `generateObject` parses with the same zod
+schema, so a second parse can never fail — and no test could be written that
+kills it. It was removed rather than kept as untestable code.
+
+What we do own is the *failure* path: the SDK raises both "no tool call" and
+"tool call that does not match" as `NoObjectGeneratedError`, and those need
+different retries. `TypeValidationError.isInstance(error.cause)` separates them,
+and re-parsing `cause.value` recovers the zod issues step 7 quotes back at the
+model. That safeParse is exercised and mutation-checked.
 
 ### Reasoning effort mapping
 
