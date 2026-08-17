@@ -6,10 +6,17 @@
 // the callers that need the definition itself: tools/sim recording which schema
 // version a model was benchmarked against, and the server logging it beside
 // `action_rejected` events.
-import type { ZodTypeAny } from "zod";
+import type { ZodType, ZodTypeDef } from "zod";
 import type { JsonSchema7Type } from "zod-to-json-schema";
 import { zodToJsonSchema } from "zod-to-json-schema";
 
-export function toolJsonSchema(schema: ZodTypeAny, name: string): JsonSchema7Type {
+/**
+ * Typed against `unknown` rather than zod's `ZodTypeAny`, whose `any` would
+ * make every call an unsafe argument under `strictTypeChecked`.
+ */
+export function toolJsonSchema(
+  schema: ZodType<unknown, ZodTypeDef, unknown>,
+  name: string,
+): JsonSchema7Type {
   return zodToJsonSchema(schema, name);
 }

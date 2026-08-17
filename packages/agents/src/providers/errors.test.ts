@@ -2,12 +2,14 @@ import { describe, expect, it } from "vitest";
 import { z } from "zod";
 import { adapterFailure, adapterSuccess } from "./errors.js";
 
+// These construct concrete AdapterSuccess/AdapterFailure values, so no `.ok`
+// narrowing is needed here. Narrowing across the union is exercised where it
+// actually matters: results returned from a port, in runtime and vercel tests.
 describe("adapterSuccess", () => {
-  it("wraps a value in a result the caller can narrow on", () => {
+  it("wraps a value in a success result", () => {
     const result = adapterSuccess({ actorId: "gob-2" });
 
     expect(result.ok).toBe(true);
-    if (!result.ok) throw new Error("expected success");
     expect(result.value.actorId).toBe("gob-2");
   });
 });
@@ -17,7 +19,6 @@ describe("adapterFailure", () => {
     const result = adapterFailure("provider_error", "Anthropic returned 529.");
 
     expect(result.ok).toBe(false);
-    if (result.ok) throw new Error("expected failure");
     expect(result.error.code).toBe("provider_error");
     expect(result.error.message).toBe("Anthropic returned 529.");
   });
@@ -25,7 +26,6 @@ describe("adapterFailure", () => {
   it("omits diagnostics that were not supplied", () => {
     const result = adapterFailure("no_tool_call", "Model returned prose, not a tool call.");
 
-    if (result.ok) throw new Error("expected failure");
     expect(result.error.issues).toBeUndefined();
     expect(result.error.cause).toBeUndefined();
   });
@@ -38,7 +38,6 @@ describe("adapterFailure", () => {
       issues: parsed.error.issues,
     });
 
-    if (result.ok) throw new Error("expected failure");
     expect(result.error.issues?.[0]?.path).toStrictEqual(["actorId"]);
   });
 
@@ -46,7 +45,6 @@ describe("adapterFailure", () => {
     const cause = new Error("socket hang up");
     const result = adapterFailure("provider_error", "Transport failed.", { cause });
 
-    if (result.ok) throw new Error("expected failure");
     expect(result.error.cause).toBe(cause);
   });
 

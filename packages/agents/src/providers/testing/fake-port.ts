@@ -88,6 +88,9 @@ export function createFakePort(script: FakePortScript = {}): FakePort {
       if (chunks === undefined) throw exhausted("stream");
 
       return {
+        // Replaying a fixed array needs no await; the interface still has to
+        // be an async iterable because real streams are.
+        // eslint-disable-next-line @typescript-eslint/require-await
         async *[Symbol.asyncIterator](): AsyncGenerator<StreamChunk> {
           yield* chunks;
         },
