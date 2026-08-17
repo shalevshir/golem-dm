@@ -23,13 +23,17 @@ const INCAPACITATING_CONDITIONS: readonly Condition[] = [
   "unconscious",
 ];
 
-/** Conditions that drop speed to 0 outright, whatever the creature's speed is. */
+/**
+ * The conditions whose SRD glossary entry states "Speed 0". Stunned is
+ * deliberately absent: its entry lists Incapacitated, auto-failed Strength and
+ * Dexterity saves, and Advantage on attacks against you — but no Speed 0, and
+ * moving is not an action.
+ */
 const IMMOBILISING_CONDITIONS: readonly Condition[] = [
   "grappled",
   "restrained",
   "paralyzed",
   "petrified",
-  "stunned",
   "unconscious",
 ];
 

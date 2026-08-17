@@ -19,6 +19,11 @@ export const SpellSlots = z.record(
   z.object({ max: z.number().int(), current: z.number().int() }),
 );
 
+export const AbilityKey = z.enum(["str", "dex", "con", "int", "wis", "cha"]);
+
+/** POC scope — widening this is a reviewed change (see the schemas CLAUDE.md). */
+export const CharacterClass = z.enum(["fighter", "wizard", "rogue", "cleric"]);
+
 export const Abilities = z.object({
   str: z.number().int().min(1).max(30),
   dex: z.number().int().min(1).max(30),
@@ -33,11 +38,11 @@ export const CharacterSheet = z.object({
   nameHebrew: z.string(),
   /** Required for grammatically correct Hebrew narration. */
   grammaticalGender: z.enum(["masculine", "feminine"]),
-  class: z.enum(["fighter", "wizard", "rogue", "cleric"]), // POC scope
+  class: CharacterClass,
   level: z.number().int().min(1).max(20),
   proficiencyBonus: z.number().int().min(2).max(6),
   abilities: Abilities,
-  savingThrowProficiencies: z.array(z.enum(["str", "dex", "con", "int", "wis", "cha"])),
+  savingThrowProficiencies: z.array(AbilityKey),
   skillProficiencies: z.array(z.string()),
   combat: z.object({
     maxHp: z.number().int().min(1),
@@ -57,3 +62,6 @@ export type CharacterSheet = z.infer<typeof CharacterSheet>;
 export type ActiveCondition = z.infer<typeof ActiveCondition>;
 export type SpellSlots = z.infer<typeof SpellSlots>;
 export type Condition = z.infer<typeof Condition>;
+export type AbilityKey = z.infer<typeof AbilityKey>;
+export type CharacterClass = z.infer<typeof CharacterClass>;
+export type Abilities = z.infer<typeof Abilities>;

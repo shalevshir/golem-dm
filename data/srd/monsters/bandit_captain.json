@@ -1,0 +1,31 @@
+{
+  "monsterId": "bandit_captain",
+  "nameEnglish": "Bandit Captain",
+  "size": "medium",
+  "creatureType": "Humanoid",
+  "alignment": "Neutral",
+  "armorClass": 15,
+  "hitPoints": { "average": 52, "diceNotation": "8d8+16" },
+  "speedFeet": 30,
+  "abilities": { "str": 15, "dex": 16, "con": 14, "int": 14, "wis": 11, "cha": 14 },
+  "challengeRating": "2",
+  "proficiencyBonus": 2,
+  "attacksPerAction": 2,
+  "actions": [
+    {
+      "actionId": "scimitar",
+      "nameEnglish": "Scimitar",
+      "attackBonus": 5,
+      "reachFeet": 5,
+      "damage": { "diceNotation": "1d6+3", "averageDamage": 6, "damageType": "slashing" }
+    },
+    {
+      "actionId": "pistol",
+      "nameEnglish": "Pistol",
+      "attackBonus": 5,
+      "rangeFeet": 30,
+      "longRangeFeet": 90,
+      "damage": { "diceNotation": "1d10+3", "averageDamage": 8, "damageType": "piercing" }
+    }
+  ]
+}

@@ -71,7 +71,7 @@ Status: POC phase · Supersedes `dm-plan.md` (see `dm-plan-review.md` for the fa
 | 2 | **Scaffold:** pnpm workspaces, tsconfig, ESLint/Prettier, Vitest, CI | `pnpm typecheck && lint && test` green in CI | 1 | ✅ done |
 | 3 | **Schemas:** character, actions (`ExecuteTurn`), events, world in zod; JSON-schema export | Fixtures parse; tool schema generated | 1 | ✅ done |
 | 4 | **Rules engine:** dice → checks → combat resolution → action economy → grid/A*/LoS | Golden tests pass, ≥90% coverage | 1–2 | ✅ done |
-| 5 | **SRD data:** ~10 monsters, conditions, 4 classes as validated JSON | Loads + validates | 2 | ⬜ not started |
+| 5 | **SRD data:** ~10 monsters, conditions, 4 classes as validated JSON | Loads + validates | 2 | ✅ done |
 | 6 | **Provider adapter:** Vercel AI SDK wrapper, `ModelRouting` config | Mocked-provider tests pass | 3 | ⬜ not started |
 | 7 | **Tactical agent + sim:** validate→retry→fallback loop; benchmark Flash vs nano/mini | Legality ≥95% after retry on fixture scenarios; model chosen from data | 3–4 | ⬜ not started |
 | 8 | **Server + web:** Fastify+WS, event log, replay-on-reconnect, clickable canvas grid | Full combat playable E2E vs scripted enemy | 4–5 | ⬜ not started |
@@ -100,12 +100,21 @@ resulting action economy and spell slots) or a list of rejections, each with a
 stable `TurnRejectionReason` code for the tactical agent's single retry and the
 `action_rejected` event.
 
+Step 5 landed 11 monster stat blocks, all 15 conditions and the 4 POC classes in
+`data/srd/`, transcribed from the SRD 5.2.1 PDF rather than from recall. A test
+in `@ai-dm/schemas` loads and validates every file, and
+`combatantFromStatBlock` / `actionRangesFeetFrom` in the rules engine turn a
+stat block into a `Combatant` and into the validator's range lookup.
+
+The pass paid for itself immediately: it caught that **Stunned does not set
+Speed 0** in 2024, which the action-economy state machine had wrong (see
+`RULES_REFERENCE.md` §7).
+
 **Known gaps** are tracked in [`RULES_REFERENCE.md`](RULES_REFERENCE.md) §8,
 which is the canonical record of what the engine does and does not implement.
-The ones that most affect the validator: weapon and spell ranges are injected by
-the caller until the SRD data pass, cover is all-or-nothing per square rather
-than measured against how much of the target is hidden, and Tiny creatures
-cannot share a square.
+The ones that most affect the validator: player weapon and spell ranges still
+have no data, monster traits and reactions are not captured, cover is
+all-or-nothing per square, and Tiny creatures cannot share a square.
 
 ## 5. Open Risks
 

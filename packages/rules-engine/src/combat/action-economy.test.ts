@@ -130,7 +130,8 @@ describe("effectiveSpeedFeet", () => {
     expect(effectiveSpeedFeet(actor)).toBe(30);
   });
 
-  it.each(["grappled", "restrained", "paralyzed", "stunned", "unconscious", "petrified"] as const)(
+  // Exactly five conditions state "Speed 0" in the SRD glossary.
+  it.each(["grappled", "restrained", "paralyzed", "unconscious", "petrified"] as const)(
     "is zero while %s",
     (condition) => {
       const actor = combatant({
@@ -141,6 +142,18 @@ describe("effectiveSpeedFeet", () => {
       expect(effectiveSpeedFeet(actor)).toBe(0);
     },
   );
+
+  // Stunned is not one of them: its entry lists Incapacitated, auto-failed
+  // Str/Dex saves and Advantage on attacks against you — no Speed 0. Moving is
+  // not an action, so a Stunned creature can still move.
+  it("is unchanged while stunned, which does not state Speed 0", () => {
+    const actor = combatant({
+      combatantId: "a",
+      speedFeet: 30,
+      conditions: [{ condition: "stunned", durationRounds: 1 }],
+    });
+    expect(effectiveSpeedFeet(actor)).toBe(30);
+  });
 });
 
 describe("movementBudgetFeet", () => {

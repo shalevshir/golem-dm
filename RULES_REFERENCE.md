@@ -142,9 +142,9 @@ Implemented in `combat/exhaustion.ts`.
 - **Incapacitated** — no Action, Bonus Action, or Reaction. Paralyzed,
   Petrified, Stunned and Unconscious each *include* Incapacitated, so all five
   block acting.
-- **Speed 0** — Grappled, Restrained, Paralyzed, Petrified, Stunned,
-  Unconscious. Distinguished from an empty budget by the `actor_cannot_move`
-  rejection.
+- **Speed 0** — Grappled, Restrained, Paralyzed, Petrified, Unconscious, and
+  **only** those five. Distinguished from an empty budget by the
+  `actor_cannot_move` rejection. **Stunned is not among them** — see §7.
 - **Prone** — "your only movement options are to crawl or to spend an amount of
   movement equal to half your Speed (round down) to right yourself." Modelled as
   crawling, since `ExecuteTurn` has no way to propose standing up. Prone raises
@@ -170,8 +170,14 @@ These are where memory of 2014 will silently produce wrong code.
    check, granting the Invisible condition until you attack, cast, make noise,
    or are found.
 5. **Initiative** is a Dexterity check.
-6. **Weapon mastery** exists in 2024 and is not implemented — it arrives with
-   the SRD data pass (step 5).
+6. **Stunned does not set Speed 0.** Its entry lists exactly three effects:
+   Incapacitated, auto-failed Strength and Dexterity saves, and Advantage on
+   attacks against you. 2014's Stunned said "can't move"; 2024's does not, and
+   moving is not an action, so a Stunned creature can still move. Only
+   Grappled, Paralyzed, Petrified, Restrained and Unconscious state Speed 0.
+   `data/srd/conditions.json` is the check — a test asserts that exactly those
+   five carry a "Speed 0" effect.
+7. **Weapon mastery** exists in 2024 and is not implemented.
 
 ---
 
@@ -183,9 +189,16 @@ Not yet implemented, roughly in dependency order:
 - Stabilising, and the 1d4-hour natural recovery (§4)
 - HP maximum reduced to 0 (§4)
 - Condition mechanical effects beyond those listed in §6
-- Weapon mastery, base AC from armor, weapon/spell ranges — all need SRD data.
-  Ranges are injected meanwhile via `CombatWorld.actionRangesFeet`, defaulting
-  to the actor's melee reach.
+- Weapon mastery and base AC from armor still need SRD data. Monster attack
+  ranges now come from `data/srd/` via `actionRangesFeetFrom`; player weapon and
+  spell ranges do not exist yet, so `CombatWorld.actionRangesFeet` stays
+  caller-supplied and defaults to the actor's melee reach.
+- **Conditional damage riders.** `MonsterAttack.extraDamage` holds unconditional
+  extras such as the cultist's Necrotic rider, but the goblin's "plus 2 (1d4) if
+  the attack roll had Advantage" has nowhere to go.
+- **Monster traits, reactions and bonus actions.** Pack Tactics, Nimble Escape,
+  Undead Fortitude and Parry are all absent — only the Actions block is
+  captured, and only its attacks.
 - Opportunity attacks, concentration checks
 - Corner-to-corner RAW line of sight (currently the Bresenham house rule)
 - **Tiny creatures sharing a square.** The SRD fits four Tiny creatures in one

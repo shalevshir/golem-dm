@@ -1,0 +1,32 @@
+{
+  "monsterId": "ogre",
+  "nameEnglish": "Ogre",
+  "size": "large",
+  "creatureType": "Giant",
+  "alignment": "Chaotic Evil",
+  "armorClass": 11,
+  "hitPoints": { "average": 68, "diceNotation": "8d10+24" },
+  "speedFeet": 40,
+  "abilities": { "str": 19, "dex": 8, "con": 16, "int": 5, "wis": 7, "cha": 7 },
+  "challengeRating": "2",
+  "proficiencyBonus": 2,
+  "attacksPerAction": 1,
+  "actions": [
+    {
+      "actionId": "greatclub",
+      "nameEnglish": "Greatclub",
+      "attackBonus": 6,
+      "reachFeet": 5,
+      "damage": { "diceNotation": "2d8+4", "averageDamage": 13, "damageType": "bludgeoning" }
+    },
+    {
+      "actionId": "javelin",
+      "nameEnglish": "Javelin",
+      "attackBonus": 6,
+      "reachFeet": 5,
+      "rangeFeet": 30,
+      "longRangeFeet": 120,
+      "damage": { "diceNotation": "2d6+4", "averageDamage": 11, "damageType": "piercing" }
+    }
+  ]
+}

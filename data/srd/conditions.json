@@ -1,0 +1,243 @@
+[
+  {
+    "condition": "blinded",
+    "nameEnglish": "Blinded",
+    "effects": [
+      {
+        "nameEnglish": "Can't See",
+        "ruleEnglish": "You can't see and automatically fail any ability check that requires sight."
+      },
+      {
+        "nameEnglish": "Attacks Affected",
+        "ruleEnglish": "Attack rolls against you have Advantage, and your attack rolls have Disadvantage."
+      }
+    ]
+  },
+  {
+    "condition": "charmed",
+    "nameEnglish": "Charmed",
+    "effects": [
+      {
+        "nameEnglish": "Can't Harm the Charmer",
+        "ruleEnglish": "You can't attack the charmer or target the charmer with damaging abilities or magical effects."
+      },
+      {
+        "nameEnglish": "Social Advantage",
+        "ruleEnglish": "The charmer has Advantage on any ability check to interact with you socially."
+      }
+    ]
+  },
+  {
+    "condition": "deafened",
+    "nameEnglish": "Deafened",
+    "effects": [
+      {
+        "nameEnglish": "Can't Hear",
+        "ruleEnglish": "You can't hear and automatically fail any ability check that requires hearing."
+      }
+    ]
+  },
+  {
+    "condition": "exhaustion",
+    "nameEnglish": "Exhaustion",
+    "effects": [
+      {
+        "nameEnglish": "Exhaustion Levels",
+        "ruleEnglish": "This condition is cumulative. Each time you receive it, you gain 1 Exhaustion level. You die if your Exhaustion level is 6."
+      },
+      {
+        "nameEnglish": "D20 Tests Affected",
+        "ruleEnglish": "When you make a D20 Test, the roll is reduced by 2 times your Exhaustion level."
+      },
+      {
+        "nameEnglish": "Speed Reduced",
+        "ruleEnglish": "Your Speed is reduced by a number of feet equal to 5 times your Exhaustion level."
+      },
+      {
+        "nameEnglish": "Removing Exhaustion Levels",
+        "ruleEnglish": "Finishing a Long Rest removes 1 of your Exhaustion levels. When your Exhaustion level reaches 0, the condition ends."
+      }
+    ]
+  },
+  {
+    "condition": "frightened",
+    "nameEnglish": "Frightened",
+    "effects": [
+      {
+        "nameEnglish": "Ability Checks and Attacks Affected",
+        "ruleEnglish": "You have Disadvantage on ability checks and attack rolls while the source of fear is within line of sight."
+      },
+      {
+        "nameEnglish": "Can't Approach",
+        "ruleEnglish": "You can't willingly move closer to the source of fear."
+      }
+    ]
+  },
+  {
+    "condition": "grappled",
+    "nameEnglish": "Grappled",
+    "effects": [
+      { "nameEnglish": "Speed 0", "ruleEnglish": "Your Speed is 0 and can't increase." },
+      {
+        "nameEnglish": "Attacks Affected",
+        "ruleEnglish": "You have Disadvantage on attack rolls against any target other than the grappler."
+      },
+      {
+        "nameEnglish": "Movable",
+        "ruleEnglish": "The grappler can drag or carry you when it moves, but every foot of movement costs it 1 extra foot unless you are Tiny or two or more sizes smaller than it."
+      }
+    ]
+  },
+  {
+    "condition": "incapacitated",
+    "nameEnglish": "Incapacitated",
+    "effects": [
+      {
+        "nameEnglish": "Inactive",
+        "ruleEnglish": "You can't take any action, Bonus Action, or Reaction."
+      },
+      { "nameEnglish": "No Concentration", "ruleEnglish": "Your Concentration is broken." },
+      { "nameEnglish": "Speechless", "ruleEnglish": "You can't speak." },
+      {
+        "nameEnglish": "Surprised",
+        "ruleEnglish": "If you're Incapacitated when you roll Initiative, you have Disadvantage on the roll."
+      }
+    ]
+  },
+  {
+    "condition": "invisible",
+    "nameEnglish": "Invisible",
+    "effects": [
+      {
+        "nameEnglish": "Surprise",
+        "ruleEnglish": "If you're Invisible when you roll Initiative, you have Advantage on the roll."
+      },
+      {
+        "nameEnglish": "Concealed",
+        "ruleEnglish": "You aren't affected by any effect that requires its target to be seen unless the effect's creator can somehow see you. Any equipment you are wearing or carrying is also concealed."
+      },
+      {
+        "nameEnglish": "Attacks Affected",
+        "ruleEnglish": "Attack rolls against you have Disadvantage, and your attack rolls have Advantage. If a creature can somehow see you, you don't gain this benefit against that creature."
+      }
+    ]
+  },
+  {
+    "condition": "paralyzed",
+    "nameEnglish": "Paralyzed",
+    "effects": [
+      { "nameEnglish": "Incapacitated", "ruleEnglish": "You have the Incapacitated condition." },
+      { "nameEnglish": "Speed 0", "ruleEnglish": "Your Speed is 0 and can't increase." },
+      {
+        "nameEnglish": "Saving Throws Affected",
+        "ruleEnglish": "You automatically fail Strength and Dexterity saving throws."
+      },
+      {
+        "nameEnglish": "Attacks Affected",
+        "ruleEnglish": "Attack rolls against you have Advantage."
+      },
+      {
+        "nameEnglish": "Automatic Critical Hits",
+        "ruleEnglish": "Any attack roll that hits you is a Critical Hit if the attacker is within 5 feet of you."
+      }
+    ]
+  },
+  {
+    "condition": "petrified",
+    "nameEnglish": "Petrified",
+    "effects": [
+      {
+        "nameEnglish": "Turned to Inanimate Substance",
+        "ruleEnglish": "You are transformed, along with any nonmagical objects you are wearing and carrying, into a solid inanimate substance (usually stone). Your weight increases by a factor of ten, and you cease aging."
+      },
+      { "nameEnglish": "Incapacitated", "ruleEnglish": "You have the Incapacitated condition." },
+      { "nameEnglish": "Speed 0", "ruleEnglish": "Your Speed is 0 and can't increase." },
+      {
+        "nameEnglish": "Attacks Affected",
+        "ruleEnglish": "Attack rolls against you have Advantage."
+      },
+      {
+        "nameEnglish": "Saving Throws Affected",
+        "ruleEnglish": "You automatically fail Strength and Dexterity saving throws."
+      }
+    ]
+  },
+  {
+    "condition": "poisoned",
+    "nameEnglish": "Poisoned",
+    "effects": [
+      {
+        "nameEnglish": "Ability Checks and Attacks Affected",
+        "ruleEnglish": "You have Disadvantage on attack rolls and ability checks."
+      }
+    ]
+  },
+  {
+    "condition": "prone",
+    "nameEnglish": "Prone",
+    "effects": [
+      {
+        "nameEnglish": "Restricted Movement",
+        "ruleEnglish": "Your only movement options are to crawl or to spend an amount of movement equal to half your Speed (round down) to right yourself and thereby end the condition. If your Speed is 0, you can't right yourself."
+      },
+      {
+        "nameEnglish": "Attacks Affected",
+        "ruleEnglish": "You have Disadvantage on attack rolls. An attack roll against you has Advantage if the attacker is within 5 feet of you. Otherwise, that attack roll has Disadvantage."
+      }
+    ]
+  },
+  {
+    "condition": "restrained",
+    "nameEnglish": "Restrained",
+    "effects": [
+      { "nameEnglish": "Speed 0", "ruleEnglish": "Your Speed is 0 and can't increase." },
+      {
+        "nameEnglish": "Attacks Affected",
+        "ruleEnglish": "Attack rolls against you have Advantage, and your attack rolls have Disadvantage."
+      },
+      {
+        "nameEnglish": "Saving Throws Affected",
+        "ruleEnglish": "You have Disadvantage on Dexterity saving throws."
+      }
+    ]
+  },
+  {
+    "condition": "stunned",
+    "nameEnglish": "Stunned",
+    "effects": [
+      { "nameEnglish": "Incapacitated", "ruleEnglish": "You have the Incapacitated condition." },
+      {
+        "nameEnglish": "Saving Throws Affected",
+        "ruleEnglish": "You automatically fail Strength and Dexterity saving throws."
+      },
+      {
+        "nameEnglish": "Attacks Affected",
+        "ruleEnglish": "Attack rolls against you have Advantage."
+      }
+    ]
+  },
+  {
+    "condition": "unconscious",
+    "nameEnglish": "Unconscious",
+    "effects": [
+      {
+        "nameEnglish": "Inert",
+        "ruleEnglish": "You have the Incapacitated and Prone conditions, and you drop whatever you're holding. When this condition ends, you remain Prone."
+      },
+      { "nameEnglish": "Speed 0", "ruleEnglish": "Your Speed is 0 and can't increase." },
+      {
+        "nameEnglish": "Attacks Affected",
+        "ruleEnglish": "Attack rolls against you have Advantage."
+      },
+      {
+        "nameEnglish": "Saving Throws Affected",
+        "ruleEnglish": "You automatically fail Strength and Dexterity saving throws."
+      },
+      {
+        "nameEnglish": "Automatic Critical Hits",
+        "ruleEnglish": "Any attack roll that hits you is a Critical Hit if the attacker is within 5 feet of you."
+      },
+      { "nameEnglish": "Unaware", "ruleEnglish": "You're unaware of your surroundings." }
+    ]
+  }
+]

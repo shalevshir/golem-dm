@@ -1,0 +1,25 @@
+{
+  "monsterId": "guard",
+  "nameEnglish": "Guard",
+  "size": "medium",
+  "creatureType": "Humanoid",
+  "alignment": "Neutral",
+  "armorClass": 16,
+  "hitPoints": { "average": 11, "diceNotation": "2d8+2" },
+  "speedFeet": 30,
+  "abilities": { "str": 13, "dex": 12, "con": 12, "int": 10, "wis": 11, "cha": 10 },
+  "challengeRating": "1/8",
+  "proficiencyBonus": 2,
+  "attacksPerAction": 1,
+  "actions": [
+    {
+      "actionId": "spear",
+      "nameEnglish": "Spear",
+      "attackBonus": 3,
+      "reachFeet": 5,
+      "rangeFeet": 20,
+      "longRangeFeet": 60,
+      "damage": { "diceNotation": "1d6+1", "averageDamage": 4, "damageType": "piercing" }
+    }
+  ]
+}

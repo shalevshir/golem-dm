@@ -1,0 +1,33 @@
+[
+  {
+    "class": "fighter",
+    "nameEnglish": "Fighter",
+    "hitDie": 10,
+    "primaryAbilities": ["str", "dex"],
+    "savingThrowProficiencies": ["str", "con"],
+    "extraAttackLevel": 5
+  },
+  {
+    "class": "wizard",
+    "nameEnglish": "Wizard",
+    "hitDie": 6,
+    "primaryAbilities": ["int"],
+    "savingThrowProficiencies": ["int", "wis"],
+    "spellcastingAbility": "int"
+  },
+  {
+    "class": "rogue",
+    "nameEnglish": "Rogue",
+    "hitDie": 8,
+    "primaryAbilities": ["dex"],
+    "savingThrowProficiencies": ["dex", "int"]
+  },
+  {
+    "class": "cleric",
+    "nameEnglish": "Cleric",
+    "hitDie": 8,
+    "primaryAbilities": ["wis"],
+    "savingThrowProficiencies": ["wis", "cha"],
+    "spellcastingAbility": "wis"
+  }
+]
