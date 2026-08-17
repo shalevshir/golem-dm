@@ -4,7 +4,12 @@
 // by how the fight happened to go.
 import type { TacticalAgent, TimingPort } from "@ai-dm/agents";
 import type { Faction } from "@ai-dm/schemas";
-import type { DecideInput, EncounterResult, TurnDecider } from "../engine/encounter.js";
+import type {
+  DecideInput,
+  EncounterResult,
+  TurnDecider,
+  TurnLogEntry,
+} from "../engine/encounter.js";
 import { runEncounter } from "../engine/encounter.js";
 import { scriptedTurn } from "../engine/policy.js";
 import { seeded } from "../rng.js";
@@ -30,6 +35,34 @@ export interface RunEncounterArmInput {
 export interface EncounterArmResult {
   records: TurnRecord[];
   result: EncounterResult;
+}
+
+/**
+ * `recordFrom` runs inside the decider, before `applyTurn` has produced this
+ * turn's `TurnEffect` — so `unresolvedActionIds` (Task 5's count of engine-legal
+ * action ids the actor's stat block does not contain) is not known yet at push
+ * time and is back-filled here from `runEncounter`'s log once it resolves.
+ *
+ * `(round, actorId)` is a safe join key because this loop gives each combatant
+ * exactly one turn per round (`engine/encounter.ts`'s `for (const actorId of
+ * scenario.turnOrder)`), so at most one log entry can match a given record.
+ *
+ * A record with no matching log entry is a decider failure (`aborted` or
+ * `no_legal_turn`) — no turn was ever applied, so there is nothing to join and
+ * the record keeps `recordFrom`'s default `[]`.
+ */
+export function joinUnresolvedActionIds(
+  records: readonly TurnRecord[],
+  log: readonly TurnLogEntry[],
+): TurnRecord[] {
+  return records.map((record) => {
+    const entry = log.find(
+      (each) => each.round === record.round && each.actorId === record.actorId,
+    );
+    return entry === undefined
+      ? record
+      : { ...record, unresolvedActionIds: entry.effect.unresolvedActionIds };
+  });
 }
 
 export async function runEncounterArm(input: RunEncounterArmInput): Promise<EncounterArmResult> {
@@ -80,5 +113,5 @@ export async function runEncounterArm(input: RunEncounterArmInput): Promise<Enco
     deciderFor: (faction: Faction) => (faction === "hostile" ? modelDecider : baselineDecider),
   });
 
-  return { records, result };
+  return { records: joinUnresolvedActionIds(records, result.log), result };
 }
