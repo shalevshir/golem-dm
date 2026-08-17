@@ -103,8 +103,9 @@ stable `TurnRejectionReason` code for the tactical agent's single retry and the
 **Known gaps** are tracked in [`RULES_REFERENCE.md`](RULES_REFERENCE.md) §8,
 which is the canonical record of what the engine does and does not implement.
 The ones that most affect the validator: weapon and spell ranges are injected by
-the caller until the SRD data pass, creatures do not grant cover, and Tiny
-creatures cannot share a square.
+the caller until the SRD data pass, cover is all-or-nothing per square rather
+than measured against how much of the target is hidden, and Tiny creatures
+cannot share a square.
 
 ## 5. Open Risks
 

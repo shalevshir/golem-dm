@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { Combatant, ExecuteTurn } from "@ai-dm/schemas";
-import { validateExecuteTurn } from "./validate-turn.js";
+import { coverAgainst, validateExecuteTurn } from "./validate-turn.js";
 import type { CombatWorld, TurnRejectionReason, TurnValidation } from "./validate-turn.js";
 import { combatant, parseGrid } from "./test-fixtures.js";
 
@@ -921,6 +921,79 @@ describe("validateExecuteTurn — targeting", () => {
       world({ combatants: [hero, goblin] }),
     );
     expect(reasons(result)).toStrictEqual(["target_not_found"]);
+  });
+});
+
+// SRD Cover table: a creature offers Half Cover at most — Three-Quarters and
+// Total are objects only, so a creature never makes a target untargetable.
+describe("coverAgainst", () => {
+  const shooter = combatant({ combatantId: "hero", faction: "party", position: [0, 0] });
+  const mark = combatant({ combatantId: "mark", position: [4, 0] });
+
+  it("reports no cover across open ground", () => {
+    expect(coverAgainst(shooter, mark, world({ combatants: [shooter, mark] }))).toBe("none");
+  });
+
+  it("reports half cover from an enemy standing in the way", () => {
+    const inTheWay = combatant({ combatantId: "gob", position: [2, 0] });
+    const state = world({ combatants: [shooter, mark, inTheWay] });
+    expect(coverAgainst(shooter, mark, state)).toBe("half");
+  });
+
+  it("reports half cover from an ally too — the SRD says 'another creature'", () => {
+    const friend = combatant({ combatantId: "friend", faction: "party", position: [2, 0] });
+    const state = world({ combatants: [shooter, mark, friend] });
+    expect(coverAgainst(shooter, mark, state)).toBe("half");
+  });
+
+  it("never lets a creature exceed half cover", () => {
+    const wall = combatant({ combatantId: "colossus", position: [2, 0], size: "gargantuan" });
+    const state = world({ combatants: [shooter, mark, wall] });
+    expect(coverAgainst(shooter, mark, state)).toBe("half");
+  });
+
+  it("does not count the attacker or the target as cover", () => {
+    const state = world({ combatants: [shooter, mark] });
+    expect(coverAgainst(shooter, mark, state)).toBe("none");
+    expect(coverAgainst(mark, shooter, state)).toBe("none");
+  });
+
+  it("does not count a corpse", () => {
+    const corpse = combatant({ combatantId: "gob", position: [2, 0], status: "dead" });
+    const state = world({ combatants: [shooter, mark, corpse] });
+    expect(coverAgainst(shooter, mark, state)).toBe("none");
+  });
+
+  it("prefers a tree over a creature, per the SRD's worked example", () => {
+    const grid = parseGrid(`.q...`);
+    const inTheWay = combatant({ combatantId: "gob", position: [2, 0] });
+    const state = { grid, combatants: [shooter, mark, inTheWay] };
+    expect(coverAgainst(shooter, mark, state)).toBe("three_quarters");
+  });
+
+  it("reports full cover behind a wall", () => {
+    const grid = parseGrid(`..#..`);
+    expect(coverAgainst(shooter, mark, { grid, combatants: [shooter, mark] })).toBe("full");
+  });
+
+  it("reports no cover between adjacent creatures", () => {
+    const adjacent = combatant({ combatantId: "mark", position: [1, 0] });
+    expect(coverAgainst(shooter, adjacent, world({ combatants: [shooter, adjacent] }))).toBe(
+      "none",
+    );
+  });
+});
+
+describe("validateExecuteTurn — targeting through creatures", () => {
+  it("still allows an attack on a target a creature merely half-covers", () => {
+    const inTheWay = combatant({ combatantId: "gob", position: [2, 0] });
+    const mark = combatant({ combatantId: "mark", position: [4, 0] });
+    const result = validateExecuteTurn(
+      turn({ mainAction: { actionType: "attack", actionId: "shortbow", targetIds: ["mark"] } }),
+      hero,
+      world({ combatants: [hero, mark, inTheWay], actionRangesFeet: { shortbow: 80 } }),
+    );
+    expect(result.valid).toBe(true);
   });
 });
 

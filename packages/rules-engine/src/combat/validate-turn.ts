@@ -15,7 +15,13 @@ import type {
   SpellSlots,
   Tile,
 } from "@ai-dm/schemas";
-import type { LineOfSightAlgorithm, OccupancyLookup, TilePassability } from "../spatial/index.js";
+import type {
+  CreatureCoverLookup,
+  LineOfSightAlgorithm,
+  OccupancyLookup,
+  TilePassability,
+} from "../spatial/index.js";
+import type { CoverLevel } from "./index.js";
 import {
   coverBetween,
   findPath,
@@ -148,6 +154,38 @@ function passabilityThrough(mover: Combatant, occupant: Combatant): TilePassabil
 
   if (!ally && !tiny && sizesApart < 2 && !isIncapacitated(occupant)) return "blocked";
   return ally || tiny ? "clear" : "hindered";
+}
+
+/**
+ * Cover the target gets against this attacker, counting terrain and creatures.
+ *
+ * SRD Cover table: a creature offers **Half Cover** at most — Three-Quarters
+ * and Total are objects only, so an intervening creature never makes a target
+ * untargetable. Only the most protective source applies; they do not add.
+ *
+ * This is what the caller passes to `resolveAttack`.
+ */
+export function coverAgainst(
+  attacker: Combatant,
+  target: Combatant,
+  world: CombatWorld,
+): CoverLevel {
+  const attackerSpace = { anchor: attacker.position, size: attacker.size };
+  const targetSpace = { anchor: target.position, size: target.size };
+  const [from, to] = nearestSquares(attackerSpace, targetSpace);
+
+  const creatureCover: CreatureCoverLookup = (tile) => {
+    const blocker = world.combatants.find(
+      (other) =>
+        other.combatantId !== attacker.combatantId &&
+        other.combatantId !== target.combatantId &&
+        OCCUPYING_STATUSES.includes(other.status) &&
+        spaceOf(other).some((part) => sameTile(part, tile)),
+    );
+    return blocker === undefined ? "none" : "half";
+  };
+
+  return coverBetween(world.grid, from, to, { algorithm: world.lineOfSight, creatureCover });
 }
 
 /** Reach for a melee action, range for anything the caller has range data for. */
@@ -353,8 +391,9 @@ export function validateExecuteTurn(
       return;
     }
 
-    const [from, to] = nearestSquares(actorSpace, targetSpace);
-    if (coverBetween(world.grid, from, to, world.lineOfSight) === "full") {
+    // Only terrain can reach full cover, so a creature in the way never makes
+    // the target illegal to attack — it just hands out +2 AC at resolution.
+    if (coverAgainst({ ...actor, position }, target, world) === "full") {
       rejections.push({
         reason: "target_behind_full_cover",
         message: `${targetId} is behind full cover and cannot be targeted`,

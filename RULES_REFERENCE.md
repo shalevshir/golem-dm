@@ -56,15 +56,27 @@ success. Death saves are the one exception (§4). `abilityCheck` and
 Three degrees. If behind more than one source, **only the most protective
 applies** — they never add together.
 
-| Degree | Effect |
-|---|---|
-| Half | **+2** to AC *and* Dexterity saving throws |
-| Three-quarters | **+5** to AC *and* Dexterity saving throws |
-| Total | **Cannot be targeted directly** at all |
+| Degree | Effect | Offered by |
+|---|---|---|
+| Half | **+2** to AC *and* Dexterity saving throws | **Another creature**, or an object covering at least half the target |
+| Three-quarters | **+5** to AC *and* Dexterity saving throws | An **object** covering at least three-quarters |
+| Total | **Cannot be targeted directly** at all | An **object** covering the whole target |
 
-Implemented in `combat/` `coverArmorClassBonus` and `spatial/` `coverBetween`.
+**A creature can only ever give Half Cover.** Three-Quarters and Total are
+objects only, so someone standing in the way never makes a target illegal to
+attack — it is worth +2 AC at resolution and nothing more. Any creature counts,
+ally or enemy; the attacker and the target are not cover for the target.
+
+Cover must lie *between*: "a target can benefit from cover only when an attack
+or other effect originates on the opposite side of the cover."
+
+Implemented in `combat/` `coverArmorClassBonus` and `coverAgainst` — the latter
+is what a caller passes to `resolveAttack` — over `spatial/` `coverBetween`.
 Both the AC bonus and the Dex-save bonus are **RAW**, not a house rule —
 ADR-0003 describes them as house rules, which is inaccurate.
+
+Creatures do **not** block line of sight; they grant cover instead, so
+`hasLineOfSight` is deliberately terrain-only.
 
 ---
 
@@ -179,11 +191,12 @@ Not yet implemented, roughly in dependency order:
 - **Tiny creatures sharing a square.** The SRD fits four Tiny creatures in one
   square; `occupiedTiles` gives every creature at least a full square, so two
   Tiny creatures cannot share one. Needs fractional occupancy to fix.
-- **Creatures granting cover.** `coverBetween` reads terrain only; RAW another
-  creature in the line can give Half Cover.
 - **Cover for a large creature** is traced between the nearest squares of the
   two spaces. RAW lets the attacker pick any square of its space, which can
   find a cleaner line.
+- **Cover is all-or-nothing per square.** A creature on the line gives Half
+  Cover regardless of its size, and an object gives whatever its terrain type
+  says. RAW asks how much of the target is actually covered.
 - **"Ally" is faction equality.** `passabilityThrough` treats same-faction as
   allied. A `FactionRelation` score exists in `schemas` but is not consulted.
 - **Standing up from Prone.** `ExecuteTurn` cannot express it, so a prone actor

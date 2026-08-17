@@ -364,19 +364,47 @@ export function hasLineOfSight(
   });
 }
 
-/** The strongest cover granted by any tile between the two endpoints. */
+/**
+ * Cover granted by a creature standing on a tile. Supplied by the caller, which
+ * decides who counts — the attacker and the target never give the target cover.
+ */
+export type CreatureCoverLookup = (tile: Tile) => CoverLevel;
+
+export interface CoverOptions {
+  /**
+   * Swappable per ADR-0003; defaults to the Bresenham house rule. Explicitly
+   * `undefined` is allowed so callers can forward an optional field straight in.
+   */
+  algorithm?: LineOfSightAlgorithm | undefined;
+  /** Absent means terrain is the only thing in the way. */
+  creatureCover?: CreatureCoverLookup | undefined;
+}
+
+/**
+ * The strongest cover granted by anything between the two endpoints.
+ *
+ * SRD: "If a target is behind multiple sources of cover, only the most
+ * protective degree of cover applies; the degrees aren't added together."
+ */
 export function coverBetween(
   grid: GridMap,
   from: Tile,
   to: Tile,
-  algorithm: LineOfSightAlgorithm = bresenhamLineOfSight,
+  options: CoverOptions = {},
 ): CoverLevel {
+  const algorithm = options.algorithm ?? bresenhamLineOfSight;
   let strongest: CoverLevel = "none";
+
   for (const tile of algorithm.tilesBetween(from, to)) {
     const terrain = terrainAt(grid, tile);
-    if (terrain === undefined) continue;
-    const cover = coverFromTerrain(terrain);
-    if (COVER_RANK[cover] > COVER_RANK[strongest]) strongest = cover;
+    if (terrain !== undefined) {
+      const cover = coverFromTerrain(terrain);
+      if (COVER_RANK[cover] > COVER_RANK[strongest]) strongest = cover;
+    }
+
+    const fromCreature = options.creatureCover?.(tile) ?? "none";
+    if (COVER_RANK[fromCreature] > COVER_RANK[strongest]) strongest = fromCreature;
   }
+
   return strongest;
 }

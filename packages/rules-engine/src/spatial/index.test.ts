@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { CreatureSize, GridMap, TerrainType, Tile } from "@ai-dm/schemas";
+import type { CoverLevel } from "../combat/index.js";
 import {
   bresenhamLineOfSight,
   coverBetween,
@@ -432,6 +433,54 @@ describe("coverBetween", () => {
   it("takes the strongest cover on the line", () => {
     const grid = parseGrid(`.hq..`);
     expect(coverBetween(grid, [0, 0], [4, 0])).toBe("three_quarters");
+  });
+
+  // SRD Cover: "Walls, trees, creatures, and other obstacles can provide
+  // cover." Creature cover is supplied by the caller — spatial has no notion
+  // of who is standing where.
+  describe("creature cover", () => {
+    const creatureAt =
+      (occupied: Tile) =>
+      (tile: Tile): CoverLevel =>
+        tile[0] === occupied[0] && tile[1] === occupied[1] ? "half" : "none";
+
+    it("reports half cover from a creature on the line", () => {
+      const grid = parseGrid(`.....`);
+      expect(coverBetween(grid, [0, 0], [4, 0], { creatureCover: creatureAt([2, 0]) })).toBe("half");
+    });
+
+    it("ignores a creature that is not on the line", () => {
+      const grid = parseGrid(`
+        .....
+        .....
+      `);
+      expect(coverBetween(grid, [0, 0], [4, 0], { creatureCover: creatureAt([2, 1]) })).toBe("none");
+    });
+
+    // The SRD's own worked example: "if a target is behind a creature that
+    // gives Half Cover and a tree trunk that gives Three-Quarters Cover, the
+    // target has Three-Quarters Cover."
+    it("takes the tree over the creature when both are in the way", () => {
+      const grid = parseGrid(`.q...`);
+      expect(coverBetween(grid, [0, 0], [4, 0], { creatureCover: creatureAt([2, 0]) })).toBe(
+        "three_quarters",
+      );
+    });
+
+    it("takes the creature over bare ground", () => {
+      const grid = parseGrid(`.....`);
+      expect(coverBetween(grid, [0, 0], [4, 0], { creatureCover: creatureAt([2, 0]) })).toBe("half");
+    });
+
+    it("still reports full cover behind a wall", () => {
+      const grid = parseGrid(`..#..`);
+      expect(coverBetween(grid, [0, 0], [4, 0], { creatureCover: creatureAt([1, 0]) })).toBe("full");
+    });
+
+    it("reports terrain cover only when no lookup is supplied", () => {
+      const grid = parseGrid(`..h..`);
+      expect(coverBetween(grid, [0, 0], [4, 0])).toBe("half");
+    });
   });
 
   it("ignores cover on the endpoints themselves", () => {
