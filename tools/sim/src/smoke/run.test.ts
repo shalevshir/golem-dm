@@ -43,6 +43,15 @@ describe("runSmoke", () => {
     expect(legality?.firstTry).toBeGreaterThan(0);
     expect(legality?.afterRetry).toBeGreaterThan(0);
     expect(legality?.fallback).toBeGreaterThan(0);
+
+    // Pins Correction 1 / Task 12 Step 8: encounter mode's `beforeTurn` must
+    // hand the runner the real board so a legal baseline can be scripted. A
+    // regression to the pre-Step-8 shape (scripting from a null board) makes
+    // every encounter turn fall straight to the deterministic fallback, which
+    // still validates — so `encounter.turns > 0` alone would not catch it.
+    // `firstTry > 0` here can only hold if a legal, non-fallback turn was
+    // scripted from the actual board at least once.
+    expect(report.arms[0]?.encounter.legality.firstTry).toBeGreaterThan(0);
   });
 
   it("is byte-identical across two runs, apart from the timestamp", async () => {

@@ -31,13 +31,20 @@ pnpm --filter @ai-dm/sim test | typecheck
 network, no API key. It verifies the pipeline and the metric arithmetic, and
 says nothing about any real model's tactical quality.
 
-| Flag          | Values                                       | Default                 |
-| ------------- | -------------------------------------------- | ----------------------- |
-| `--mode`      | `probe` \| `encounter` \| `both`             | `both`                  |
-| `--live`      | absent \| present                            | absent                  |
-| `--arms`      | comma-separated arm ids from `src/config.ts` | every arm when `--live` |
-| `--seeds`     | comma-separated integers                     | `1,2,3,4,5`             |
-| `--scenarios` | comma-separated scenario ids                 | all four                |
+| Flag          | Values                                                              | Default                 |
+| ------------- | ------------------------------------------------------------------- | ----------------------- |
+| `--mode`      | `probe` \| `encounter` \| `both`                                    | `both`                  |
+| `--live`      | absent \| present                                                   | absent                  |
+| `--arms`      | comma-separated arm ids from `src/config.ts`, **requires `--live`** | every arm when `--live` |
+| `--seeds`     | comma-separated integers                                            | `1,2,3,4,5`             |
+| `--scenarios` | comma-separated scenario ids                                        | all four                |
+
+An unrecognised `--flag` (including a singular typo like `--scenario` or `--seed`)
+is rejected with the list of known flags, rather than silently falling through to
+the default matrix. `--arms` without `--live` is rejected too: the smoke run
+always benchmarks the scripted arm regardless of which id you name, so honouring
+the flag there would either do nothing or mislabel every record with a model
+that was never called.
 
 Probe mode is the paired comparison that picks the model: every arm sees
 byte-identical boards, derived from the scripted control encounter. Encounter
@@ -48,6 +55,12 @@ mode plays the fight out and is the only source of win rate.
 Not run yet. Nothing in this repo has ever called a live model, and
 `DEFAULT_MODEL_ROUTING.tactical` and `REASONING_BUDGET_TOKENS` are still
 unmeasured placeholders.
+
+**`--live` currently exits 1.** This build has no provider wired to the live
+path: `pnpm sim --live` prints "Live benchmarking is not wired to a provider in
+this build" to stderr and stops before reading any credential or making any
+call. The recipe below is what an operator runs once a provider adapter is
+wired in — not something this build will execute today.
 
 ```bash
 export GOOGLE_GENERATIVE_AI_API_KEY=…   # gemini-3-flash

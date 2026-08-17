@@ -37,8 +37,19 @@ describe("parseArgs", () => {
     expect(() => parseArgs(["--seeds", "one"])).toThrow("one");
   });
 
-  it("selects arms by id and rejects unknown ones", () => {
-    expect(parseArgs(["--arms", "gemini-3-flash@low"]).arms[0]?.armId).toBe("gemini-3-flash@low");
-    expect(() => parseArgs(["--arms", "nope@low"])).toThrow("nope@low");
+  it("selects arms by id and rejects unknown ones, when live", () => {
+    expect(parseArgs(["--live", "--arms", "gemini-3-flash@low"]).arms[0]?.armId).toBe(
+      "gemini-3-flash@low",
+    );
+    expect(() => parseArgs(["--live", "--arms", "nope@low"])).toThrow("nope@low");
+  });
+
+  it("rejects --arms outside live mode instead of silently ignoring it", () => {
+    expect(() => parseArgs(["--arms", "gemini-3-flash@low"])).toThrow("--live");
+  });
+
+  it("rejects an unknown flag rather than silently running the default matrix", () => {
+    expect(() => parseArgs(["--scenario", "melee-brawl"])).toThrow("--scenario");
+    expect(() => parseArgs(["--seed", "42"])).toThrow("--seed");
   });
 });

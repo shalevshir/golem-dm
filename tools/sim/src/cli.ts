@@ -5,14 +5,31 @@
 // run the identical code path with a different port underneath, which is what
 // stops the CI path from drifting away from the path that produces real numbers.
 import type { Arm, BenchmarkConfig } from "./config.js";
-import { ARMS, DEFAULT_CONFIG, armById } from "./config.js";
+import { ARMS, DEFAULT_CONFIG, SMOKE_ARM, armById } from "./config.js";
 import { scenarioById } from "./scenarios/index.js";
 
 const MODES = ["probe", "encounter", "both"] as const;
 type Mode = (typeof MODES)[number];
 
+const KNOWN_FLAGS = ["--live", "--mode", "--seeds", "--scenarios", "--arms"] as const;
+
 function isMode(value: string): value is Mode {
   return (MODES as readonly string[]).includes(value);
+}
+
+/**
+ * Any unrecognised `--`-prefixed token is a typo, not a value: `valueAfter`
+ * already refuses to let a flag's value start with `--`, so every such token
+ * in `argv` is a flag name. A typo here (`--scenario`, `--seed`) must stop the
+ * run rather than silently fall through to the default matrix — the same
+ * standard `parseScenarios` and `parseArms` already hold their inputs to.
+ */
+function assertKnownFlags(argv: readonly string[]): void {
+  for (const token of argv) {
+    if (token.startsWith("--") && !(KNOWN_FLAGS as readonly string[]).includes(token)) {
+      throw new Error(`Unknown flag ${token}; known flags: ${KNOWN_FLAGS.join(", ")}`);
+    }
+  }
 }
 
 function valueAfter(argv: readonly string[], flag: string): string | undefined {
@@ -51,6 +68,7 @@ function parseArms(value: string): Arm[] {
 }
 
 export function parseArgs(argv: readonly string[]): BenchmarkConfig {
+  assertKnownFlags(argv);
   const live = argv.includes("--live");
 
   const rawMode = valueAfter(argv, "--mode");
@@ -61,6 +79,19 @@ export function parseArgs(argv: readonly string[]): BenchmarkConfig {
   const rawSeeds = valueAfter(argv, "--seeds");
   const rawScenarios = valueAfter(argv, "--scenarios");
   const rawArms = valueAfter(argv, "--arms");
+
+  // `runSmoke` always benchmarks `SMOKE_ARM` and never reads `config.arms` — a
+  // scripted port answers identically regardless of which model id labels the
+  // record, so honouring `--arms` outside `--live` would either be a no-op
+  // (misleading: the flag looks like it did something) or would mislabel every
+  // record with a model that was never called. Reject it instead of choosing
+  // between those two dishonest options.
+  if (rawArms !== undefined && !live) {
+    throw new Error(
+      `--arms only applies with --live; a smoke run always benchmarks the scripted arm ` +
+        `(${SMOKE_ARM.armId}). Pass --live to select a real arm, or drop --arms.`,
+    );
+  }
 
   return {
     mode: rawMode ?? DEFAULT_CONFIG.mode,
