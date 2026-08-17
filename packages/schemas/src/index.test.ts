@@ -131,6 +131,7 @@ describe("Combatant", () => {
     expect(parsed.reachFeet).toBe(5);
     expect(parsed.exhaustionLevel).toBe(0);
     expect(parsed.attacksPerAction).toBe(1);
+    expect(parsed.size).toBe("medium");
     expect(parsed.conditions).toStrictEqual([]);
     expect(parsed.spellSlots).toStrictEqual({});
     expect(parsed.status).toBe("alive");
@@ -185,6 +186,17 @@ describe("Combatant", () => {
 
   it("rejects an unknown faction", () => {
     expect(() => Combatant.parse({ ...validCombatant, faction: "chaotic" })).toThrow(ZodError);
+  });
+
+  it.each(["tiny", "small", "medium", "large", "huge", "gargantuan"] as const)(
+    "parses the %s creature size",
+    (size) => {
+      expect(Combatant.parse({ ...validCombatant, size }).size).toBe(size);
+    },
+  );
+
+  it("rejects a size outside the SRD table", () => {
+    expect(() => Combatant.parse({ ...validCombatant, size: "colossal" })).toThrow(ZodError);
   });
 
   it("exports a JSON schema usable as an LLM tool definition", () => {

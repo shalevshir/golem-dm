@@ -6,6 +6,7 @@ const BASE: Combatant = {
   combatantId: "unnamed",
   faction: "hostile",
   position: [0, 0],
+  size: "medium",
   speedFeet: 30,
   reachFeet: 5,
   maxHp: 10,

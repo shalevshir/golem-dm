@@ -148,6 +148,58 @@ describe("findPath", () => {
     expect(findPath(grid, [0, 0], [1, 0], { crawling: false })?.costFeet).toBe(10);
   });
 
+  // Occupancy is supplied by the caller — spatial knows nothing of factions or
+  // conditions, only whether a tile is clear, hindered, or blocked.
+  describe("occupancy", () => {
+    const at =
+      (blocked: Tile, verdict: "hindered" | "blocked") =>
+      (tile: Tile): "clear" | "hindered" | "blocked" =>
+        tile[0] === blocked[0] && tile[1] === blocked[1] ? verdict : "clear";
+
+    it("routes around a blocked tile", () => {
+      const grid = parseGrid(`
+        .....
+        .....
+      `);
+      const result = findPath(grid, [0, 0], [4, 0], { occupancy: at([2, 0], "blocked") });
+      expect(result?.path).not.toContainEqual([2, 0]);
+    });
+
+    it("returns null when a blocked tile seals the only route", () => {
+      const grid = parseGrid(`.....`);
+      expect(findPath(grid, [0, 0], [4, 0], { occupancy: at([2, 0], "blocked") })).toBeNull();
+    });
+
+    it("charges a hindered tile as difficult terrain", () => {
+      const grid = parseGrid(`.....`);
+      const result = findPath(grid, [0, 0], [4, 0], { occupancy: at([2, 0], "hindered") });
+      // 5 + 10 + 5 + 5
+      expect(result?.costFeet).toBe(25);
+    });
+
+    // SRD: movement "costs 1 extra foot, even if multiple things in a space
+    // count as Difficult Terrain" — a hindered difficult square is still 10 ft.
+    it("does not stack a hindered tile with difficult terrain", () => {
+      const grid = parseGrid(`..~..`);
+      const result = findPath(grid, [0, 0], [4, 0], { occupancy: at([2, 0], "hindered") });
+      expect(result?.costFeet).toBe(25);
+    });
+
+    it("charges a crawling creature 15 ft for a hindered square", () => {
+      const grid = parseGrid(`...`);
+      const result = findPath(grid, [0, 0], [1, 0], {
+        crawling: true,
+        occupancy: at([1, 0], "hindered"),
+      });
+      expect(result?.costFeet).toBe(15);
+    });
+
+    it("leaves costs untouched when no occupancy is supplied", () => {
+      const grid = parseGrid(`.....`);
+      expect(findPath(grid, [0, 0], [4, 0])?.costFeet).toBe(20);
+    });
+  });
+
   it("returns null when the goal is unreachable", () => {
     const grid = parseGrid(`
       ...

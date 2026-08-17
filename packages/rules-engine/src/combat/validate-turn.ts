@@ -8,13 +8,14 @@
 import type {
   ActionEconomy,
   Combatant,
+  CreatureSize,
   EntityStatus,
   ExecuteTurn,
   GridMap,
   SpellSlots,
   Tile,
 } from "@ai-dm/schemas";
-import type { LineOfSightAlgorithm } from "../spatial/index.js";
+import type { LineOfSightAlgorithm, OccupancyLookup, TilePassability } from "../spatial/index.js";
 import { coverBetween, findPath, tileDistanceFeet } from "../spatial/index.js";
 import {
   isImmobilised,
@@ -109,6 +110,30 @@ function occupantOf(world: CombatWorld, tile: Tile, exceptId: string): Combatant
   );
 }
 
+const SIZE_RANK: Record<CreatureSize, number> = {
+  tiny: 0,
+  small: 1,
+  medium: 2,
+  large: 3,
+  huge: 4,
+  gargantuan: 5,
+};
+
+/**
+ * SRD "Moving around Other Creatures": you may pass through the space of an
+ * ally, a creature with the Incapacitated condition, a Tiny creature, or one
+ * two sizes larger or smaller than you. Any other creature's space is Difficult
+ * Terrain, unless the creature is Tiny or an ally.
+ */
+function passabilityThrough(mover: Combatant, occupant: Combatant): TilePassability {
+  const ally = mover.faction === occupant.faction;
+  const tiny = occupant.size === "tiny";
+  const sizesApart = Math.abs(SIZE_RANK[mover.size] - SIZE_RANK[occupant.size]);
+
+  if (!ally && !tiny && sizesApart < 2 && !isIncapacitated(occupant)) return "blocked";
+  return ally || tiny ? "clear" : "hindered";
+}
+
 /** Reach for a melee action, range for anything the caller has range data for. */
 function rangeFeetFor(actor: Combatant, world: CombatWorld, actionId: string | undefined): number {
   const configured = actionId === undefined ? undefined : world.actionRangesFeet?.[actionId];
@@ -160,7 +185,11 @@ export function validateExecuteTurn(
   let position = actor.position;
   // A prone creature's only movement option is to crawl, unless it stands up —
   // which `ExecuteTurn` has no way to propose yet.
-  const movementOptions = { crawling: isProne(actor) };
+  const occupancy: OccupancyLookup = (tile) => {
+    const occupant = occupantOf(world, tile, actor.combatantId);
+    return occupant === undefined ? "clear" : passabilityThrough(actor, occupant);
+  };
+  const movementOptions = { crawling: isProne(actor), occupancy };
 
   if (movement.length > 0 && isImmobilised(actor)) {
     rejections.push({

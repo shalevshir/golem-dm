@@ -39,6 +39,15 @@ const COVER_RANK: Record<CoverLevel, number> = {
   full: 3,
 };
 
+/**
+ * How a tile's occupant affects a creature moving through it. Whether an
+ * occupant blocks or merely hinders depends on factions, conditions and
+ * relative size — rules this module deliberately knows nothing about.
+ */
+export type TilePassability = "clear" | "hindered" | "blocked";
+
+export type OccupancyLookup = (tile: Tile) => TilePassability;
+
 export interface MovementOptions {
   /**
    * SRD 5.2.1 ("Crawling"): each foot of movement costs 1 extra foot, or
@@ -47,6 +56,8 @@ export interface MovementOptions {
    * ordinary difficult cost. Prone creatures crawl unless they stand up.
    */
   crawling?: boolean;
+  /** Creatures standing in the way. Absent means an empty battlefield. */
+  occupancy?: OccupancyLookup;
 }
 
 /** Cost to enter a tile, or null when it cannot be entered at all. */
@@ -191,7 +202,15 @@ export function findPath(
     for (const neighbor of neighbors(grid, current)) {
       const terrain = terrainAt(grid, neighbor);
       if (terrain === undefined) continue;
-      const stepCost = movementCostFeet(terrain, options);
+      const passability = options.occupancy?.(neighbor) ?? "clear";
+      if (passability === "blocked") continue;
+
+      // A creature's space is Difficult Terrain, and difficult terrain never
+      // stacks — "1 extra foot, even if multiple things in a space count as
+      // Difficult Terrain" — so a hindered difficult square is still doubled.
+      const effective: TerrainType =
+        passability === "hindered" && terrain === "normal" ? "difficult" : terrain;
+      const stepCost = movementCostFeet(effective, options);
       if (stepCost === null) continue;
 
       const neighborKey = key(neighbor);

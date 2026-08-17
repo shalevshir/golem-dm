@@ -98,6 +98,11 @@ house rule. Chebyshev distance is therefore correct.
 | Difficult terrain | Costs **2** squares to enter. | `spatial/` `movementCostFeet` |
 | Crawling | Each foot costs **1 extra foot**, or **2 extra feet** in Difficult Terrain — so 10 ft per open square and **15 ft** per difficult square. Note the difficult case is *not* twice the ordinary difficult cost. | `spatial/` `movementCostFeet(t, {crawling})` |
 | Dash | Extra movement equal to your Speed, i.e. the budget doubles. | `combat/` `movementBudgetFeet` |
+| Difficult terrain never stacks | "1 extra foot, **even if multiple things in a space count as Difficult Terrain**." A creature's space that is also difficult is still just doubled. | `spatial/` `findPath` |
+| Creature size | Tiny 2½ ft · Small/Medium 5 ft · Large 10 ft (2×2) · Huge 15 ft (3×3) · Gargantuan 20 ft (4×4). Order matters — pass-through is stated in categories apart. | `schemas` `CreatureSize` |
+| Passing through a creature | Allowed through an **ally**, an **Incapacitated** creature, a **Tiny** creature, or one **two sizes** larger or smaller. Otherwise blocked. | `combat/` `passabilityThrough` |
+| Cost of a creature's space | **Difficult Terrain**, unless that creature is Tiny or your ally. | `combat/` `passabilityThrough` → `hindered` |
+| Ending a move | You can't willingly end a move in a space occupied by another creature. | `combat/` `destination_occupied` |
 | Corners | Diagonal movement **cannot cross the corner** of a wall or anything filling its space. | `spatial/` `cutsWallCorner` |
 | Range | Count squares from a square adjacent to one thing, stopping in the other's space; shortest route. Equivalent to Chebyshev. | `spatial/` `tileDistanceFeet` |
 
@@ -169,11 +174,14 @@ Not yet implemented, roughly in dependency order:
   to the actor's melee reach.
 - Opportunity attacks, concentration checks
 - Corner-to-corner RAW line of sight (currently the Bresenham house rule)
-- **Creature-aware pathing.** `findPath` routes through occupied squares; only a
-  movement segment's *destination* is checked for occupancy. RAW you may move
-  through an ally freely but through an enemy only if it is Tiny or two size
-  categories apart — which needs a `size` field on `Combatant`.
+- **Multi-square footprints.** `Combatant.position` is a single anchor tile, so
+  a Large creature occupies one square rather than the 2×2 the SRD gives it.
+  Size *is* modelled, and drives pass-through (§5), but reach, cover and
+  occupancy are all measured from the anchor. This is the largest remaining
+  divergence on the grid.
 - **Creatures granting cover.** `coverBetween` reads terrain only; RAW another
   creature in the line can give Half Cover.
+- **"Ally" is faction equality.** `passabilityThrough` treats same-faction as
+  allied. A `FactionRelation` score exists in `schemas` but is not consulted.
 - **Standing up from Prone.** `ExecuteTurn` cannot express it, so a prone actor
   is always costed as crawling (§6).

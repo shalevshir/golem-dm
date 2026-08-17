@@ -297,6 +297,105 @@ describe("validateExecuteTurn — movement", () => {
     expect(result.valid).toBe(true);
   });
 
+  // SRD "Moving around Other Creatures": you may pass through the space of an
+  // ally, an Incapacitated creature, a Tiny creature, or one two sizes larger
+  // or smaller. Any other creature's space is Difficult Terrain, and no
+  // creature's space may be where you end your move.
+  describe("moving around other creatures", () => {
+    const CORRIDOR = parseGrid(`.....`);
+
+    function walkPast(blocker: Combatant, mover = hero) {
+      return validateExecuteTurn(
+        turn({
+          movement: [{ destinationTile: [4, 0], pathType: "direct" }],
+          mainAction: { actionType: "dodge" },
+        }),
+        mover,
+        { grid: CORRIDOR, combatants: [mover, blocker] },
+      );
+    }
+
+    it("refuses to path through an enemy of the same size", () => {
+      const enemy = combatant({ combatantId: "gob", position: [2, 0] });
+      expect(reasons(walkPast(enemy))).toStrictEqual(["movement_path_blocked"]);
+    });
+
+    it("passes through an ally at no extra cost", () => {
+      const ally = combatant({ combatantId: "friend", faction: "party", position: [2, 0] });
+      const result = walkPast(ally);
+      expect(result.valid).toBe(true);
+      expect(result.valid && result.plan.totalMovementFeet).toBe(20);
+    });
+
+    it("passes through a Tiny enemy at no extra cost", () => {
+      const rat = combatant({ combatantId: "rat", position: [2, 0], size: "tiny" });
+      const result = walkPast(rat);
+      expect(result.valid).toBe(true);
+      expect(result.valid && result.plan.totalMovementFeet).toBe(20);
+    });
+
+    it("squeezes past an enemy two sizes larger, paying difficult terrain", () => {
+      const giant = combatant({ combatantId: "giant", position: [2, 0], size: "huge" });
+      const result = walkPast(giant);
+      expect(result.valid).toBe(true);
+      expect(result.valid && result.plan.totalMovementFeet).toBe(25);
+    });
+
+    it("refuses an enemy only one size larger", () => {
+      const ogre = combatant({ combatantId: "ogre", position: [2, 0], size: "large" });
+      expect(reasons(walkPast(ogre))).toStrictEqual(["movement_path_blocked"]);
+    });
+
+    it("passes through an incapacitated enemy of the same size, paying difficult terrain", () => {
+      const stunned = combatant({
+        combatantId: "gob",
+        position: [2, 0],
+        conditions: [{ condition: "stunned", durationRounds: 1 }],
+      });
+      const result = walkPast(stunned);
+      expect(result.valid).toBe(true);
+      expect(result.valid && result.plan.totalMovementFeet).toBe(25);
+    });
+
+    it("ignores a dead creature entirely", () => {
+      const corpse = combatant({ combatantId: "gob", position: [2, 0], status: "dead" });
+      const result = walkPast(corpse);
+      expect(result.valid).toBe(true);
+      expect(result.valid && result.plan.totalMovementFeet).toBe(20);
+    });
+
+    it("routes around an enemy when the map allows it", () => {
+      const grid = parseGrid(`
+        .....
+        .....
+      `);
+      const enemy = combatant({ combatantId: "gob", position: [2, 0] });
+      const result = validateExecuteTurn(
+        turn({
+          movement: [{ destinationTile: [4, 0], pathType: "direct" }],
+          mainAction: { actionType: "dodge" },
+        }),
+        hero,
+        { grid, combatants: [hero, enemy] },
+      );
+      expect(result.valid).toBe(true);
+      expect(result.valid && result.plan.segments[0]?.path).not.toContainEqual([2, 0]);
+    });
+
+    it("still refuses to end a move on a passable creature's tile", () => {
+      const ally = combatant({ combatantId: "friend", faction: "party", position: [2, 0] });
+      const result = validateExecuteTurn(
+        turn({
+          movement: [{ destinationTile: [2, 0], pathType: "direct" }],
+          mainAction: { actionType: "dodge" },
+        }),
+        hero,
+        { grid: CORRIDOR, combatants: [hero, ally] },
+      );
+      expect(reasons(result)).toContain("destination_occupied");
+    });
+  });
+
   it("sums the cost of every ordered segment of a move–attack–move turn", () => {
     const result = validateExecuteTurn(
       turn({
