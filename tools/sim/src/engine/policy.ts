@@ -55,7 +55,16 @@ function actorIn(world: CombatWorld, actorId: string): Combatant {
   return found;
 }
 
-/** Nearest first; ties broken on id so the same board always yields the same turn. */
+/**
+ * Nearest first; ties broken on id so the same board always yields the same
+ * turn. Ranks by straight-line (`footprintDistanceFeet`) distance, while
+ * movement is priced in actual path cost — an assumption that two enemies
+ * sitting behind different detours could make the straight-line-nearest
+ * target flip turn to turn, oscillating the actor between them. None of the
+ * four shipped fixtures put two enemies behind unequal detours from the same
+ * actor, so this doesn't fire today, but it is a silent assumption, not a
+ * proven-safe one.
+ */
 function enemiesByDistance(actor: Combatant, world: CombatWorld): Combatant[] {
   const actorSpace = { anchor: actor.position, size: actor.size };
   return world.combatants
@@ -121,7 +130,15 @@ function tileKey(tile: Tile): string {
  * (which lets you cross an ally's or a Tiny creature's space) — deliberately
  * so, since this is only used to pick a *candidate* destination. Every
  * candidate still passes through `validateExecuteTurn`, which applies the real
- * rule and can only find a route at least as good as this one.
+ * rule and can only find a route at least as good as this one — the same
+ * `OCCUPYING_STATUSES` filter as the validator, so the two lookups agree on
+ * which tiles are occupied and differ only in the pass-through verdict.
+ *
+ * That caution has a real, if usually small, cost: in `cover-corridor`, while
+ * one wolf stands on the single gap tile at `(8, 11)`, this lookup treats the
+ * gap as sealed for the other wolf, which Dodges that turn where the real
+ * ally-pass-through rule would have let it route past. One wasted round,
+ * self-clearing as soon as the blocking wolf moves off the tile.
  */
 function conservativeOccupancy(world: CombatWorld, actorId: string): OccupancyLookup {
   const blocked = new Set<string>();
@@ -187,13 +204,22 @@ function furthestWithinBudget(
  * movement budget allows — closing the distance is strictly better than a
  * baseline that dodges in place, and lets a long corridor or a wide-open field
  * resolve over several turns instead of stalling forever.
+ *
+ * The truncated destination can land inside a *ranged* action's reach even
+ * though it was never one of the radius-3 melee-charge candidates step 2
+ * tried (a javelin or a bow reaches well past 15 ft) — so before settling for
+ * Dodge, this tries every available action against the enemy it just closed
+ * on. Declining a free attack because the destination came from the advance
+ * search rather than the approach search would make the baseline weaker than
+ * it should be, and Tasks 7/10 measure the model against exactly this policy.
  */
 function partialAdvanceTurn(
   actorId: string,
   actor: Combatant,
   enemies: readonly Combatant[],
   world: CombatWorld,
-): ExecuteTurn | null {
+  byReach: readonly string[],
+): DecidedTurn | null {
   if (isImmobilised(actor)) return null;
   const budgetFeet = movementBudgetFeet(actor);
   if (budgetFeet <= 0) return null;
@@ -214,12 +240,20 @@ function partialAdvanceTurn(
       );
       if (destination === null) continue;
 
-      return {
+      for (const actionId of byReach) {
+        const attack = attackTurn(actorId, enemy.combatantId, actionId, destination);
+        const validation = validateExecuteTurn(attack, actor, world);
+        if (validation.valid) return { turn: attack, plan: validation.plan };
+      }
+
+      const advance: ExecuteTurn = {
         actorId,
         movement: [{ destinationTile: destination, pathType: "direct" }],
         mainAction: { actionType: "dodge" },
         tacticalRationaleEnglish: PARTIAL_ADVANCE_RATIONALE,
       };
+      const validation = validateExecuteTurn(advance, actor, world);
+      if (validation.valid) return { turn: advance, plan: validation.plan };
     }
   }
 
@@ -261,12 +295,11 @@ export function scriptedTurn(input: ScriptedPolicyInput): DecidedTurn | null {
 
   // 3. Nothing this turn brings it into range. Close as much distance as the
   //    movement budget allows, so the encounter keeps advancing instead of
-  //    dodging in place until `maxRounds` with no winner.
-  const advance = partialAdvanceTurn(input.actorId, actor, enemies, input.world);
-  if (advance !== null) {
-    const validation = validateExecuteTurn(advance, actor, input.world);
-    if (validation.valid) return { turn: advance, plan: validation.plan };
-  }
+  //    dodging in place until `maxRounds` with no winner — and take the free
+  //    attack if the destination happens to land inside a ranged action's
+  //    reach, rather than always defaulting to Dodge.
+  const advance = partialAdvanceTurn(input.actorId, actor, enemies, input.world, byReach);
+  if (advance !== null) return advance;
 
   // 4. Nothing worked. Dodge is inert in this harness (see resolve.ts) but it is
   //    a legal turn, which keeps the encounter advancing.

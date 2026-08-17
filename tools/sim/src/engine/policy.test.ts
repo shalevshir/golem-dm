@@ -3,6 +3,7 @@ import { footprintDistanceFeet } from "@ai-dm/rules-engine";
 import { buildScenario } from "../scenarios/build.js";
 import { COVER_CORRIDOR } from "../scenarios/cover-corridor.js";
 import { MELEE_BRAWL } from "../scenarios/melee-brawl.js";
+import { OGRE_CHARGE } from "../scenarios/ogre-charge.js";
 import { RANGED_APPROACH } from "../scenarios/ranged-approach.js";
 import { scriptedTurn } from "./policy.js";
 
@@ -139,5 +140,26 @@ describe("scriptedTurn", () => {
       { anchor: guard1.position, size: guard1.size },
     );
     expect(endDistanceFeet).toBeLessThan(startDistanceFeet);
+  });
+
+  it("attacks from the partial-advance destination instead of dodging when it lands in range", () => {
+    // The ogre's javelin reaches 30 ft (6 tiles). Neither step 1 (45 ft away)
+    // nor step 2 (the radius-3 melee-charge candidates, plus the mud costing
+    // double, put no candidate within budget) succeeds — but the full 40 ft
+    // advance lands the ogre's footprint edge 20 ft from guard_1, well inside
+    // javelin range. A policy that always Dodges after a partial advance would
+    // waste this free attack.
+    const built = buildScenario(OGRE_CHARGE);
+    const decided = scriptedTurn({
+      world: built.world,
+      actorId: "ogre_1",
+      availableActions: built.availableActions.get("ogre_1") ?? [],
+    });
+
+    expect(decided).not.toBeNull();
+    expect(decided?.turn.movement?.length).toBeGreaterThan(0);
+    expect(decided?.turn.mainAction.actionType).toBe("attack");
+    expect(decided?.turn.mainAction.actionId).toBe("javelin");
+    expect(decided?.turn.mainAction.targetIds).toEqual(["guard_1"]);
   });
 });
