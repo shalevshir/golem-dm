@@ -1,0 +1,18 @@
+{
+  "name": "@ai-dm/sim",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "tsx src/index.ts",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run --passWithNoTests",
+    "build": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "@ai-dm/schemas": "workspace:*",
+    "@ai-dm/rules-engine": "workspace:*",
+    "@ai-dm/agents": "workspace:*"
+  },
+  "devDependencies": { "tsx": "^4.19.0" }
+}

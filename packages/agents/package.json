@@ -1,0 +1,20 @@
+{
+  "name": "@ai-dm/agents",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": { ".": "./src/index.ts" },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run --passWithNoTests"
+  },
+  "dependencies": {
+    "@ai-dm/schemas": "workspace:*",
+    "@ai-dm/rules-engine": "workspace:*",
+    "ai": "^4.1.0",
+    "@ai-sdk/anthropic": "^1.1.0",
+    "@ai-sdk/google": "^1.1.0",
+    "@ai-sdk/openai": "^1.1.0"
+  }
+}

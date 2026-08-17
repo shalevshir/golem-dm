@@ -1,0 +1,12 @@
+# Local dev: Postgres 17 with pgvector (single DB for world state + episodic memory)
+services:
+  db:
+    image: pgvector/pgvector:pg17
+    environment:
+      POSTGRES_USER: aidm
+      POSTGRES_PASSWORD: aidm
+      POSTGRES_DB: aidm
+    ports: ["5432:5432"]
+    volumes: [dbdata:/var/lib/postgresql/data]
+volumes:
+  dbdata:
