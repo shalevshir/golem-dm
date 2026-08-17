@@ -38,6 +38,10 @@ describe("percentile", () => {
   });
 
   it("ignores input order", () => {
+    // p50 on this array happens to land on index 2 whether sorted or not
+    // ([9,1,5,3,7][2] === 5 === sorted[2]), so it wouldn't catch a version
+    // that skipped the sort. p20 diverges: sorted -> 1, raw order -> 9.
+    expect(percentile([9, 1, 5, 3, 7], 20)).toBe(1);
     expect(percentile([9, 1, 5, 3, 7], 50)).toBe(5);
   });
 });

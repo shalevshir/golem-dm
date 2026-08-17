@@ -64,6 +64,22 @@ export function recordFrom(input: RecordInput): TurnRecord {
   // attempt that was billed and reported nothing — the report says so rather
   // than quietly publishing a low number.
   const attempts = input.timings.length;
+
+  // The inverse — more usage entries than timings — can only come from a
+  // runner bug (e.g. handing recordFrom a truncated `timings` slice while the
+  // full usage array from the turn), never from model behaviour: every usage
+  // entry is produced by a timed call. Clamping this to 0 like the shortfall
+  // case would make `attemptsMissingUsage` read 0 and `usageComplete` read
+  // true while real spend went unaccounted for — exactly the silent-zero
+  // failure this task exists to prevent. Fail loudly at the first bad record
+  // instead of emitting a corrupt report.
+  if (result.usage.length > attempts) {
+    throw new Error(
+      `recordFrom: actor "${input.actorId}" reported ${String(result.usage.length)} usage ` +
+        `entries but only ${String(attempts)} timings — usage cannot exceed attempts`,
+    );
+  }
+
   const attemptsMissingUsage = Math.max(0, attempts - result.usage.length);
 
   return {
