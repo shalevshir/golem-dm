@@ -1,0 +1,82 @@
+// The benchmark matrix. Arms are data: adding a model or an effort level is an
+// edit here, never a branch in code.
+//
+// NOTHING in this file is a measurement or a recommendation. It is the list of
+// candidates to measure. `DEFAULT_MODEL_ROUTING.tactical` in `@ai-dm/agents`
+// stays exactly as it is until a live run has produced numbers to change it by.
+import type { ModelSpec, ProviderId, ReasoningEffort } from "@ai-dm/agents";
+import { ALL_SCENARIO_IDS } from "./scenarios/index.js";
+
+export interface Arm {
+  /** `<modelId>@<effort>`. Stable, so reports across runs line up. */
+  armId: string;
+  spec: ModelSpec;
+}
+
+interface Candidate {
+  provider: ProviderId;
+  modelId: string;
+}
+
+/**
+ * The plan's tactical candidates (PROJECT_PLAN.md section 2), plus one Claude
+ * model as a quality ceiling — if the cheap models all miss the 95% bar, the
+ * ceiling says whether the task is hard or the models are weak.
+ */
+const CANDIDATES: readonly Candidate[] = [
+  { provider: "google", modelId: "gemini-3-flash" },
+  { provider: "openai", modelId: "gpt-5.4-mini" },
+  { provider: "openai", modelId: "gpt-5.4-nano" },
+  { provider: "anthropic", modelId: "claude-sonnet-5" },
+];
+
+/** Swept, because `REASONING_BUDGET_TOKENS` is an unmeasured placeholder too. */
+const EFFORTS: readonly ReasoningEffort[] = ["low", "medium", "high"];
+
+/** Near-deterministic but not frozen, matching the tactical row's rationale. */
+const TACTICAL_TEMPERATURE = 0.2;
+
+export const ARMS: readonly Arm[] = CANDIDATES.flatMap((candidate) =>
+  EFFORTS.map((effort) => ({
+    armId: `${candidate.modelId}@${effort}`,
+    spec: {
+      provider: candidate.provider,
+      modelId: candidate.modelId,
+      temperature: TACTICAL_TEMPERATURE,
+      reasoningEffort: effort,
+    } satisfies ModelSpec,
+  })),
+);
+
+export function armById(armId: string): Arm {
+  const found = ARMS.find((arm) => arm.armId === armId);
+  if (found === undefined) {
+    throw new Error(`Unknown arm ${armId}; known: ${ARMS.map((arm) => arm.armId).join(", ")}`);
+  }
+  return found;
+}
+
+/** Five seeds is enough to see variance without making a live sweep expensive. */
+export const DEFAULT_SEEDS: readonly number[] = [1, 2, 3, 4, 5];
+
+/** The arm the smoke run uses. Never called: the scripted port answers for it. */
+export const SMOKE_ARM: Arm = {
+  armId: "scripted-fake@medium",
+  spec: { provider: "google", modelId: "scripted-fake", reasoningEffort: "medium" },
+};
+
+export interface BenchmarkConfig {
+  mode: "probe" | "encounter" | "both";
+  live: boolean;
+  arms: readonly Arm[];
+  seeds: readonly number[];
+  scenarioIds: readonly string[];
+}
+
+export const DEFAULT_CONFIG: BenchmarkConfig = {
+  mode: "both",
+  live: false,
+  arms: [SMOKE_ARM],
+  seeds: DEFAULT_SEEDS,
+  scenarioIds: ALL_SCENARIO_IDS,
+};
