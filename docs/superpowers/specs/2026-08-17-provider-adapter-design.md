@@ -39,6 +39,7 @@ Deliberately out of scope, and why:
 | `vercel.ts` | `createVercelPort` — the only file that imports the AI SDK |
 | `runtime.ts` | `createAgentRuntime` — resolves role → `ModelSpec`, delegates |
 | `tool-schema.ts` | `toolJsonSchema` over `zod-to-json-schema` |
+| `timing.ts` | `createTimingPort` — optional latency decorator (added after step 7a) |
 | `testing/fake-port.ts` | Scripted `LanguageModelPort` double, reused by step 7 |
 
 ## Routing is data
@@ -275,3 +276,30 @@ differ from the v5 API:
 The existing `ModelRouting` — three `string` fields — is replaced by
 `Record<AgentRole, ModelSpec>`. Nothing consumes it yet, so the change is free
 now and would not be later.
+
+## Latency measurement — added after step 7a
+
+Step 7a's review surfaced that nothing captured per-attempt latency: a
+`TurnProposalResult` carries `usage` but no timing, and timing `proposeTurn`
+from outside cannot say whether attempt 1 or attempt 2 spent the 10s budget.
+
+The obvious fix — inject a clock into `createTacticalAgent` — was rejected. It
+serves one agent, and step 9's exit criterion is **first token < 1.5s p50**,
+which is a property of a *stream*. No wrapper around `proposeTurn` can observe
+it, so that route needs a second mechanism later regardless.
+
+`createTimingPort(inner, { now })` decorates any `LanguageModelPort` instead,
+recording `durationMs` per call and `firstChunkMs` for streams. One seam covers
+all three agents: 7b's per-attempt tactical latency, step 9's first-token
+budget, and step 11's per-turn dashboards.
+
+It lives in `providers/` rather than `tools/sim` because `apps/server` needs the
+same numbers and cannot depend on `sim` — the port is the only seam both already
+stand on. Failed calls are timed too: a slow `provider_error` still spends the
+turn budget, and that is precisely the latency worth seeing.
+
+The clock is a parameter, never ambient, so agent logic stays clock-free and a
+caller opts into timing by wrapping. Two behaviours are mutation-checked rather
+than merely asserted, because a scripted clock cannot catch either on its own:
+that the timer stops when a call *settles* rather than when it starts, and that
+`firstChunkMs` is read once rather than overwritten by every chunk.
