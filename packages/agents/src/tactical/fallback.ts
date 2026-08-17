@@ -57,7 +57,8 @@ export function deterministicFallback(
 ): FallbackTurn | null {
   const actorSpace = { anchor: actor.position, size: actor.size };
 
-  // A downed enemy is not worth the action while one is still upright.
+  // Downed enemies are excluded outright, not merely deprioritised: with only a
+  // downed enemy on the board this Dodges rather than finish it off.
   const targets = world.combatants
     .filter((each) => each.status === "alive" && opposes(actor.faction, each.faction))
     .map((each) => ({

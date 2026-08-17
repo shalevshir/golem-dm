@@ -85,6 +85,17 @@ describe("createTacticalAgent — a legal proposal", () => {
     expect(port.calls[0]?.spec.modelId).toBe("gemini-3-flash");
     expect(port.calls[0]?.request.toolName).toBe("execute_turn");
   });
+
+  it("hands the caller's abort signal to the model call", async () => {
+    // Nothing else asserts this, and without it the server's 10s turn budget
+    // stops being enforced the moment someone drops the spread.
+    const { port, agent } = agentWith(adapterSuccess({ value: legalTurn, usage }));
+    const signal = AbortSignal.timeout(10_000);
+
+    await agent.proposeTurn({ world, actorId: "gob-1", abortSignal: signal });
+
+    expect(port.calls[0]?.request.abortSignal).toBe(signal);
+  });
 });
 
 const illegalTurn = {
@@ -167,7 +178,7 @@ describe("createTacticalAgent — the single retry", () => {
     );
   });
 
-  it("logs the engine rejection that triggered the retry", async () => {
+  it("logs the engine rejection", async () => {
     const { agent } = agentWith(
       adapterSuccess({ value: illegalTurn, usage }),
       adapterSuccess({ value: legalTurn, usage }),
@@ -300,6 +311,24 @@ describe("createTacticalAgent — terminal outcomes", () => {
     expect(result.kind).toBe("aborted");
     // The rejection is still logged: every failure reaches the event stream.
     expect(result.rejections[0]?.adapterErrorCode).toBe("aborted");
+  });
+
+  it("abandons the turn when the caller aborts during the retry, without falling back", async () => {
+    const { port, agent } = agentWith(
+      adapterSuccess({ value: illegalTurn, usage }),
+      adapterFailure("aborted", "The turn budget is gone."),
+    );
+
+    const result = await agent.proposeTurn({ world, actorId: "gob-1" });
+
+    // The only other abort test scripts a single failure, so it exercises the
+    // attempt-1 branch alone; deleting the attempt-2 abort check would turn a
+    // cancelled request into a fallback — work nobody asked for — and nothing
+    // would fail. `ok: false` is what says no fallback was produced.
+    if (result.ok) throw new Error("expected the turn to be abandoned");
+    expect(result.kind).toBe("aborted");
+    expect(port.calls).toHaveLength(2);
+    expect(result.rejections.map((rejection) => rejection.attempt)).toStrictEqual([1, 2]);
   });
 
   it("dodges as its fallback when nothing is in reach", async () => {
