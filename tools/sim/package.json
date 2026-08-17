@@ -14,5 +14,8 @@
     "@ai-dm/rules-engine": "workspace:*",
     "@ai-dm/agents": "workspace:*"
   },
-  "devDependencies": { "tsx": "^4.19.0" }
+  "devDependencies": {
+    "tsx": "^4.19.0",
+    "zod": "^3.24.0"
+  }
 }
