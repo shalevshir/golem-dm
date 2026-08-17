@@ -65,19 +65,38 @@ Status: POC phase · Supersedes `dm-plan.md` (see `dm-plan-review.md` for the fa
 
 ## 4. Roadmap — 11 Steps (≈8 weeks)
 
-| # | Step | Exit criteria | Week |
-|---|---|---|---|
-| 1 | **Decisions:** edition (rec: 2024/SRD 5.2.1), solo vs party (rec: solo), spatial house rules → ADRs | ADRs 0001–0003 accepted | 1 |
-| 2 | **Scaffold:** pnpm workspaces, tsconfig, ESLint/Prettier, Vitest, CI | `pnpm typecheck && lint && test` green in CI | 1 |
-| 3 | **Schemas:** character, actions (`ExecuteTurn`), events, world in zod; JSON-schema export | Fixtures parse; tool schema generated | 1 |
-| 4 | **Rules engine:** dice → checks → combat resolution → action economy → grid/A*/LoS | Golden tests pass, ≥90% coverage | 1–2 |
-| 5 | **SRD data:** ~10 monsters, conditions, 4 classes as validated JSON | Loads + validates | 2 |
-| 6 | **Provider adapter:** Vercel AI SDK wrapper, `ModelRouting` config | Mocked-provider tests pass | 3 |
-| 7 | **Tactical agent + sim:** validate→retry→fallback loop; benchmark Flash vs nano/mini | Legality ≥95% after retry on fixture scenarios; model chosen from data | 3–4 |
-| 8 | **Server + web:** Fastify+WS, event log, replay-on-reconnect, clickable canvas grid | Full combat playable E2E vs scripted enemy | 4–5 |
-| 9 | **Narrative agent:** Sonnet 5 streaming, Hebrew glossary, gendered narration, cache-stable prefix | First token <1.5s p50; Hebrew reviewed by native speaker | 5–6 |
-| 10 | **Memory:** pgvector episodic store, scene summarization, quest DAG | Replay test + top-k retrieval test pass | 6 |
-| 11 | **Closed beta:** 5–10 Hebrew-speaking playtesters; per-turn token/latency/cost dashboards | Measured cost table replaces §3 estimates; go/no-go review | 7–8 |
+| # | Step | Exit criteria | Week | Status |
+|---|---|---|---|---|
+| 1 | **Decisions:** edition (rec: 2024/SRD 5.2.1), solo vs party (rec: solo), spatial house rules → ADRs | ADRs 0001–0003 accepted | 1 | ✅ done |
+| 2 | **Scaffold:** pnpm workspaces, tsconfig, ESLint/Prettier, Vitest, CI | `pnpm typecheck && lint && test` green in CI | 1 | ✅ done |
+| 3 | **Schemas:** character, actions (`ExecuteTurn`), events, world in zod; JSON-schema export | Fixtures parse; tool schema generated | 1 | 🟡 partial — no `Combatant` schema |
+| 4 | **Rules engine:** dice → checks → combat resolution → action economy → grid/A*/LoS | Golden tests pass, ≥90% coverage | 1–2 | 🟡 partial — no action economy / `ExecuteTurn` validation |
+| 5 | **SRD data:** ~10 monsters, conditions, 4 classes as validated JSON | Loads + validates | 2 | ⬜ not started |
+| 6 | **Provider adapter:** Vercel AI SDK wrapper, `ModelRouting` config | Mocked-provider tests pass | 3 | ⬜ not started |
+| 7 | **Tactical agent + sim:** validate→retry→fallback loop; benchmark Flash vs nano/mini | Legality ≥95% after retry on fixture scenarios; model chosen from data | 3–4 | ⬜ not started |
+| 8 | **Server + web:** Fastify+WS, event log, replay-on-reconnect, clickable canvas grid | Full combat playable E2E vs scripted enemy | 4–5 | ⬜ not started |
+| 9 | **Narrative agent:** Sonnet 5 streaming, Hebrew glossary, gendered narration, cache-stable prefix | First token <1.5s p50; Hebrew reviewed by native speaker | 5–6 | ⬜ not started |
+| 10 | **Memory:** pgvector episodic store, scene summarization, quest DAG | Replay test + top-k retrieval test pass | 6 | ⬜ not started |
+| 11 | **Closed beta:** 5–10 Hebrew-speaking playtesters; per-turn token/latency/cost dashboards | Measured cost table replaces §3 estimates; go/no-go review | 7–8 | ⬜ not started |
+
+### Status as of 2026-08-17
+
+Toolchain bootstrapped and verified: `pnpm typecheck`, `pnpm lint`, `pnpm test`
+all green (132 tests). Rules-engine coverage 98.2% stmts / 94.15% branch / 100%
+funcs, above the ≥90% bar.
+
+**Built:** `dice` (notation parser, 2024 crit doubling, replay determinism),
+`checks` (modifiers, proficiency/expertise, saves, passive scores, contests),
+`combat` (attack vs AC with cover, temp-HP ordering, massive-damage death,
+death saves, 2024 unified exhaustion), `spatial` (Chebyshev distance, A* with
+difficult terrain, Bresenham LoS behind a swappable interface, cover).
+
+**Blocked:** `ExecuteTurn` validation and the action-economy state machine —
+the agent-retry gate described in `packages/rules-engine/CLAUDE.md`. Both need a
+`Combatant` schema (position, speed, reach, remaining action economy, conditions)
+that does not exist yet; `packages/schemas/src/world.ts` currently has only
+`GridMap`, `EntityStatus`, `TerrainType`, and `FactionRelation`. **This is the
+next task**, and it reopens steps 3 and 4 before step 5 can start.
 
 ## 5. Open Risks
 
