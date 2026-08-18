@@ -228,6 +228,18 @@ describe("renderMarkdown — fidelity caveats", () => {
     expect(markdown).toContain("dropped rather than redirected to a new target");
   });
 
+  it("labels the encounter table's legality column as confounded, distinct from the probe exit-criterion column", () => {
+    const markdown = renderMarkdown(
+      buildReport({ ...BASE, probeRecords: [record()], encounterRecords: [record()] }),
+    );
+
+    expect(markdown).toContain("Legal after retry (confounded)");
+    expect(markdown).toContain(
+      "Step 7's >= 95%-after-retry exit criterion is read off " +
+        'the probe table\'s "Legal after retry" column above, never off this one.',
+    );
+  });
+
   it("suppresses the encounter table rather than inventing zeros for a probe-only run", () => {
     const markdown = renderMarkdown(buildReport({ ...BASE, probeRecords: [record()] }));
 

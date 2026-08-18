@@ -301,7 +301,7 @@ export function renderMarkdown(report: RunReport): string {
   if (encounterRan(report)) {
     lines.push(
       "| Arm | Encounters | Win rate | Dmg/round (hostile) | Non-attack actions | Turns | " +
-        "Legal after retry | Unresolved actions |",
+        "Legal after retry (confounded) | Unresolved actions |",
     );
     lines.push("|---|---|---|---|---|---|---|---|");
     for (const arm of report.arms) {
@@ -318,6 +318,13 @@ export function renderMarkdown(report: RunReport): string {
       '"Unresolved actions" is **encounter-only**: probe mode resolves nothing by ' +
         "design, so that field is structurally always empty there and is omitted from " +
         "the probe table above rather than shown as a false-clean empty list.",
+    );
+    lines.push("");
+    lines.push(
+      '"Legal after retry (confounded)" is diagnostic only — it is measured on the ' +
+        "model-driven state distribution this arm happened to play itself into, not on " +
+        "the paired probe corpus. Step 7's >= 95%-after-retry exit criterion is read off " +
+        'the probe table\'s "Legal after retry" column above, never off this one.',
     );
     lines.push("");
     lines.push(
