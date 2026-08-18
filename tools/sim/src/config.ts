@@ -24,9 +24,14 @@ interface Candidate {
  * ceiling says whether the task is hard or the models are weak.
  */
 const CANDIDATES: readonly Candidate[] = [
-  // "gemini-3-flash" is not a real model id at Google's API — a live probe
-  // against it returns an APICallError on every call (real network round-trip,
-  // 0 tokens, $0 billed). Confirmed against the provider on 2026-08-18.
+  // Was "gemini-3-flash". A live probe against that id returned
+  // provider_error on every call (real network round-trip, 0 tokens, $0
+  // billed) — the same symptom later confirmed, against this corrected id,
+  // to be Google Generate Content API per-minute quota exhaustion rather
+  // than an invalid model id. Whether "gemini-3-flash" was ever actually
+  // wrong is therefore unconfirmed; it may have hit the same quota. This id
+  // has not yet produced a successful live call either — see
+  // tools/sim/CLAUDE.md's Live benchmarking section before trusting it.
   { provider: "google", modelId: "gemini-3.1-flash-lite" },
   { provider: "openai", modelId: "gpt-5.4-mini" },
   { provider: "openai", modelId: "gpt-5.4-nano" },

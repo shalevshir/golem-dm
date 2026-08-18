@@ -72,7 +72,7 @@ own standard environment variables the moment a call is made — not before, and
 not via any `.env` file this package loads.
 
 ```bash
-export GOOGLE_GENERATIVE_AI_API_KEY=…   # gemini-3-flash
+export GOOGLE_GENERATIVE_AI_API_KEY=…   # gemini-3.1-flash-lite
 export OPENAI_API_KEY=…                 # gpt-5.4-mini, gpt-5.4-nano
 export ANTHROPIC_API_KEY=…              # claude-sonnet-5 (quality ceiling)
 pnpm sim --live --mode probe            # 12 arms x 4 scenarios x 5 seeds
@@ -84,8 +84,22 @@ agent's `provider_error` handling turns it into a same-turn deterministic
 fallback, so a run with no credentials exported still completes and writes a
 report; every record in it carries `adapterErrorCodes: ["provider_error"]`
 rather than any real model output. Narrow a run with `--arms`, `--seeds` and
-`--scenarios` (e.g. `--arms gemini-3-flash@low --seeds 1 --scenarios
+`--scenarios` (e.g. `--arms gemini-3.1-flash-lite@low --seeds 1 --scenarios
 melee-brawl`) to keep a first pass small before committing to the full matrix.
+
+**`provider_error` is not always a missing key.** The first attempted live
+pass (2026-08-18) produced `provider_error` on every call — real network
+round-trips (~100-300ms), 0 tokens, $0 billed — and it took a raw-SDK probe
+outside `tools/sim` (bypassing `createVercelPort`'s error classification,
+which discards the message and keeps only the stable code) to learn the
+actual cause: Google Generate Content API per-minute quota exhaustion, not
+an invalid model id, even though the report's `adapterErrorCodes` look
+identical either way. `TurnRecord` never stores the underlying message —
+only the code — so a report alone cannot distinguish "no key", "bad model
+id", "quota exceeded" and "provider outage"; all four currently show up as
+the same `provider_error` row. If every call in a run falls back with 0
+tokens, check the quota/billing page for the project behind the key before
+assuming the model id or the wiring is wrong.
 
 **Before publishing any number from a live run:**
 
