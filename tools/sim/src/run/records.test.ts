@@ -111,6 +111,37 @@ describe("recordFrom: usage completeness", () => {
     expect(record.usageComplete).toBe(false);
   });
 
+  it("does not count a terminal provider_error attempt as a shortfall — nothing was billed", () => {
+    const record = recordFrom(
+      input({
+        result: success({
+          rejections: [rejection({ stage: "adapter", adapterErrorCode: "provider_error" })],
+        }),
+        timings: [timing(50)],
+      }),
+    );
+
+    expect(record.attempts).toBe(1);
+    expect(record.attemptsMissingUsage).toBe(0);
+    expect(record.usageComplete).toBe(true);
+    expect(record.adapterErrorCodes).toStrictEqual(["provider_error"]);
+  });
+
+  it("still counts an aborted attempt as a shortfall — it may have been billed", () => {
+    const record = recordFrom(
+      input({
+        result: success({
+          rejections: [rejection({ stage: "adapter", adapterErrorCode: "aborted" })],
+        }),
+        timings: [timing(50)],
+      }),
+    );
+
+    expect(record.attempts).toBe(1);
+    expect(record.attemptsMissingUsage).toBe(1);
+    expect(record.usageComplete).toBe(false);
+  });
+
   it("throws rather than silently reporting completeness when usage exceeds timings", () => {
     expect(() =>
       recordFrom(

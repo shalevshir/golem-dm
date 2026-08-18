@@ -80,7 +80,18 @@ export function recordFrom(input: RecordInput): TurnRecord {
     );
   }
 
-  const attemptsMissingUsage = Math.max(0, attempts - result.usage.length);
+  // A `provider_error` attempt is a call the SDK's transport gave up on before
+  // any output existed — `AdapterError` carries no usage for it (`vercel.ts`:
+  // `APICallError` has no usage and gets none), and it is always terminal (the
+  // agent falls straight to the deterministic fallback rather than retrying).
+  // Nothing was billed, so it must not count as a shortfall — that would make
+  // every run that draws one print "cost is under-reported" for a call that
+  // cost nothing. `aborted` stays counted: an abort can land after the
+  // provider already billed the call, so its usage really may be missing.
+  const providerErrorAttempts = result.rejections.filter(
+    (rejection) => rejection.adapterErrorCode === "provider_error",
+  ).length;
+  const attemptsMissingUsage = Math.max(0, attempts - result.usage.length - providerErrorAttempts);
 
   return {
     armId: input.armId,

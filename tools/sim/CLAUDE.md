@@ -76,6 +76,8 @@ never included in a report.
 
 - Check `costIsUnderreported` in the report. It is true when an attempt was
   billed but reported no usage, which makes every cost figure a lower bound.
+  A terminal `provider_error` attempt does not trip this — nothing was billed
+  for it, so it is excluded from the shortfall count.
 - Check `promptVersion` matches across every run you intend to compare. Two runs
   either side of a prompt edit must not be pooled.
 - Read win rate with the resolver's declared gaps in view — Dodge is inert here,
