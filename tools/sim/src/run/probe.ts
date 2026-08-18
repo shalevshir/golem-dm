@@ -6,7 +6,6 @@
 // back, and throws the turn away.
 import type { AvailableAction, TacticalAgent, TimingPort } from "@ai-dm/agents";
 import type { CombatWorld } from "@ai-dm/rules-engine";
-import type { MonsterStatBlock } from "@ai-dm/schemas";
 import type { DecideInput, TurnDecider } from "../engine/encounter.js";
 import { runEncounter } from "../engine/encounter.js";
 import { scriptedTurn } from "../engine/policy.js";
@@ -24,7 +23,6 @@ export interface ProbeState {
   actorId: string;
   world: CombatWorld;
   availableActions: readonly AvailableAction[];
-  statBlocks: ReadonlyMap<string, MonsterStatBlock>;
   turnOrder: readonly string[];
 }
 
@@ -59,7 +57,6 @@ export async function deriveProbeCorpus(input: DeriveProbeCorpusInput): Promise<
             actorId: decide.actorId,
             world: decide.world,
             availableActions: decide.availableActions,
-            statBlocks: built.statBlocks,
             turnOrder: built.turnOrder,
           });
         }

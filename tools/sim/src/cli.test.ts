@@ -48,6 +48,16 @@ describe("parseArgs", () => {
     expect(() => parseArgs(["--arms", "gemini-3-flash@low"])).toThrow("--live");
   });
 
+  it("resolves the smoke arm's own id through --arms, when live", () => {
+    // `SMOKE_ARM` is not in `ARMS` — `armById` special-cases its id so
+    // `--arms scripted-fake@medium` behaves like any other known arm instead
+    // of throwing a "known:" list that omits the one arm every smoke run
+    // actually exercises.
+    expect(parseArgs(["--live", "--arms", "scripted-fake@medium"]).arms[0]?.armId).toBe(
+      "scripted-fake@medium",
+    );
+  });
+
   it("rejects an unknown flag rather than silently running the default matrix", () => {
     expect(() => parseArgs(["--scenario", "melee-brawl"])).toThrow("--scenario");
     expect(() => parseArgs(["--seed", "42"])).toThrow("--seed");

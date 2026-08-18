@@ -9,7 +9,6 @@ import { runSmoke } from "./run.js";
 // draw zero fallbacks over a corpus this size — seed 42 does, for instance.
 const CONFIG = {
   mode: "both" as const,
-  live: false,
   seeds: [1],
   scenarioIds: ["melee-brawl"],
 };

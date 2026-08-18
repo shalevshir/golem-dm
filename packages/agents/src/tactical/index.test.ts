@@ -251,7 +251,7 @@ describe("createTacticalAgent — the single retry", () => {
     expect(dynamicOf(port, 1)).not.toContain("Tool call did not match");
   });
 
-  it("counts only the calls that produced output toward usage", async () => {
+  it("does not invent usage for a rejection the provider did not price", async () => {
     const { agent } = agentWith(
       adapterFailure("no_tool_call", "The model answered in prose."),
       adapterSuccess({ value: legalTurn, usage }),
