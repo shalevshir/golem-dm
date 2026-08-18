@@ -54,15 +54,22 @@ mode plays the fight out and is the only source of win rate.
 
 ## Live benchmarking
 
-Not run yet. Nothing in this repo has ever called a live model, and
-`DEFAULT_MODEL_ROUTING.tactical` and `REASONING_BUDGET_TOKENS` are still
-unmeasured placeholders.
+**Wired, not yet run.** `--live` is plumbed to a real provider
+(`tools/sim/src/live/run.ts`'s `runLive`), but no live pass has been executed
+against this repo yet, so `DEFAULT_MODEL_ROUTING.tactical` and
+`REASONING_BUDGET_TOKENS` are still unmeasured placeholders. Firing a live run
+is the operator's call, made by exporting keys and passing `--live` — nothing
+in this package does that on its own.
 
-**`--live` currently exits 1.** This build has no provider wired to the live
-path: `pnpm sim --live` prints "Live benchmarking is not wired to a provider in
-this build" to stderr and stops before reading any credential or making any
-call. The recipe below is what an operator runs once a provider adapter is
-wired in — not something this build will execute today.
+`runLive` assembles one `createVercelPort()`-backed `TacticalAgent` per arm —
+`createTacticalAgent` binds to a model spec at construction, and a sweep
+covers several — and drives it through the same `runProbeArm`/`runEncounterArm`
+runners the smoke path uses, so a live run and a smoke run share every line of
+code downstream of the port. No credential is ever read by `tools/sim` itself:
+`createVercelPort`'s default `resolveModel` goes straight to `@ai-sdk/anthropic`
+/ `@ai-sdk/google` / `@ai-sdk/openai`'s own provider clients, which read their
+own standard environment variables the moment a call is made — not before, and
+not via any `.env` file this package loads.
 
 ```bash
 export GOOGLE_GENERATIVE_AI_API_KEY=…   # gemini-3-flash
@@ -72,7 +79,13 @@ pnpm sim --live --mode probe            # 12 arms x 4 scenarios x 5 seeds
 ```
 
 Keys are read from `process.env` only: never written to disk, never logged,
-never included in a report.
+never included in a report. A missing key is not a crash — the tactical
+agent's `provider_error` handling turns it into a same-turn deterministic
+fallback, so a run with no credentials exported still completes and writes a
+report; every record in it carries `adapterErrorCodes: ["provider_error"]`
+rather than any real model output. Narrow a run with `--arms`, `--seeds` and
+`--scenarios` (e.g. `--arms gemini-3-flash@low --seeds 1 --scenarios
+melee-brawl`) to keep a first pass small before committing to the full matrix.
 
 **Before publishing any number from a live run:**
 

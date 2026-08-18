@@ -9,6 +9,7 @@ import { execFileSync } from "node:child_process";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "./cli.js";
+import { runLive } from "./live/run.js";
 import { runSmoke } from "./smoke/run.js";
 import { writeReport } from "./run/report.js";
 
@@ -25,27 +26,31 @@ function gitCommit(): string {
 
 export async function main(): Promise<void> {
   const config = parseArgs(process.argv.slice(2));
-
-  if (config.live) {
-    // Everything for a live run exists — arms, runners, records, reports — but
-    // firing one spends money against credentials this process would read from
-    // the environment. That is the operator's decision, made explicitly.
-    console.error(
-      "Live benchmarking is not wired to a provider in this build. See tools/sim/CLAUDE.md.",
-    );
-    process.exitCode = 1;
-    return;
-  }
-
   const generatedAt = new Date().toISOString();
-  const report = await runSmoke({
-    runId: `smoke-${generatedAt.replaceAll(":", "-")}`,
-    generatedAt,
-    gitCommit: gitCommit(),
-    seeds: config.seeds,
-    scenarioIds: config.scenarioIds,
-    mode: config.mode,
-  });
+
+  // `--live` and the smoke path share everything downstream of `report` — the
+  // only difference is which port produced the records. Real credentials are
+  // read from `process.env` deep inside `createVercelPort`'s provider clients,
+  // never here: firing a live call is still the operator's decision, made by
+  // exporting keys and passing `--live`, not by anything this branch decides.
+  const report = config.live
+    ? await runLive({
+        runId: `live-${generatedAt.replaceAll(":", "-")}`,
+        generatedAt,
+        gitCommit: gitCommit(),
+        arms: config.arms,
+        seeds: config.seeds,
+        scenarioIds: config.scenarioIds,
+        mode: config.mode,
+      })
+    : await runSmoke({
+        runId: `smoke-${generatedAt.replaceAll(":", "-")}`,
+        generatedAt,
+        gitCommit: gitCommit(),
+        seeds: config.seeds,
+        scenarioIds: config.scenarioIds,
+        mode: config.mode,
+      });
 
   const { jsonPath, markdownPath } = writeReport(report, RUNS_DIR);
   console.warn(`Wrote ${jsonPath}`);
