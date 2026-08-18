@@ -101,6 +101,34 @@ the same `provider_error` row. If every call in a run falls back with 0
 tokens, check the quota/billing page for the project behind the key before
 assuming the model id or the wiring is wrong.
 
+**`claude-sonnet-5` cannot currently complete a live turn at any effort
+level.** Confirmed by probing `generateObject({ mode: "tool" })` directly
+(the tactical agent's actual call shape) against `ai@4.3.19` +
+`@ai-sdk/anthropic@1.2.12`:
+
+- `@low` (thinking disabled): the AI SDK defaults `temperature` to `0`
+  internally whenever the caller doesn't set one (`// TODO v5 remove default
+  0 for temperature` — a known, not-yet-fixed v4 behavior) and only clears it
+  when `thinking` is enabled. With thinking off, that forced `0` reaches
+  Anthropic, which now rejects any explicit `temperature` outright: `` `temperature`
+  is deprecated for this model ``. `callSettingsFor` (`packages/agents/src/providers/vercel.ts`)
+  was fixed to never pass an explicit temperature for the anthropic provider,
+  but that does not change this outcome — the SDK's own default fills the gap
+  regardless of what we send.
+- `@medium` / `@high` (thinking enabled): thinking correctly clears the
+  forced temperature, but then `generateObject`'s forced tool-choice
+  conflicts with it directly: `` Thinking may not be enabled when tool_choice
+  forces tool use. `` — a documented Anthropic constraint, not an SDK bug.
+
+These two failure modes are mutually exclusive for this SDK version and this
+model: there is no effort level where forced-tool-call structured output
+currently works. A real fix (an SDK upgrade, or switching Anthropic to
+non-forced tool choice) is bigger than a config change — it touches the
+reliability guarantee the tactical agent's retry/fallback logic depends on —
+and is intentionally not attempted here. Until resolved, exclude
+`claude-sonnet-5` from any live run (`--arms` naming only the google/openai
+arms) rather than spending quota rediscovering this.
+
 **Before publishing any number from a live run:**
 
 - Check `costIsUnderreported` in the report. It is true when an attempt was
