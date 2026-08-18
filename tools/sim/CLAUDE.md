@@ -54,12 +54,34 @@ mode plays the fight out and is the only source of win rate.
 
 ## Live benchmarking
 
-**Wired, not yet run.** `--live` is plumbed to a real provider
-(`tools/sim/src/live/run.ts`'s `runLive`), but no live pass has been executed
-against this repo yet, so `DEFAULT_MODEL_ROUTING.tactical` and
-`REASONING_BUDGET_TOKENS` are still unmeasured placeholders. Firing a live run
-is the operator's call, made by exporting keys and passing `--live` — nothing
-in this package does that on its own.
+**Wired, and confirmed reaching real models — but only one candidate is
+proven end-to-end so far.** `--live` is plumbed to a real provider
+(`tools/sim/src/live/run.ts`'s `runLive`). `DEFAULT_MODEL_ROUTING.tactical`
+and `REASONING_BUDGET_TOKENS` are still unmeasured placeholders — no full
+benchmark matrix has been run, only single-arm probes while debugging each
+candidate's live wiring (2026-08-18). Firing a live run is the operator's
+call, made by exporting keys and passing `--live` — nothing in this package
+does that on its own.
+
+**Per-candidate status (2026-08-18):**
+
+| Candidate | Status | Notes |
+| --- | --- | --- |
+| `gpt-5.4-nano` (openai) | ✅ confirmed working | Fixed by routing openai through the Responses API — see below. Not yet verified for `gpt-5.4-mini`, the other openai candidate; same fix should apply but hasn't been probed. |
+| `gemini-3.1-flash-lite` (google) | ⚠️ unconfirmed | Every attempt so far hit Google Generate Content API per-minute quota exhaustion (see below) before producing a real generation. Model id and wiring are otherwise unverified — no successful call yet. |
+| `claude-sonnet-5` (anthropic) | ❌ structurally blocked | Cannot complete a tool-call turn at any effort level with the pinned SDK version — see below. Not a config problem. |
+
+**OpenAI needs the Responses API, not Chat Completions.** Confirmed live: a
+400 on `gpt-5.4-nano` — `` Function tools with reasoning_effort are not
+supported for gpt-5.4-nano in /v1/chat/completions. To use function tools,
+use /v1/responses or set reasoning_effort to 'none'. `` `resolveLanguageModel`
+(`packages/agents/src/providers/vercel.ts`) now calls `openai.responses(modelId)`
+instead of the default `openai(modelId)` for every openai call, unconditionally
+— every call this repo makes combines function tools with a reasoning effort,
+so there is no case in this codebase that still wants Chat Completions.
+Confirmed working live after the fix (`gpt-5.4-nano@low`, tool-mode
+`generateObject`, real success). **Next session: verify `gpt-5.4-mini`
+too** — same fix, unconfirmed for that specific model id.
 
 `runLive` assembles one `createVercelPort()`-backed `TacticalAgent` per arm —
 `createTacticalAgent` binds to a model spec at construction, and a sweep
@@ -72,10 +94,11 @@ own standard environment variables the moment a call is made — not before, and
 not via any `.env` file this package loads.
 
 ```bash
-export GOOGLE_GENERATIVE_AI_API_KEY=…   # gemini-3.1-flash-lite
-export OPENAI_API_KEY=…                 # gpt-5.4-mini, gpt-5.4-nano
-export ANTHROPIC_API_KEY=…              # claude-sonnet-5 (quality ceiling)
-pnpm sim --live --mode probe            # 12 arms x 4 scenarios x 5 seeds
+export OPENAI_API_KEY=…                 # gpt-5.4-mini, gpt-5.4-nano — gpt-5.4-nano confirmed working
+export GOOGLE_GENERATIVE_AI_API_KEY=…   # gemini-3.1-flash-lite — unconfirmed, see status table above
+export ANTHROPIC_API_KEY=…              # claude-sonnet-5 — do not use yet, structurally blocked, see below
+pnpm sim --live --mode probe            # all 12 arms x 4 scenarios x 5 seeds — do not run this yet; only
+                                         # openai arms are confirmed, narrow with --arms first (see below)
 ```
 
 Keys are read from `process.env` only: never written to disk, never logged,

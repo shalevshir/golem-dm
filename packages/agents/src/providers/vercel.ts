@@ -112,7 +112,15 @@ export function resolveLanguageModel(spec: ModelSpec): LanguageModelV1 {
     case "google":
       return google(spec.modelId);
     case "openai":
-      return openai(spec.modelId);
+      // The default `openai(modelId)` factory targets Chat Completions, which
+      // rejects function tools combined with `reasoning_effort` (confirmed
+      // live: 400 "Function tools with reasoning_effort are not supported for
+      // gpt-5.4-nano in /v1/chat/completions. To use function tools, use
+      // /v1/responses..."). Every call this repo makes is a tool call
+      // (`generateStructured`) with a reasoning effort set, so the Responses
+      // API is used unconditionally rather than branching on a call shape
+      // this function cannot see.
+      return openai.responses(spec.modelId);
   }
 }
 

@@ -4,7 +4,7 @@ import { APICallError, NoObjectGeneratedError, simulateReadableStream } from "ai
 import { MockLanguageModelV1 } from "ai/test";
 import { beforeEach, describe, expect, it } from "vitest";
 import type { ModelSpec } from "./routing.js";
-import { callSettingsFor, createVercelPort, providerOptionsFor } from "./vercel.js";
+import { callSettingsFor, createVercelPort, providerOptionsFor, resolveLanguageModel } from "./vercel.js";
 
 const flash: ModelSpec = { provider: "google", modelId: "gemini-3-flash" };
 
@@ -340,6 +340,17 @@ describe("callSettingsFor", () => {
     expect(callSettingsFor({ ...claude, temperature: 0.2, maxOutputTokens: 512 })).toStrictEqual({
       maxTokens: 512,
     });
+  });
+});
+
+describe("resolveLanguageModel", () => {
+  it("resolves openai through the Responses API, not Chat Completions", () => {
+    // Chat Completions rejects function tools combined with reasoning_effort
+    // (confirmed live: 400 on gpt-5.4-nano), and every call this repo makes
+    // is exactly that combination. The two implementations are otherwise
+    // indistinguishable from the outside, so this pins the constructor.
+    const model = resolveLanguageModel({ provider: "openai", modelId: "gpt-5.4-nano" });
+    expect(model.constructor.name).toBe("OpenAIResponsesLanguageModel");
   });
 });
 
