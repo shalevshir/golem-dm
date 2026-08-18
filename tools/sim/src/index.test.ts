@@ -88,7 +88,7 @@ describe("main — --live", () => {
       "--scenarios",
       "melee-brawl",
       "--arms",
-      "gemini-3-flash@low",
+      "gemini-3.1-flash-lite@low",
     ];
 
     await main();

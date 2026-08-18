@@ -24,7 +24,10 @@ interface Candidate {
  * ceiling says whether the task is hard or the models are weak.
  */
 const CANDIDATES: readonly Candidate[] = [
-  { provider: "google", modelId: "gemini-3-flash" },
+  // "gemini-3-flash" is not a real model id at Google's API — a live probe
+  // against it returns an APICallError on every call (real network round-trip,
+  // 0 tokens, $0 billed). Confirmed against the provider on 2026-08-18.
+  { provider: "google", modelId: "gemini-3.1-flash-lite" },
   { provider: "openai", modelId: "gpt-5.4-mini" },
   { provider: "openai", modelId: "gpt-5.4-nano" },
   { provider: "anthropic", modelId: "claude-sonnet-5" },

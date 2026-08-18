@@ -38,14 +38,14 @@ describe("parseArgs", () => {
   });
 
   it("selects arms by id and rejects unknown ones, when live", () => {
-    expect(parseArgs(["--live", "--arms", "gemini-3-flash@low"]).arms[0]?.armId).toBe(
-      "gemini-3-flash@low",
+    expect(parseArgs(["--live", "--arms", "gemini-3.1-flash-lite@low"]).arms[0]?.armId).toBe(
+      "gemini-3.1-flash-lite@low",
     );
     expect(() => parseArgs(["--live", "--arms", "nope@low"])).toThrow("nope@low");
   });
 
   it("rejects --arms outside live mode instead of silently ignoring it", () => {
-    expect(() => parseArgs(["--arms", "gemini-3-flash@low"])).toThrow("--live");
+    expect(() => parseArgs(["--arms", "gemini-3.1-flash-lite@low"])).toThrow("--live");
   });
 
   it("resolves the smoke arm's own id through --arms, when live", () => {
