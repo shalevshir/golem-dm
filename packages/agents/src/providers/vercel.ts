@@ -50,10 +50,23 @@ export interface SdkCallSettings {
   maxTokens?: number;
 }
 
-/** Translate the spec's neutral names into AI SDK v4 call settings. */
+/**
+ * Translate the spec's neutral names into AI SDK v4 call settings.
+ *
+ * Anthropic drops `temperature` here entirely: `claude-sonnet-5` returns a
+ * 400 ("`temperature` is deprecated for this model") for any explicit value,
+ * confirmed live against both thinking-enabled and thinking-disabled
+ * requests — this is not a thinking-mode interaction, the parameter itself
+ * is gone for this provider. A caller-supplied `ModelSpec.temperature` is
+ * silently dropped rather than risking a hard failure on every anthropic
+ * call; there is currently no anthropic model in this repo's config that
+ * still accepts it.
+ */
 export function callSettingsFor(spec: ModelSpec): SdkCallSettings {
+  const temperature = spec.provider === "anthropic" ? undefined : spec.temperature;
+
   return {
-    ...(spec.temperature === undefined ? {} : { temperature: spec.temperature }),
+    ...(temperature === undefined ? {} : { temperature }),
     // v4 calls this maxTokens; v5 renamed it maxOutputTokens. Ours is the
     // unambiguous name and this is where it gets translated.
     ...(spec.maxOutputTokens === undefined ? {} : { maxTokens: spec.maxOutputTokens }),

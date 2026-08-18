@@ -329,6 +329,18 @@ describe("callSettingsFor", () => {
   it("omits settings the spec does not set", () => {
     expect(callSettingsFor(flash)).toStrictEqual({});
   });
+
+  it("drops temperature for anthropic — claude-sonnet-5 returns a 400 for any explicit value", () => {
+    const claude: ModelSpec = { provider: "anthropic", modelId: "claude-sonnet-5" };
+    expect(callSettingsFor({ ...claude, temperature: 0.2 })).toStrictEqual({});
+  });
+
+  it("still maps maxOutputTokens for anthropic — only temperature is dropped", () => {
+    const claude: ModelSpec = { provider: "anthropic", modelId: "claude-sonnet-5" };
+    expect(callSettingsFor({ ...claude, temperature: 0.2, maxOutputTokens: 512 })).toStrictEqual({
+      maxTokens: 512,
+    });
+  });
 });
 
 describe("providerOptionsFor", () => {
