@@ -23,7 +23,7 @@ function gitCommit(): string {
   }
 }
 
-async function main(): Promise<void> {
+export async function main(): Promise<void> {
   const config = parseArgs(process.argv.slice(2));
 
   if (config.live) {
@@ -52,4 +52,22 @@ async function main(): Promise<void> {
   console.warn(`Wrote ${markdownPath}`);
 }
 
-await main();
+/**
+ * Guards the top-level run so importing this module (from a test, say) does
+ * not itself trigger a full smoke run — only running it directly, the way
+ * `tsx src/index.ts` does, does.
+ */
+const isMainModule = process.argv[1] === fileURLToPath(import.meta.url);
+
+if (isMainModule) {
+  try {
+    await main();
+  } catch (error) {
+    // `parseArgs` throws plain `Error`s for the CLI's common mistakes (an
+    // unknown flag, `--arms` outside `--live`) — without this, those surface
+    // as a raw Node stack trace instead of the message the error was written
+    // to carry.
+    console.error(error instanceof Error ? error.message : String(error));
+    process.exitCode = 1;
+  }
+}
