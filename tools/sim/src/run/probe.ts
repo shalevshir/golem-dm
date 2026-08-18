@@ -15,6 +15,7 @@ import { scenarioById } from "../scenarios/index.js";
 import { seeded } from "../rng.js";
 import type { TurnRecord } from "./records.js";
 import { recordFrom } from "./records.js";
+import { timedPropose } from "./timed-propose.js";
 
 export interface ProbeState {
   scenarioId: string;
@@ -93,16 +94,12 @@ export async function runProbeArm(input: RunProbeArmInput): Promise<TurnRecord[]
   for (const state of input.corpus) {
     input.beforeTurn?.(state);
 
-    // `TimingPort.timings` is one append-only array for the whole run, so the
-    // only correct way to attribute entries to a turn is to slice.
-    const before = input.timingPort.timings.length;
-    const result = await input.agent.proposeTurn({
+    const { result, timings } = await timedPropose(input.agent, input.timingPort, {
       world: state.world,
       actorId: state.actorId,
       availableActions: state.availableActions,
       turnOrder: state.turnOrder,
     });
-    const timings = input.timingPort.timings.slice(before);
 
     records.push(
       recordFrom({

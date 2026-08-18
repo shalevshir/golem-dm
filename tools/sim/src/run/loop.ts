@@ -17,6 +17,7 @@ import { buildScenario } from "../scenarios/build.js";
 import { scenarioById } from "../scenarios/index.js";
 import type { TurnRecord } from "./records.js";
 import { recordFrom } from "./records.js";
+import { timedPropose } from "./timed-propose.js";
 
 export interface RunEncounterArmInput {
   armId: string;
@@ -77,16 +78,12 @@ export async function runEncounterArm(input: RunEncounterArmInput): Promise<Enco
   const modelDecider: TurnDecider = async (decide) => {
     input.beforeTurn?.(decide);
 
-    // `TimingPort.timings` is one append-only array for the whole run, so the
-    // only correct way to attribute entries to a turn is to slice.
-    const before = input.timingPort.timings.length;
-    const result = await input.agent.proposeTurn({
+    const { result, timings } = await timedPropose(input.agent, input.timingPort, {
       world: decide.world,
       actorId: decide.actorId,
       availableActions: decide.availableActions,
       turnOrder: built.turnOrder,
     });
-    const timings = input.timingPort.timings.slice(before);
 
     records.push(
       recordFrom({
