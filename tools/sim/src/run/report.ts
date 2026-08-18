@@ -31,6 +31,12 @@ export interface ModeSummary {
    * read as a clean bill of health for a mode that never looked.
    */
   unresolvedActionIds: readonly string[];
+  /**
+   * Sum of `TurnRecord.nonAttackActions` — turns spent on Dodge, Dash, Hide
+   * and friends, which are legal but inert in this harness. Encounter-mode
+   * only, same reasoning as `unresolvedActionIds`.
+   */
+  nonAttackActions: number;
 }
 
 export interface EncounterSummary {
@@ -49,6 +55,13 @@ export interface ArmSummary {
   encounter: ModeSummary;
   /** Fraction of encounters the model-driven side won. */
   winRate: number;
+  /**
+   * `sum(damageByFaction.hostile) / sum(rounds)` across this arm's encounters
+   * — damage per round against the scripted control arm (spec §9). Null when
+   * the arm played zero encounter rounds, guarded the same way `costPerTurnUsd`
+   * is null rather than a division-by-zero NaN.
+   */
+  damagePerRound: number | null;
 }
 
 export interface RunReport {
@@ -64,6 +77,16 @@ export interface RunReport {
   arms: readonly ArmSummary[];
   costIsUnderreported: boolean;
   encounters: readonly EncounterSummary[];
+  /**
+   * The raw per-turn records, split by mode. Every aggregate above is a fold
+   * over these; nothing else in this file groups by `scenarioId`/`seed`, so
+   * this is what lets a reader decompose a run per scenario or per seed
+   * instead of only ever seeing the arm-wide totals.
+   */
+  records: {
+    probe: readonly TurnRecord[];
+    encounter: readonly TurnRecord[];
+  };
 }
 
 export interface BuildReportInput {
@@ -102,7 +125,18 @@ function summarise(armId: string, records: readonly TurnRecord[]): ModeSummary {
     costPerTurnUsd: perTurn,
     costPer30TurnSessionUsd: perTurn === null ? null : perTurn * TURNS_PER_SESSION,
     unresolvedActionIds: [...new Set(records.flatMap((record) => record.unresolvedActionIds))],
+    nonAttackActions: records.reduce((sum, record) => sum + record.nonAttackActions, 0),
   };
+}
+
+function damagePerRoundOf(encounters: readonly EncounterSummary[]): number | null {
+  const totalRounds = encounters.reduce((sum, each) => sum + each.rounds, 0);
+  if (totalRounds === 0) return null;
+  const totalHostileDamage = encounters.reduce(
+    (sum, each) => sum + (each.damageByFaction.hostile ?? 0),
+    0,
+  );
+  return totalHostileDamage / totalRounds;
 }
 
 function armIdsIn(...groups: readonly (readonly TurnRecord[])[]): string[] {
@@ -132,6 +166,7 @@ export function buildReport(input: BuildReportInput): RunReport {
         encounterRecords.filter((record) => record.armId === armId),
       ),
       winRate: armEncounters.length === 0 ? 0 : wins / armEncounters.length,
+      damagePerRound: damagePerRoundOf(armEncounters),
     };
   });
 
@@ -149,6 +184,7 @@ export function buildReport(input: BuildReportInput): RunReport {
       (arm) => !arm.probe.usage.usageComplete || !arm.encounter.usage.usageComplete,
     ),
     encounters,
+    records: { probe: probeRecords, encounter: encounterRecords },
   };
 }
 
@@ -162,6 +198,11 @@ function percent(value: number): string {
 
 function unresolvedActionsCell(ids: readonly string[]): string {
   return ids.length === 0 ? "none" : ids.join(", ");
+}
+
+/** Guarded the same way `money` guards an unpriced model: null prints, not NaN. */
+function perRound(value: number | null): string {
+  return value === null ? "n/a (0 rounds)" : value.toFixed(1);
 }
 
 /**
@@ -258,12 +299,16 @@ export function renderMarkdown(report: RunReport): string {
   lines.push("## Encounter mode — unpaired, win rate only");
   lines.push("");
   if (encounterRan(report)) {
-    lines.push("| Arm | Encounters | Win rate | Turns | Legal after retry | Unresolved actions |");
-    lines.push("|---|---|---|---|---|---|");
+    lines.push(
+      "| Arm | Encounters | Win rate | Dmg/round (hostile) | Non-attack actions | Turns | " +
+        "Legal after retry | Unresolved actions |",
+    );
+    lines.push("|---|---|---|---|---|---|---|---|");
     for (const arm of report.arms) {
       const played = report.encounters.filter((each) => each.armId === arm.armId).length;
       lines.push(
         `| \`${arm.armId}\` | ${String(played)} | ${percent(arm.winRate)} | ` +
+          `${perRound(arm.damagePerRound)} | ${String(arm.encounter.nonAttackActions)} | ` +
           `${String(arm.encounter.turns)} | ${percent(arm.encounter.legality.legalAfterRetryRate)} | ` +
           `${unresolvedActionsCell(arm.encounter.unresolvedActionIds)} |`,
       );
@@ -276,9 +321,11 @@ export function renderMarkdown(report: RunReport): string {
     );
     lines.push("");
     lines.push(
-      "Win rate is measured against the scripted baseline. Read it with the resolver's " +
-        "declared gaps in view. **Dodge has no mechanical effect** in this harness, so a " +
-        "model that Dodges wisely is penalised, as is the deterministic fallback. Attacks " +
+      "Win rate and damage per round are measured against the scripted baseline. Read " +
+        "them with the resolver's declared gaps in view. **Dodge has no mechanical effect** " +
+        "in this harness, so a model that Dodges wisely is penalised, as is the " +
+        'deterministic fallback — the "Non-attack actions" column counts exactly those ' +
+        "turns so neither figure is ever read without it in view. Attacks " +
         'are also always resolved at `"normal"` mode — condition-driven advantage or ' +
         "disadvantage is never applied (currently unreachable, since nothing in the sim " +
         "inflicts conditions) — and a swing at a target that already died earlier in the " +

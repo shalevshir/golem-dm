@@ -20,6 +20,7 @@ function record(overrides: Partial<TurnRecord> = {}): TurnRecord {
     durationMs: 100,
     callDurationsMs: [100],
     unresolvedActionIds: [],
+    nonAttackActions: 0,
     ...overrides,
   };
 }

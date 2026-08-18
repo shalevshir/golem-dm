@@ -7,7 +7,9 @@ Headless combat simulator: runs the tactical agent against scripted enemies on f
 ## What it measures (per model, per scenario)
 
 - Tool-call legality rate (validated on first try / after retry / fallback used)
-- Tactical quality vs scripted baseline (win rate, avg damage efficiency)
+- Tactical quality vs scripted baseline (win rate, damage per round, non-attack
+  action count — Dodge is inert in this harness, so it is counted separately
+  rather than folded silently into win rate)
 - Latency p50/p95 per turn; tokens and $ per turn (cached vs uncached)
 
 Output: one JSON + markdown report per run under `runs/` (gitignored). Use these numbers to set `ModelRouting` — never pick models by vibes.

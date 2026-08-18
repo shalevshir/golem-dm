@@ -40,8 +40,9 @@ export interface EncounterArmResult {
 /**
  * `recordFrom` runs inside the decider, before `applyTurn` has produced this
  * turn's `TurnEffect` — so `unresolvedActionIds` (Task 5's count of engine-legal
- * action ids the actor's stat block does not contain) is not known yet at push
- * time and is back-filled here from `runEncounter`'s log once it resolves.
+ * action ids the actor's stat block does not contain) and `nonAttackActions`
+ * are not known yet at push time and are back-filled here from
+ * `runEncounter`'s log once it resolves.
  *
  * `(round, actorId)` is a safe join key because this loop gives each combatant
  * exactly one turn per round (`engine/encounter.ts`'s `for (const actorId of
@@ -49,7 +50,7 @@ export interface EncounterArmResult {
  *
  * A record with no matching log entry is a decider failure (`aborted` or
  * `no_legal_turn`) — no turn was ever applied, so there is nothing to join and
- * the record keeps `recordFrom`'s default `[]`.
+ * the record keeps `recordFrom`'s defaults (`[]` and `0`).
  */
 export function joinUnresolvedActionIds(
   records: readonly TurnRecord[],
@@ -61,7 +62,11 @@ export function joinUnresolvedActionIds(
     );
     return entry === undefined
       ? record
-      : { ...record, unresolvedActionIds: entry.effect.unresolvedActionIds };
+      : {
+          ...record,
+          unresolvedActionIds: entry.effect.unresolvedActionIds,
+          nonAttackActions: entry.effect.nonAttackAction ? 1 : 0,
+        };
   });
 }
 

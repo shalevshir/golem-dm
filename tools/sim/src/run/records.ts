@@ -28,6 +28,16 @@ export interface TurnRecord {
   callDurationsMs: readonly number[];
   /** Engine-legal action ids the actor's stat block does not contain. */
   unresolvedActionIds: readonly string[];
+  /**
+   * 1 when this turn's main action was not an attack (Dodge, Dash, Hide and
+   * friends), 0 otherwise. Dodge has no mechanical effect in this harness —
+   * the engine models no dodging state — which penalises both a model that
+   * Dodges wisely and the deterministic fallback, so the report counts these
+   * as their own line rather than folding them silently into win rate.
+   * Encounter-mode only, same as `unresolvedActionIds`: probe mode resolves
+   * nothing, so this is always 0 there.
+   */
+  nonAttackActions: number;
 }
 
 export interface RecordInput {
@@ -40,6 +50,7 @@ export interface RecordInput {
   /** The slice of `TimingPort.timings` this turn produced. */
   timings: readonly CallTiming[];
   unresolvedActionIds?: readonly string[];
+  nonAttackActions?: number;
 }
 
 function outcomeOf(result: TurnProposalResult): TurnOutcome {
@@ -112,5 +123,6 @@ export function recordFrom(input: RecordInput): TurnRecord {
     durationMs: input.timings.reduce((sum, timing) => sum + timing.durationMs, 0),
     callDurationsMs: input.timings.map((timing) => timing.durationMs),
     unresolvedActionIds: input.unresolvedActionIds ?? [],
+    nonAttackActions: input.nonAttackActions ?? 0,
   };
 }

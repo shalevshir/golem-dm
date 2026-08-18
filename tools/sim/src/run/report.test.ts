@@ -20,6 +20,7 @@ function record(overrides: Partial<TurnRecord> = {}): TurnRecord {
     durationMs: 100,
     callDurationsMs: [100],
     unresolvedActionIds: [],
+    nonAttackActions: 0,
     ...overrides,
   };
 }
@@ -71,6 +72,58 @@ describe("buildReport", () => {
     expect(report.gitCommit).toBe("abc1234");
     expect(report.pricingTableDate).toMatch(/^\d{4}-\d{2}-\d{2}$/);
   });
+
+  it("sums nonAttackActions across a mode's records", () => {
+    const report = buildReport({
+      ...BASE,
+      encounterRecords: [record({ nonAttackActions: 1 }), record({ nonAttackActions: 0 })],
+    });
+
+    expect(report.arms[0]?.encounter.nonAttackActions).toBe(1);
+  });
+
+  it("computes damage per round against the scripted control arm", () => {
+    const report = buildReport({
+      ...BASE,
+      encounterRecords: [record()],
+      encounters: [
+        {
+          armId: "gemini-3-flash@medium",
+          scenarioId: "melee-brawl",
+          seed: 1,
+          winner: "hostile",
+          rounds: 4,
+          damageByFaction: { hostile: 20, party: 5 },
+        },
+        {
+          armId: "gemini-3-flash@medium",
+          scenarioId: "melee-brawl",
+          seed: 2,
+          winner: "party",
+          rounds: 6,
+          damageByFaction: { hostile: 10, party: 8 },
+        },
+      ],
+    });
+
+    // (20 + 10) / (4 + 6) = 3.
+    expect(report.arms[0]?.damagePerRound).toBeCloseTo(3);
+  });
+
+  it("reports damagePerRound as null rather than dividing by zero when no rounds were played", () => {
+    const report = buildReport({ ...BASE, encounterRecords: [record()] });
+
+    expect(report.arms[0]?.damagePerRound).toBeNull();
+  });
+
+  it("carries the raw per-turn records, split by mode, so a run can be decomposed by scenario or seed", () => {
+    const probe = record({ scenarioId: "melee-brawl", seed: 1 });
+    const encounter = record({ scenarioId: "ogre-charge", seed: 2 });
+    const report = buildReport({ ...BASE, probeRecords: [probe], encounterRecords: [encounter] });
+
+    expect(report.records.probe).toEqual([probe]);
+    expect(report.records.encounter).toEqual([encounter]);
+  });
 });
 
 describe("renderMarkdown", () => {
@@ -99,6 +152,29 @@ describe("renderMarkdown", () => {
     );
 
     expect(markdown).toContain("unpriced");
+  });
+
+  it("renders non-attack actions and damage per round in the encounter table", () => {
+    const markdown = renderMarkdown(
+      buildReport({
+        ...BASE,
+        encounterRecords: [record({ nonAttackActions: 1 })],
+        encounters: [
+          {
+            armId: "gemini-3-flash@medium",
+            scenarioId: "melee-brawl",
+            seed: 1,
+            winner: "hostile",
+            rounds: 2,
+            damageByFaction: { hostile: 8, party: 0 },
+          },
+        ],
+      }),
+    );
+
+    expect(markdown).toContain("Non-attack actions");
+    expect(markdown).toContain("Dmg/round");
+    expect(markdown).toContain("4.0");
   });
 });
 

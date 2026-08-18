@@ -21,6 +21,7 @@ function record(overrides: Partial<TurnRecord> = {}): TurnRecord {
     durationMs: 0,
     callDurationsMs: [],
     unresolvedActionIds: [],
+    nonAttackActions: 0,
     ...overrides,
   };
 }
@@ -63,6 +64,28 @@ describe("joinUnresolvedActionIds", () => {
     const joined = joinUnresolvedActionIds(records, log);
 
     expect(joined[0]?.unresolvedActionIds).toEqual(["greatclub"]);
+  });
+
+  it("back-fills nonAttackActions from the matching log entry's effect", () => {
+    const records = [record({ round: 2, actorId: "goblin_1", nonAttackActions: 0 })];
+    const log = [
+      logEntry({
+        round: 2,
+        actorId: "goblin_1",
+        effect: {
+          attacks: [],
+          damageDealt: 0,
+          killed: [],
+          movedFeet: 0,
+          nonAttackAction: true,
+          unresolvedActionIds: [],
+        },
+      }),
+    ];
+
+    const joined = joinUnresolvedActionIds(records, log);
+
+    expect(joined[0]?.nonAttackActions).toBe(1);
   });
 
   it("leaves a record with no matching log entry as an empty list, without throwing", () => {
