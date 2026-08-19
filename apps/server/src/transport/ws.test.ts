@@ -534,4 +534,68 @@ describe("websocket transport", () => {
 
     socket.close();
   });
+
+  // Post-review regression fix: `join` must NOT compete for the per-session
+  // lock. `join` (pipeline.ts) is read-only — latestSnapshot/readSince,
+  // yielding session_state/event frames, never `emit` — so it cannot itself
+  // duplicate a turn, the only hazard CRITICAL-1's lock exists to prevent.
+  // Claiming the lock for `join` regressed the spec's own §Reconnect
+  // requirement: C-36a keeps a turn's `handleCommand` draining — lock held —
+  // for the whole hero turn plus the entire enemy sweep even after the
+  // originating socket is gone, so a client that drops mid-turn and
+  // reconnects would have its OWN `join` rejected with `turn_in_progress`
+  // instead of getting the `session_state` restore `protocol.ts`'s
+  // `JoinMessage` doc-comment promises.
+  //
+  // Break scenario: a handler that still claims the session lock for `join`
+  // answers socket B's join with `error { code: "turn_in_progress" }`
+  // instead of `session_state` while socket A's turn is still resolving.
+  it("lets a SECOND socket join and get its session_state restore while a turn is in flight on the first socket", async () => {
+    const { app, url, store } = await startServer({ narrative: delayedNarrative(400) });
+    const sessionId = await createSessionOver(app);
+
+    const socketA = await connect(url);
+    await joinAndWaitForAck(socketA, sessionId);
+
+    // Socket A starts a hero turn and gets stuck in narrate()'s 400ms delay.
+    // Wait for A's own player_input event first — proof the lock (if `join`
+    // still contended for it) would already be held.
+    const aPlayerInput = framesUntil(
+      socketA,
+      (frame) => frame.type === "event" && frame.event.type === "player_input",
+    );
+    socketA.send(
+      JSON.stringify({
+        type: "structured_action",
+        clientMessageId: "a1",
+        actorId: "hero",
+        turn: {
+          actorId: "hero",
+          mainAction: { actionType: "dodge" },
+          tacticalRationaleEnglish: "Test fixture: socket A's hero turn.",
+        },
+      }),
+    );
+    await aPlayerInput;
+
+    // A SECOND, brand-new socket joins the SAME session while A's turn is
+    // still in flight.
+    const socketB = await connect(url);
+    const bJoinReply = framesUntil(
+      socketB,
+      (frame) => frame.type === "session_state" || frame.type === "error",
+    );
+    socketB.send(JSON.stringify({ type: "join", sessionId }));
+    const bFrames = await bJoinReply;
+
+    // Must be the session_state restore, not turn_in_progress.
+    expect(bFrames.at(-1)).toMatchObject({ type: "session_state" });
+
+    // Let A's turn (and the enemy sweep) finish before the test ends, so
+    // nothing keeps writing to the store after the sockets close.
+    await waitForRoundSettled(store, sessionId);
+
+    socketA.close();
+    socketB.close();
+  });
 });

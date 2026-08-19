@@ -85,12 +85,31 @@ export function registerWebSocketRoute(app: FastifyInstance, input: WebSocketRou
         //    `nextSequence` advanced on it in place — so `localBusy` alone
         //    cannot prevent two different sockets bound to the same session
         //    from each passing their own turn-order check while the other's
-        //    turn is still resolving. `sessionId` is known synchronously in
-        //    both branches: a `join` carries its own `command.sessionId`;
-        //    anything else can only reach this point with `session` already
-        //    bound, because guard 1 above forbids a second message on THIS
-        //    socket from starting before an earlier `join` finished binding
-        //    it.
+        //    turn is still resolving. Claimed ONLY for mutating commands
+        //    (`structured_action`/`free_text`) — see the `join` exclusion
+        //    just below for why. `sessionId` below reads `session?.state.
+        //    sessionId`, which is `undefined` whenever this socket has not
+        //    yet bound a session — including a stray non-join sent before
+        //    any `join` at all, a case guard 1 does NOT rule out (it only
+        //    serializes messages on this socket; it does not require the
+        //    first one to have been a `join`). When `sessionId` is
+        //    `undefined` no lock is consulted, and control falls through to
+        //    the `session === null` ("send a join message first") branch
+        //    further down.
+        //
+        // `join` is deliberately EXCLUDED from the session lock (post-review
+        // fix): `pipeline.ts`'s `join` branch is read-only — it calls
+        // `latestSnapshot`/`readSince` and yields `session_state`/`event`
+        // frames, never `emit`, so it cannot itself duplicate a turn, which
+        // is the only hazard this lock exists to prevent. Claiming it for
+        // `join` was a regression: C-36a keeps a turn's `handleCommand`
+        // draining, lock held, for the WHOLE hero turn plus the entire enemy
+        // sweep (each budgeted `turnTimeoutMs`) even after the originating
+        // socket has disappeared — so a client that drops mid-turn and
+        // reconnects could have its own `join` rejected with
+        // `turn_in_progress` instead of getting the `session_state` restore
+        // the spec's §Reconnect and `protocol.ts`'s `JoinMessage`
+        // doc-comment both promise.
         //
         // Neither guard is a queue: the spec is explicit that a queued stale
         // click would land against a changed board and fail validation for
@@ -100,7 +119,7 @@ export function registerWebSocketRoute(app: FastifyInstance, input: WebSocketRou
           turnInProgress();
           return;
         }
-        const sessionId = command.type === "join" ? command.sessionId : session?.state.sessionId;
+        const sessionId = command.type === "join" ? undefined : session?.state.sessionId;
         const claimedSessionLock = sessionId !== undefined && input.registry.tryBegin(sessionId);
         if (sessionId !== undefined && !claimedSessionLock) {
           turnInProgress();
@@ -149,11 +168,13 @@ export function registerWebSocketRoute(app: FastifyInstance, input: WebSocketRou
         } finally {
           localBusy = false;
           // Release the SESSION lock last — after the drain above has fully
-          // finished (or thrown) — never earlier: a `join` that resolved to
-          // `unknown_session` and returned early still reaches here via the
-          // early `return`s inside `try`, so the lock claimed for that
-          // nonexistent session id is released regardless of which path out
-          // of `try` was taken.
+          // finished (or thrown) — never earlier. `claimedSessionLock` is
+          // only ever `true` for a mutating command whose `session` was
+          // already bound when the lock was claimed (see the guard-2
+          // comment above), so this only fires on the one path that could
+          // have held it: the full `handleCommand` drain, success or
+          // failure. `join` never reaches here with anything to release —
+          // it never claims the lock at all (excluded above).
           if (sessionId !== undefined && claimedSessionLock) input.registry.end(sessionId);
         }
       })();
