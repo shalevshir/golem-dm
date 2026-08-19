@@ -18,7 +18,13 @@
 import { applyTurn, seeded, validateExecuteTurn } from "@ai-dm/rules-engine";
 import type { TurnEffect } from "@ai-dm/rules-engine";
 import { availableActionsFor, createDeterministicNarrative } from "@ai-dm/agents";
-import type { NarrativePort, TacticalAgent, TurnProposalResult } from "@ai-dm/agents";
+import type {
+  NarrativePort,
+  TacticalAgent,
+  TurnProposalFailure,
+  TurnProposalResult,
+  TurnProposalSource,
+} from "@ai-dm/agents";
 import type { ClientMessage, GameEvent, ServerFrame } from "@ai-dm/schemas";
 import { SequenceConflictError, SessionMismatchError } from "./event-store.js";
 import type { EventStore } from "./event-store.js";
@@ -29,6 +35,50 @@ import { worldFor } from "./session.js";
 /** `apps/server/CLAUDE.md`: snapshot every 50 events. */
 export const SNAPSHOT_EVERY = 50;
 
+/**
+ * Per-turn tactical-agent metrics (`apps/server/CLAUDE.md`: "tokens in/out,
+ * cached tokens, latency, retries, cost ... emitted as structured logs from
+ * day one"). Recorded only for turns that actually called the tactical
+ * agent — a player's `structured_action` makes no model call and has
+ * nothing to report.
+ *
+ * Two of the spec's five fields are deliberately absent (task-corrections.md
+ * addendum, C-23/C-39):
+ * - Cached tokens: `TokenUsage` (`packages/agents/src/providers/usage.ts`)
+ *   is exactly `{ promptTokens, completionTokens, totalTokens }` — no
+ *   cache-read field exists anywhere in the port layer to report.
+ * - Cost: the pricing table lives in `tools/sim`, which nothing under
+ *   `apps/server` may depend on (dependency direction, root CLAUDE.md §5).
+ *   A cost figure computed from `TokenUsage` alone would also be *wrong*,
+ *   not merely missing — cache reads bill differently and nothing here
+ *   reports them.
+ */
+export interface TacticalTurnMetrics {
+  actorId: string;
+  /** `TurnProposalSuccess.source`, or the failure `kind` when no legal turn came back. */
+  source: TurnProposalSource | TurnProposalFailure["kind"];
+  /** `usage.length`: one entry per billed attempt, including failed ones. */
+  attempts: number;
+  promptTokens: number;
+  completionTokens: number;
+  totalTokens: number;
+  /** Wall time around this turn's `tactical.proposeTurn` call. */
+  latencyMs: number;
+}
+
+/**
+ * Where the metrics go is a transport decision, not a core one: core calls
+ * this port, the transport decides it writes a structured log line. Reading
+ * `TimingPort.timings` from the transport instead was rejected — it is an
+ * append-only array with no drain/reset API and carries no token counts, so
+ * tokens have to be threaded out of the pipeline regardless, and one
+ * mechanism beats two. Optional so the pre-existing pipeline tests, and
+ * Task 15, need not supply one.
+ */
+export interface MetricsPort {
+  recordTacticalTurn(metrics: TacticalTurnMetrics): void;
+}
+
 export interface TurnPorts {
   store: EventStore;
   tactical: TacticalAgent;
@@ -38,6 +88,8 @@ export interface TurnPorts {
   /** Deterministic per turn. Recorded in `dice_rolled`; replay reads it back. */
   seedFor: (rootSeed: number, sequence: number) => number;
   turnTimeoutMs: number;
+  /** Structured per-turn tactical metrics. Absent means no logging (tests). */
+  metrics?: MetricsPort;
 }
 
 function namesFor(session: Session): Record<string, string | undefined> {
@@ -101,29 +153,35 @@ async function* untilDeadline(
     });
   };
 
-  for (;;) {
-    const remaining = deadline - Date.now();
-    if (remaining <= 0) {
-      abandon();
-      return;
+  // C-36b: this loop has no bound of its own on how long it can be
+  // suspended at `yield next.value` below, and abandoning early (a consumer
+  // that `break`s out of its `for await`, which propagates `.return()` in
+  // here) must still release `iterator` — the `for (;;)` body's own two
+  // early-`return`s are not the only way out. Wrapping the whole loop in
+  // `try`/`finally` covers all three exits (deadline elapsed, timeout,
+  // upstream `.return()`) with the one `abandon()` call, so the two
+  // early-exit branches no longer need their own.
+  try {
+    for (;;) {
+      const remaining = deadline - Date.now();
+      if (remaining <= 0) return;
+
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      const timeout = new Promise<"timeout">((resolve) => {
+        timer = setTimeout(() => {
+          resolve("timeout");
+        }, remaining);
+      });
+
+      const next = await Promise.race([iterator.next(), timeout]);
+      clearTimeout(timer);
+
+      if (next === "timeout") return;
+      if (next.done === true) return;
+      yield next.value;
     }
-
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    const timeout = new Promise<"timeout">((resolve) => {
-      timer = setTimeout(() => {
-        resolve("timeout");
-      }, remaining);
-    });
-
-    const next = await Promise.race([iterator.next(), timeout]);
-    clearTimeout(timer);
-
-    if (next === "timeout") {
-      abandon();
-      return;
-    }
-    if (next.done === true) return;
-    yield next.value;
+  } finally {
+    abandon();
   }
 }
 
@@ -244,6 +302,7 @@ export async function* handleCommand(
     }, Math.max(0, deadline - Date.now()));
 
     let proposal: TurnProposalResult;
+    const proposalStartedAt = Date.now();
     try {
       proposal = await ports.tactical.proposeTurn({
         world,
@@ -254,6 +313,28 @@ export async function* handleCommand(
       });
     } finally {
       clearTimeout(timer);
+    }
+
+    // C-23/C-39: `proposal.usage` is the only place token counts for this
+    // call exist — `enemyTurn` used to drop it on the floor. One line per
+    // turn that reached the tactical agent, regardless of whether it ended
+    // in a legal turn or a forfeit, since both cost real tokens.
+    if (ports.metrics !== undefined) {
+      const totals = proposal.usage.reduce(
+        (sum, each) => ({
+          promptTokens: sum.promptTokens + each.promptTokens,
+          completionTokens: sum.completionTokens + each.completionTokens,
+          totalTokens: sum.totalTokens + each.totalTokens,
+        }),
+        { promptTokens: 0, completionTokens: 0, totalTokens: 0 },
+      );
+      ports.metrics.recordTacticalTurn({
+        actorId,
+        source: proposal.ok ? proposal.source : proposal.kind,
+        attempts: proposal.usage.length,
+        ...totals,
+        latencyMs: Date.now() - proposalStartedAt,
+      });
     }
 
     // Every attempt the agent made, whether or not one succeeded. This is the

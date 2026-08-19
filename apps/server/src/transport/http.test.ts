@@ -60,25 +60,28 @@ describe("POST /sessions", () => {
     expect(await registry.get(sessionId)).not.toBeNull();
   });
 
-  it("responds 500 for any error other than UnknownEncounterError, even one whose " +
-    "message starts with the same words", async () => {
-    // Guards the C-34 fix itself: a handler that detected the 404 case with
-    // `message.startsWith("Unknown encounter")` instead of `instanceof
-    // UnknownEncounterError` would misroute this to 404. The message is
-    // deliberately chosen to collide with that regex.
-    const app = Fastify();
-    const registry: SessionRegistry = {
-      create: () => Promise.reject(new Error("Unknown encounter that is really a bug")),
-      get: () => Promise.resolve(null),
-    };
-    registerHttpRoutes(app, registry);
-    const response = await app.inject({
-      method: "POST",
-      url: "/sessions",
-      payload: { encounterId: "goblin-ambush" },
-    });
-    expect(response.statusCode).toBe(500);
-  });
+  it(
+    "responds 500 for any error other than UnknownEncounterError, even one whose " +
+      "message starts with the same words",
+    async () => {
+      // Guards the C-34 fix itself: a handler that detected the 404 case with
+      // `message.startsWith("Unknown encounter")` instead of `instanceof
+      // UnknownEncounterError` would misroute this to 404. The message is
+      // deliberately chosen to collide with that regex.
+      const app = Fastify();
+      const registry: SessionRegistry = {
+        create: () => Promise.reject(new Error("Unknown encounter that is really a bug")),
+        get: () => Promise.resolve(null),
+      };
+      registerHttpRoutes(app, registry);
+      const response = await app.inject({
+        method: "POST",
+        url: "/sessions",
+        payload: { encounterId: "goblin-ambush" },
+      });
+      expect(response.statusCode).toBe(500);
+    },
+  );
 });
 
 describe("SessionRegistry", () => {

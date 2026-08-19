@@ -4,11 +4,11 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "tsx watch src/main.ts",
+    "dev": "tsx watch --env-file-if-exists=.env src/main.ts",
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc --noEmit",
     "test": "vitest run --passWithNoTests",
-    "start": "node dist/main.js"
+    "start": "node --env-file-if-exists=.env dist/main.js"
   },
   "dependencies": {
     "@ai-dm/agents": "workspace:*",
