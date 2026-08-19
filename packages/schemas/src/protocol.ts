@@ -5,7 +5,7 @@
 // Nothing in this file may import a Node built-in: `apps/web` bundles it for
 // the browser.
 import { z } from "zod";
-import { ExecuteTurn } from "./actions.js";
+import { ActionType, ExecuteTurn, Tile } from "./actions.js";
 import { GameEvent } from "./events.js";
 import { Combatant, GridMap } from "./world.js";
 
@@ -99,6 +99,44 @@ export const ServerErrorCode = z.enum([
 
 export type ServerErrorCode = z.infer<typeof ServerErrorCode>;
 
+/**
+ * One action the actor may take right now, with the targets it may legally
+ * take it against. Ids and enum members only — display names are static per
+ * encounter and travel over `GET /encounters/:encounterId` instead, so a
+ * frame sent every turn does not re-send text that never changes.
+ *
+ * `actionType` is present because the client builds `ExecuteTurn.mainAction`
+ * from this, and deducing the type from the id would be the client reasoning
+ * about rules — the exact thing affordances exist to prevent. `actionId` is
+ * optional because Dodge, Dash and Disengage have none.
+ */
+export const ActionAffordance = z.object({
+  actionType: ActionType,
+  actionId: z.string().optional(),
+  /**
+   * Distinguishes "needs no target" (Dodge) from "needs one and none is in
+   * range", which an empty `targetableCombatantIds` alone cannot express.
+   */
+  requiresTarget: z.boolean(),
+  targetableCombatantIds: z.array(z.string()),
+});
+
+export type ActionAffordance = z.infer<typeof ActionAffordance>;
+
+/**
+ * Everything the actor may legally do this turn, derived server-side by
+ * running `validateExecuteTurn` over enumerated candidates. The client
+ * highlights exactly this and computes nothing: a tile it draws as reachable
+ * is a tile the validator already accepted.
+ */
+export const TurnAffordances = z.object({
+  actorId: z.string(),
+  reachableTiles: z.array(Tile),
+  actions: z.array(ActionAffordance),
+});
+
+export type TurnAffordances = z.infer<typeof TurnAffordances>;
+
 export const ServerFrame = z.discriminatedUnion("type", [
   z.object({
     type: z.literal("session_state"),
@@ -113,6 +151,20 @@ export const ServerFrame = z.discriminatedUnion("type", [
    * gap.
    */
   z.object({ type: z.literal("narrative_token"), streamId: z.string(), text: z.string() }),
+  /**
+   * Pushed at the two points the pipeline knows the player is up: a `join`
+   * that lands on their turn, and the end of a turn that returns control to
+   * them. Not a request/response — the client never asks for these.
+   */
+  TurnAffordances.extend({
+    type: z.literal("turn_affordances"),
+    /**
+     * The projection these were computed from. The client discards a frame
+     * older than the state it currently holds, so an affordance set cannot
+     * be applied to a board that has already moved past it.
+     */
+    forSequence: z.number().int().min(0),
+  }),
   z.object({
     type: z.literal("rejected"),
     clientMessageId: z.string(),
