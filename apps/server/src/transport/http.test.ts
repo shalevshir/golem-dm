@@ -139,3 +139,48 @@ describe("GET /health", () => {
     expect((await app.inject({ method: "GET", url: "/health" })).statusCode).toBe(200);
   });
 });
+
+describe("GET /encounters/:encounterId", () => {
+  it("returns display names for every combatant in the encounter", async () => {
+    const { app } = appWith();
+    const response = await app.inject({ method: "GET", url: "/encounters/goblin-ambush" });
+    expect(response.statusCode).toBe(200);
+
+    const body = response.json<{
+      encounterId: string;
+      combatants: { combatantId: string; nameEnglish: string; maxHp: number; faction: string }[];
+      actions: { actionId: string; nameEnglish: string }[];
+    }>();
+
+    expect(body.encounterId).toBe("goblin-ambush");
+    expect(body.combatants.map((each) => each.combatantId).sort()).toEqual([
+      "goblin-a",
+      "goblin-b",
+      "hero",
+    ]);
+
+    const hero = body.combatants.find((each) => each.combatantId === "hero");
+    // No player-character data exists, so the hero borrows the `guard` stat
+    // block (C-13) and its English name is all a label can show.
+    expect(hero?.nameEnglish).toBe("Guard");
+    expect(hero?.faction).toBe("party");
+    expect(hero?.maxHp).toBeGreaterThan(0);
+  });
+
+  it("dedupes actions by actionId across stat blocks", async () => {
+    const { app } = appWith();
+    const response = await app.inject({ method: "GET", url: "/encounters/goblin-ambush" });
+    const body = response.json<{ actions: { actionId: string; nameEnglish: string }[] }>();
+
+    const ids = body.actions.map((each) => each.actionId);
+    expect(new Set(ids).size).toBe(ids.length);
+    expect(ids).toContain("spear");
+    expect(ids).toContain("scimitar");
+  });
+
+  it("404s on an unknown encounter", async () => {
+    const { app } = appWith();
+    const response = await app.inject({ method: "GET", url: "/encounters/nope" });
+    expect(response.statusCode).toBe(404);
+  });
+});

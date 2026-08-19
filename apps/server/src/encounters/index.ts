@@ -3,7 +3,7 @@
 // half-valid world.
 import { buildEncounter } from "@ai-dm/rules-engine";
 import type { BuiltEncounter, EncounterDefinition } from "@ai-dm/rules-engine";
-import type { MonsterStatBlock } from "@ai-dm/schemas";
+import type { Faction, MonsterStatBlock } from "@ai-dm/schemas";
 import { loadMonster } from "./srd.js";
 
 export { loadMonster };
@@ -71,4 +71,57 @@ export function buildEncounterById(encounterId: string): BuiltEncounter {
     }
   }
   return buildEncounter({ definition, statBlocks });
+}
+
+/**
+ * The static per-encounter facts a client needs to label what it draws:
+ * display names, max HP and faction. Static is the point — this is fetched
+ * once over HTTP and cached, rather than re-sent on a socket that already
+ * carries a `SessionState` growing without bound (C-30).
+ */
+export interface EncounterCatalogue {
+  encounterId: string;
+  combatants: {
+    combatantId: string;
+    nameEnglish: string;
+    maxHp: number;
+    faction: Faction;
+  }[];
+  actions: { actionId: string; nameEnglish: string }[];
+}
+
+export function encounterCatalogue(encounterId: string): EncounterCatalogue {
+  const built = buildEncounterById(encounterId);
+
+  const combatants = built.world.combatants.map((combatant) => {
+    const statBlock = built.statBlocks.get(combatant.combatantId);
+    return {
+      combatantId: combatant.combatantId,
+      // A combatant with no stat block cannot occur — `buildEncounter` refuses
+      // to produce one — but the map lookup is still `T | undefined` under
+      // `noUncheckedIndexedAccess`, and the id is a better label than a crash.
+      nameEnglish: statBlock?.nameEnglish ?? combatant.combatantId,
+      maxHp: combatant.maxHp,
+      faction: combatant.faction,
+    };
+  });
+
+  // Flattened across every stat block and deduped by `actionId`, first
+  // occurrence winning. Two monsters sharing an id would otherwise appear
+  // twice; `goblin-ambush` has no collision today (scimitar/shortbow vs
+  // spear), so this is a rule for the next encounter. These are display labels
+  // only, so first-wins is harmless even when the underlying attack bonuses
+  // differ — legality still comes from affordances, never from this list.
+  const actions = new Map<string, string>();
+  for (const statBlock of built.statBlocks.values()) {
+    for (const action of statBlock.actions) {
+      if (!actions.has(action.actionId)) actions.set(action.actionId, action.nameEnglish);
+    }
+  }
+
+  return {
+    encounterId,
+    combatants,
+    actions: [...actions].map(([actionId, nameEnglish]) => ({ actionId, nameEnglish })),
+  };
 }

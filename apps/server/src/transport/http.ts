@@ -7,7 +7,7 @@ import { z } from "zod";
 import type { EventStore } from "../core/event-store.js";
 import { createSession, loadSession } from "../core/session.js";
 import type { Session } from "../core/session.js";
-import { UnknownEncounterError } from "../encounters/index.js";
+import { encounterCatalogue, UnknownEncounterError } from "../encounters/index.js";
 
 const CreateSessionBody = z.object({ encounterId: z.string().min(1) });
 
@@ -131,5 +131,20 @@ export function registerHttpRoutes(app: FastifyInstance, registry: SessionRegist
       throw error;
     }
     return reply.code(201).send({ sessionId: session.state.sessionId });
+  });
+
+  app.get<{ Params: { encounterId: string } }>("/encounters/:encounterId", (request, reply) => {
+    // C-34: `UnknownEncounterError` is the only 404. Everything else
+    // `encounterCatalogue` can throw — ENOENT from a missing SRD file, a
+    // ZodError from a malformed one, any of `buildEncounter`'s validations —
+    // is a genuine server fault and must not be reported as "not found".
+    try {
+      return reply.send(encounterCatalogue(request.params.encounterId));
+    } catch (error) {
+      if (error instanceof UnknownEncounterError) {
+        return reply.code(404).send({ error: error.message });
+      }
+      throw error;
+    }
   });
 }
