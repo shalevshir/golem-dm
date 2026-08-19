@@ -179,6 +179,56 @@ The ones that most affect the validator: player weapon and spell ranges still
 have no data, monster traits and reactions are not captured, cover is
 all-or-nothing per square, and Tiny creatures cannot share a square.
 
+### 4.1 SRD reference notebook (registered 2026-08-19)
+
+The full SRD 5.2.1 — the 13 chapter markdowns plus the official
+`SRD_CC_v5.2.1.pdf` — is loaded in NotebookLM notebook
+**`3a0d4f39-93c2-48ee-b1d1-258c7f7583ab`**, queryable through the NotebookLM
+MCP (`notebook_query`); answers carry citations into the SRD text. Verified
+2026-08-19 by re-auditing `RULES_REFERENCE.md` §1–§7 against it: ~40 claims
+checked, all seven §7 recall traps confirmed, two rows corrected (Temporary
+HP replacement is RAW a *choice*, and RAW lets a creature pass a narrow
+opening one size smaller as Difficult Terrain — our hard block is a house
+rule).
+
+**Where it plugs in — and where it must not:**
+
+- **Not the rules engine, not runtime.** Invariant 1 stands: legality and
+  math are code + `data/srd/` JSON. No engine, agent, or server path may call
+  NotebookLM at runtime — it is a dev-machine MCP on a personal Google
+  account, with the latency and availability to match. If a runtime
+  "rules-lawyer" retrieval path is ever wanted, it goes through
+  `packages/memory` pgvector over locally ingested SRD markdown (step 10
+  infrastructure), never NotebookLM.
+- **Rule verification (ongoing).** The `RULES_REFERENCE.md` discipline gains
+  a faster loop: query the notebook first; the PDF text stays the authority
+  for exact wording.
+- **SRD data transcription (step 8 pre-work).** The §8 data gaps close by
+  transcription with notebook-cited checks, same methodology that caught the
+  Stunned/Speed-0 bug in step 5.
+- **Prompt-context curation (step 9).** The static (cache-stable) prompt tier
+  gets a curated English rules digest — conditions, action economy, cover —
+  compiled at dev time and verified against the notebook before pinning.
+  Never live retrieval.
+- **Sim adjudication (step 7b+).** When a rejection-log dispute arises
+  (validator vs. model), the notebook is the offline referee for what RAW
+  says.
+
+**Tasks:**
+
+- [ ] **7b:** before publishing the benchmark, adjudicate any disputed
+      `action_rejected` codes against the notebook — a validator bug pooled
+      into a model's rejection rate corrupts the comparison.
+- [ ] **Step 8 pre-work:** transcribe player weapon data (damage, properties,
+      ranges) and armor/base AC into `data/srd/`, notebook-checked — closes
+      the caller-supplied default on `CombatWorld.actionRangesFeet` for
+      players and the base-AC row in `RULES_REFERENCE.md` §2.
+- [ ] **Step 9:** build the rules digest for the narrative/tactical static
+      prompt tier; verify each line against the notebook, then pin it under
+      the same hash-guard as `TACTICAL_PROMPT_VERSION`.
+- [ ] **Backlog:** monster traits/reactions transcription (Pack Tactics,
+      Parry, Undead Fortitude) once the engine grows hooks for them (§8).
+
 ## 5. Open Risks
 
 Tactical-model quality on spatial reasoning (mitigated by sim benchmarking + fallback); Hebrew narrative register (native-speaker review in step 9); sequential-call latency stacking (streaming + intent bypass); licensing discipline as content grows (SRD-only rule in `data/srd/README.md`); solo→party scope creep (deferred by ADR-0002).

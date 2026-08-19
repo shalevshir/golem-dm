@@ -25,3 +25,15 @@ so corner-to-corner RAW can replace it later.
 One rule this ADR omitted, now implemented: diagonal movement **cannot cross the
 corner** of a wall or anything else that fills its space. See
 [`RULES_REFERENCE.md`](../../RULES_REFERENCE.md) §5.
+
+## Correction (2026-08-19) — narrow openings
+
+Bresenham is **not** the only house rule after all. SRD 5.2.1's Difficult
+Terrain list includes "a narrow opening sized for a creature one size smaller
+than you" — RAW therefore lets a Large creature pass a one-square gap at
+double movement cost. `findPath({size})` requires the whole space to fit and
+hard-blocks the gap instead. That block stays for the POC (fractional-cost
+squeeze paths complicate A* for little POC value), but it is a **second
+genuine house rule**, recorded in `RULES_REFERENCE.md` §5 and §8. Found in
+the 2026-08-19 audit against the SRD NotebookLM notebook (PROJECT_PLAN.md
+§4.1).

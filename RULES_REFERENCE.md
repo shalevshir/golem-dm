@@ -8,11 +8,20 @@ Every row below was checked against the SRD text on 2026-08-17, not from
 recall. Rules are paraphrased; consult the SRD for exact wording. **Do not
 "correct" anything here from memory of 2014 rules — check the SRD first.**
 
-To re-verify, download the PDF and extract it:
+To re-verify, the fastest path is the **SRD NotebookLM notebook** —
+`3a0d4f39-93c2-48ee-b1d1-258c7f7583ab` ("SRD 5.2.1 Markdown Project Release
+Notes"), holding the 13 SRD chapter markdowns plus the official PDF. With the
+NotebookLM MCP connected, `notebook_query` against that ID returns answers
+with citations into the SRD text (see `PROJECT_PLAN.md` §4.1 — dev-time tool
+only, never a runtime dependency). For exact wording, or offline, extract the
+PDF:
 
 ```bash
 pdftotext -layout SRD_CC_v5.2.1.pdf srd.txt
 ```
+
+Sections 1–7 were re-audited against the notebook on 2026-08-19; two rows
+were corrected (Temporary HP choice, narrow openings) — see §4, §5, §8.
 
 ---
 
@@ -84,7 +93,7 @@ Creatures do **not** block line of sight; they grant cover instead, so
 
 | Rule | Behaviour | Implemented in |
 |---|---|---|
-| Temporary HP | Absorbed before real HP. Healing **cannot** restore them. They never stack — keep the higher pool, not the sum. | `combat/` `applyDamage`, `applyHealing` |
+| Temporary HP | Absorbed before real HP. Healing **cannot** restore them. They never stack — RAW lets the recipient **choose** which pool to keep ("you decide whether to keep the ones you have or to gain the new ones"); auto-keeping the higher will be our simplification when granting is implemented (today the engine only spends temp HP, never grants it). | `combat/` `applyDamage`, `applyHealing` |
 | Massive damage | When damage drops you to 0 **and damage remains**, you die if the remainder ≥ your HP maximum. | `combat/` `applyDamage` → `instantDeath` |
 | Monster death | A monster **dies instantly** at 0 HP — it does not fall unconscious or roll death saves. | `applyDamage(..., {diesAtZeroHp:true})` |
 | Character at 0 HP | Falls Unconscious and rolls death saves. | `applyDamage` default |
@@ -113,7 +122,7 @@ house rule. Chebyshev distance is therefore correct.
 | Difficult terrain never stacks | "1 extra foot, **even if multiple things in a space count as Difficult Terrain**." A creature's space that is also difficult is still just doubled. | `spatial/` `findPath` |
 | Creature size | Tiny 2½ ft · Small/Medium 5 ft · Large 10 ft (2×2) · Huge 15 ft (3×3) · Gargantuan 20 ft (4×4). Order matters — pass-through is stated in categories apart. | `schemas` `CreatureSize` |
 | Creature space | A creature fills its whole space, anchored at the north-west square. Every square of it counts as occupied. | `spatial/` `occupiedTiles` |
-| Moving a large creature | The **whole space** must fit in each position entered. 2024 has **no squeezing rule**, so a Large creature cannot pass a one-square gap. | `spatial/` `findPath({size})` |
+| Moving a large creature | The **whole space** must fit in each position entered. 2024 has no dedicated squeezing rule, but the Difficult Terrain list includes "a narrow opening sized for a creature one size smaller than you" — so RAW lets a Large creature pass a one-square gap at double cost. Our hard block is a **house-rule simplification** (see §8). | `spatial/` `findPath({size})` |
 | Passing through a creature | Allowed through an **ally**, an **Incapacitated** creature, a **Tiny** creature, or one **two sizes** larger or smaller. Otherwise blocked. | `combat/` `passabilityThrough` |
 | Cost of a creature's space | **Difficult Terrain**, unless that creature is Tiny or your ally. | `combat/` `passabilityThrough` → `hindered` |
 | Ending a move | You can't willingly end a move in a space occupied by another creature. | `combat/` `destination_occupied` |
@@ -214,3 +223,11 @@ Not yet implemented, roughly in dependency order:
   allied. A `FactionRelation` score exists in `schemas` but is not consulted.
 - **Standing up from Prone.** `ExecuteTurn` cannot express it, so a prone actor
   is always costed as crawling (§6).
+- **Narrow openings.** RAW treats "a narrow opening sized for a creature one
+  size smaller than you" as Difficult Terrain, so a Large creature can pass a
+  one-square gap at double cost; `findPath({size})` hard-blocks it instead
+  (§5).
+- **Ending a turn in an occupied space involuntarily** gives the Prone
+  condition unless the creature is Tiny or larger than the occupant. Forced
+  movement is not modelled, so no code path can produce this yet — record it
+  when one can.
