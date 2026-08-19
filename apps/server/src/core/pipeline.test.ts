@@ -5,7 +5,7 @@ import { createDeterministicNarrative } from "@ai-dm/agents";
 import type { ClientMessage, GameEvent, ServerFrame, SessionState } from "@ai-dm/schemas";
 import { createInMemoryEventStore } from "./event-store.js";
 import type { EventStore } from "./event-store.js";
-import { handleCommand } from "./pipeline.js";
+import { SNAPSHOT_EVERY, handleCommand } from "./pipeline.js";
 import type { TurnPorts } from "./pipeline.js";
 import { createSession } from "./session.js";
 import type { Session } from "./session.js";
@@ -204,26 +204,35 @@ describe("handleCommand — structured action", () => {
     expect(frames[0]).toMatchObject({ type: "error", code: "not_your_turn" });
   });
 
-  it("appends player_input, validated, dice_rolled, state_delta_applied in order", async () => {
+  // The full, exact appended type sequence for a successful turn — not just
+  // a `slice(0, 4)` prefix. Both `clock`/`uuid`/`seedFor` are fixed by
+  // `portsWith`, so nothing about a successful dodge is nondeterministic;
+  // there is no excuse for a weaker assertion here.
+  it("appends the exact event type sequence for a successful turn", async () => {
     const store = createInMemoryEventStore();
     const session = await freshSession(store);
     await drain(handleCommand(session, dodge("hero"), portsWith(store)));
     const types = (await store.readSince("s1", 0)).map((each) => each.type);
-    expect(types.slice(0, 4)).toEqual([
+    expect(types).toEqual([
       "player_input",
       "action_validated",
       "dice_rolled",
       "state_delta_applied",
+      "narrative_emitted",
+      "scene_changed",
     ]);
   });
 
-  it("yields an event frame for every event it appends", async () => {
+  // Frame/event *identity*, not just matching counts: a frame carrying the
+  // wrong event, or events out of order relative to their frames, would
+  // still pass a `toHaveLength` check but fails this one.
+  it("yields event frames that are exactly the events appended, in order", async () => {
     const store = createInMemoryEventStore();
     const session = await freshSession(store);
     const frames = await drain(handleCommand(session, dodge("hero"), portsWith(store)));
     const appended = await store.readSince("s1", 0);
-    const framed = frames.filter((each) => each.type === "event");
-    expect(framed).toHaveLength(appended.length);
+    const framedEvents = frames.filter((each) => each.type === "event").map((each) => each.event);
+    expect(framedEvents).toEqual(appended);
   });
 
   it("records the dice seed in the event so replay does not re-derive it", async () => {
@@ -241,6 +250,27 @@ describe("handleCommand — structured action", () => {
     expect(frames.some((each) => each.type === "narrative_token")).toBe(true);
     const types = (await store.readSince("s1", 0)).map((each) => each.type);
     expect(types).toContain("narrative_emitted");
+  });
+
+  // The other half of Task 5's own guarantee: the narrative port's streamed
+  // chunks concatenate to its completed text. This is where that text lands
+  // permanently — if the pipeline trims or otherwise alters it in transit, a
+  // client that rendered the streamed chunks optimistically would diverge
+  // from what replay produces, silently. The deterministic stand-in used by
+  // `portsWith` happens to need no trimming, so this only catches a real
+  // regression here, not a quirk of that one port.
+  it("narrative_emitted carries exactly the concatenation of its streamed tokens", async () => {
+    const store = createInMemoryEventStore();
+    const session = await freshSession(store);
+    const frames = await drain(handleCommand(session, dodge("hero"), portsWith(store)));
+    const streamed = frames
+      .filter((each) => each.type === "narrative_token")
+      .map((each) => each.text)
+      .join("");
+    const emitted = (await store.readSince("s1", 0)).find(
+      (each) => each.type === "narrative_emitted",
+    );
+    expect(emitted?.payload).toMatchObject({ text: streamed });
   });
 
   it("drops a duplicate clientMessageId without applying it twice", async () => {
@@ -282,7 +312,13 @@ describe("handleCommand — structured action", () => {
         portsWith(store),
       ),
     );
-    expect(frames.some((each) => each.type === "rejected")).toBe(true);
+    const rejected = frames.find((each) => each.type === "rejected");
+    if (rejected === undefined) throw new Error("Expected a rejected frame");
+    // Pinned to the real engine reason, not just "some rejection happened":
+    // an off-grid tile is illegal on any geometry, so unlike the brief's
+    // original out-of-reach fixture, C-14 cannot silently un-break this by
+    // making the proposed turn legal again.
+    expect(rejected.reasons).toEqual(["destination_off_grid"]);
     expect(session.state.currentActorIndex).toBe(before);
     const types = (await store.readSince("s1", 0)).map((each) => each.type);
     expect(types).toContain("action_rejected");
@@ -311,5 +347,30 @@ describe("handleCommand — structured action", () => {
     // nextSequence or added anything beyond the one rogue event already there.
     expect(session.nextSequence).toBe(1);
     expect((await store.readSince("s1", 0)).map((each) => each.sequence)).toEqual([1]);
+  });
+});
+
+describe("handleCommand — snapshot cadence", () => {
+  // `SNAPSHOT_EVERY`'s only production use is inside `emit`; the C-16 test
+  // above writes its snapshot by hand via `store.putSnapshot` and proves
+  // nothing about the pipeline actually calling it. A single hero turn can
+  // only reach one actor per `handleCommand` call (enemy turns are Task 10),
+  // so driving 50 real turns through `handleCommand` isn't possible yet —
+  // instead, fast-forward the session's own sequence counter so the one
+  // dodge turn's six events land on 45..50 and the last one crosses the
+  // boundary. `EventStore.append`'s only invariant is "no duplicate
+  // sequence for this session" (event-store.ts) — it does not require a
+  // contiguous log — so this is a legitimate way to reach the boundary
+  // without inventing a multi-actor turn loop this task doesn't have yet.
+  it("writes a snapshot via the store once the running sequence crosses SNAPSHOT_EVERY", async () => {
+    const store = createInMemoryEventStore();
+    const session = await freshSession(store);
+    session.nextSequence = SNAPSHOT_EVERY - 5;
+
+    expect(await store.latestSnapshot("s1")).toBeNull();
+    await drain(handleCommand(session, dodge("hero"), portsWith(store)));
+
+    const snapshot = await store.latestSnapshot("s1");
+    expect(snapshot).toEqual({ sequence: SNAPSHOT_EVERY, state: session.state });
   });
 });

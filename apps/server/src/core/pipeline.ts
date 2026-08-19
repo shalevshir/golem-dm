@@ -73,15 +73,29 @@ export async function* handleCommand(
       type,
       payload,
     };
+
+    // Compute the projection BEFORE persisting anything. `reduce` throws on
+    // a malformed player_input / state_delta_applied / scene_changed
+    // payload (C-27, reduce.ts's `.parse` calls) — a throw here must fail
+    // closed, before the event is written, not after. Otherwise a bad
+    // payload lands in the log with no frame ever yielded for it, which is
+    // exactly the append-without-yield window this function exists to rule
+    // out. `reduce` is pure, so computing it early costs nothing and
+    // changes no behaviour for event types it treats as a no-op.
+    const next = reduce(session.state, event);
+
     await ports.store.append(session.state.sessionId, [event]);
     session.nextSequence += 1;
-    session.state = reduce(session.state, event);
+    session.state = next;
+    yield { type: "event", event };
 
     if (event.sequence > 0 && event.sequence % SNAPSHOT_EVERY === 0) {
       // A cache, never authority: `loadSession` folds the log regardless.
+      // Deliberately after the yield — nothing downstream reads it within
+      // the same turn, so it must not sit inside the append-and-yield
+      // window either.
       await ports.store.putSnapshot(session.state.sessionId, event.sequence, session.state);
     }
-    yield { type: "event", event };
   }
 
   async function* narrate(actorId: string, effect: TurnEffect): AsyncIterable<ServerFrame> {
@@ -96,7 +110,14 @@ export async function* handleCommand(
       text += chunk;
       yield { type: "narrative_token", streamId, text: chunk };
     }
-    yield* emit("narrative_emitted", { actorId, streamId, text: text.trim() });
+    // No `.trim()`: this must carry exactly the concatenation of the
+    // narrative_token chunks yielded above (the other half of the guarantee
+    // Task 5's narrative port makes about its own streamed chunks). The
+    // deterministic stand-in happens to need no trimming, but that is a
+    // property of that port, not of this pipeline — a real LLM port with a
+    // leading/trailing space must not make replay diverge from what the
+    // client already rendered optimistically while streaming.
+    yield* emit("narrative_emitted", { actorId, streamId, text });
   }
 
   try {
@@ -119,6 +140,15 @@ export async function* handleCommand(
         // events since [the snapshot]." A resumeFrom older than the newest
         // snapshot is exactly the case a store that eventually prunes old
         // events would no longer be able to serve directly.
+        //
+        // Deliberate approximation: nothing actually prunes today, so
+        // "older than the newest snapshot" is being used as a stand-in for
+        // "predates the retained log" rather than a direct read of a
+        // retention floor. That means a client only 3 events behind a
+        // snapshot at sequence 50 still gets a whole `SessionState` resent
+        // instead of 3 events — correct, but wasteful, and per C-30 that
+        // payload only grows over a session's lifetime. Gate this on a real
+        // retention floor once the store has one.
         const snapshot = await ports.store.latestSnapshot(sessionId);
         if (snapshot !== null && command.resumeFrom < snapshot.sequence) {
           yield { type: "session_state", sequence: snapshot.sequence, snapshot: snapshot.state };
@@ -166,11 +196,13 @@ export async function* handleCommand(
           return;
         }
 
-        yield* emit("player_input", {
-          clientMessageId: command.clientMessageId,
-          actorId: command.actorId,
-        });
-
+        // Resolved before player_input is appended: this is a defensive
+        // branch (turn order and combatants both come from the same
+        // projection, so it should be unreachable), but if it ever does
+        // fire, the client must still be able to retry the same
+        // clientMessageId. Appending player_input first would mark it
+        // permanently applied and the dedupe check above would silently
+        // drop every retry.
         const world = worldFor(session);
         const actor = world.combatants.find((each) => each.combatantId === command.actorId);
         if (actor === undefined) {
@@ -182,6 +214,11 @@ export async function* handleCommand(
           };
           return;
         }
+
+        yield* emit("player_input", {
+          clientMessageId: command.clientMessageId,
+          actorId: command.actorId,
+        });
 
         const validation = validateExecuteTurn(command.turn, actor, world);
         if (!validation.valid) {
@@ -220,6 +257,18 @@ export async function* handleCommand(
         yield* narrate(command.actorId, effect);
         yield* emit("scene_changed", { kind: "turn_advanced" });
         return;
+      }
+
+      default: {
+        // Exhaustiveness guard: `reduce` gets this for free by returning
+        // `SessionState` (a missing case fails to compile), but this
+        // function returns `void` via `yield`, so a fourth `ClientMessage`
+        // member would otherwise compile and silently yield zero frames
+        // instead of failing loudly. `command` is `never` here as long as
+        // every real member is handled above — if it stops being `never`,
+        // that is this guard doing its job.
+        const exhaustiveCheck: never = command;
+        throw new Error(`Unhandled ClientMessage type: ${JSON.stringify(exhaustiveCheck)}`);
       }
     }
   } catch (error) {
