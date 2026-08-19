@@ -6,7 +6,13 @@ import { describe, expect, it } from "vitest";
 import { validateExecuteTurn } from "@ai-dm/rules-engine";
 import type { TacticalAgent } from "@ai-dm/agents";
 import { createDeterministicNarrative } from "@ai-dm/agents";
-import type { ClientMessage, ExecuteTurn, ServerFrame, SessionState } from "@ai-dm/schemas";
+import type {
+  ClientMessage,
+  ExecuteTurn,
+  GameEvent,
+  ServerFrame,
+  SessionState,
+} from "@ai-dm/schemas";
 import { createInMemoryEventStore } from "./event-store.js";
 import type { EventStore } from "./event-store.js";
 import { SNAPSHOT_EVERY, handleCommand } from "./pipeline.js";
@@ -188,10 +194,13 @@ describe("replay properties", () => {
     const store = createInMemoryEventStore();
     const live = await playRounds(store, 3);
     const events = await store.readSince("s1", -1); // ascending, includes sequence 0
+    // Loop-invariant: every cut folds from the same genesis, and rebuilding
+    // it per iteration means 81 redundant `buildEncounterById` calls (each
+    // one a `readFileSync`) for no benefit — hoisted out once instead.
+    const genesis = await genesisStateFor();
 
     for (const cutEvent of events) {
       const k = cutEvent.sequence;
-      const genesis = await genesisStateFor();
       const cached = fold(
         genesis,
         events.filter((each) => each.sequence > 0 && each.sequence <= k),
@@ -217,22 +226,38 @@ describe("replay properties", () => {
     // C-21 (blocking): the brief's version asserted only
     // `session.state.rootSeed === 99` right after passing `rootSeed: 99`
     // in — a tautology about the input that cannot fail regardless of what
-    // the pipeline does with it. This instead runs the identical command
-    // sequence under two roots and diffs the actual persisted streams:
-    // every `dice_rolled` payload carries `ports.seedFor(rootSeed,
-    // sequence)` (see `pipeline.ts`'s `enemyTurn`/`structured_action`
-    // handling), so a correctly-threaded rootSeed must produce a different
-    // recorded seed — and therefore a different event — at every one of
-    // those points. A regression that hardcoded or dropped `rootSeed`
-    // before it reached `seedFor` would make this comparison collapse to
-    // equal, and this property would catch it.
+    // the pipeline does with it.
+    //
+    // My first replacement for it was ALSO non-discriminating, for a
+    // different reason (review caught it): it compared the full event
+    // arrays from `readSince`, which include sequence 0 — whose payload is
+    // `{ encounterId, rootSeed }` (`session.ts`). With rootSeed 42 vs. 99,
+    // that one event already differs before a single turn plays, so
+    // `.not.toEqual` on the whole array passes even if `rootSeed` never
+    // reaches `seedFor` at all (e.g. a regression hardcoding
+    // `ports.seedFor(42, sequence)` in the pipeline) — exactly the bug this
+    // property exists to catch.
+    //
+    // So instead this compares only the recorded `dice_rolled` seeds —
+    // `ports.seedFor(rootSeed, sequence)`'s literal output
+    // (`pipeline.ts`'s `enemyTurn`/`structured_action` handling) — which
+    // has no sequence-0 freebie to hide behind: it only differs if
+    // `session.state.rootSeed` actually reached `seedFor` for every one of
+    // these turns. Verified by injecting the regression this comment used
+    // to only assume: hardcoding `seedFor` in `portsWith` to
+    // `(_rootSeed, sequence) => 42 * 1000 + sequence` (ignoring its
+    // `rootSeed` argument entirely) makes this assertion fail, as it
+    // should — see this task's report.
     const seed42 = createInMemoryEventStore();
     const seed99 = createInMemoryEventStore();
     await playRounds(seed42, 3, { rootSeed: 42 });
     await playRounds(seed99, 3, { rootSeed: 99 });
 
-    const a = await seed42.readSince("s1", -1);
-    const b = await seed99.readSince("s1", -1);
+    const seedsOf = (events: readonly GameEvent[]): unknown[] =>
+      events.filter((each) => each.type === "dice_rolled").map((each) => each.payload["seed"]);
+
+    const a = seedsOf(await seed42.readSince("s1", -1));
+    const b = seedsOf(await seed99.readSince("s1", -1));
     expect(a).not.toEqual(b);
   });
 });
@@ -264,6 +289,13 @@ describe("snapshots", () => {
     }
 
     expect(snapshot.sequence % SNAPSHOT_EVERY).toBe(0);
+    // At 5 rounds (81 events total), sequence SNAPSHOT_EVERY (50) is the
+    // ONLY boundary crossed, so `latestSnapshot` and "every snapshot point"
+    // coincide today — but `latestSnapshot` only ever returns the newest
+    // one (`event-store.ts`), so nothing else pins that coincidence. Pin it
+    // explicitly rather than let a later round-count change silently narrow
+    // this test to whatever the last boundary happens to be, unnoticed.
+    expect(snapshot.sequence).toBe(SNAPSHOT_EVERY);
 
     // C-22 / C-35: get the fold's starting state from the session API, not
     // from a cast on the genesis event's payload — sequence 0 no longer

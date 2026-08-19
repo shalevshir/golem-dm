@@ -58,8 +58,9 @@ export function reduce(state: SessionState, event: GameEvent): SessionState {
       // moment). `applyTurn` sets `actionEconomy: plan.economyAfter` on
       // whoever just acted, spending it — nothing else ever clears it, so
       // without this reset here, the combatant whose turn is beginning
-      // would carry forward the *previous* owner's spent economy forever
-      // after their first-ever turn.
+      // would carry forward *their own* spent economy from *their own*
+      // prior turn, forever after their first-ever turn (`actionEconomy` is
+      // per-combatant; nobody else's economy is involved or affected).
       // `turn_advanced` is exactly the event that marks a new turn
       // starting, so the fold is where this belongs, not the pipeline: no
       // new event type, no protocol change, and replay reproduces it by
