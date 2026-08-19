@@ -1,0 +1,116 @@
+// A session is its projection plus the static encounter data that projection
+// is not allowed to contain. Stat blocks and the grid's line-of-sight
+// algorithm are re-derived from `encounterId` rather than snapshotted: they
+// never change, and one of them is a function.
+//
+// C-26: `reduce` never writes `sessionId`, `rootSeed`, `encounterId`, `grid`
+// or `turnOrder` — no event branch touches those five `SessionState` fields,
+// and `session_snapshot` is deliberately a no-op in the projection (that is
+// what makes "fold-from-snapshot-plus-events equals fold-from-zero" hold).
+// So "fold from zero" here means "fold from the session-creation state", not
+// from an empty object: `initialState` below is that genesis state, and both
+// `createSession` and `loadSession` build it the same way before folding
+// anything on top of it.
+import { z } from "zod";
+import type { BuiltEncounter, CombatWorld } from "@ai-dm/rules-engine";
+import type { GameEvent, SessionState } from "@ai-dm/schemas";
+import { buildEncounterById } from "../encounters/index.js";
+import type { EventStore } from "./event-store.js";
+import { fold } from "./reduce.js";
+
+/** Sequence 0's payload. Parsed rather than cast — it is the only thing that
+ * tells a reloaded session which encounter it is. */
+const GenesisPayload = z.object({ encounterId: z.string(), rootSeed: z.number().int() });
+
+export interface Session {
+  state: SessionState;
+  built: BuiltEncounter;
+  /** The sequence the next appended event will take. */
+  nextSequence: number;
+}
+
+export interface CreateSessionInput {
+  sessionId: string;
+  encounterId: string;
+  rootSeed: number;
+  store: EventStore;
+  clock: () => string;
+  uuid: () => string;
+}
+
+/**
+ * The genesis `SessionState`: the five fields `reduce` never writes
+ * (`sessionId`, `rootSeed`, `encounterId`, `grid`, `turnOrder`), plus the
+ * starting combatants, round and turn index. `createSession` folds nothing
+ * on top of this but the genesis event; `loadSession` rebuilds this exact
+ * value before folding the rest of the log onto it.
+ */
+function initialState(input: {
+  sessionId: string;
+  rootSeed: number;
+  built: BuiltEncounter;
+}): SessionState {
+  return {
+    sessionId: input.sessionId,
+    rootSeed: input.rootSeed,
+    encounterId: input.built.encounterId,
+    grid: input.built.world.grid,
+    combatants: [...input.built.world.combatants],
+    turnOrder: [...input.built.turnOrder],
+    currentActorIndex: 0,
+    round: 1,
+    appliedClientMessageIds: [],
+  };
+}
+
+export async function createSession(input: CreateSessionInput): Promise<Session> {
+  const built = buildEncounterById(input.encounterId);
+  const state = initialState({ sessionId: input.sessionId, rootSeed: input.rootSeed, built });
+
+  // Sequence 0 is the session's own genesis event. Without it, a log with no
+  // turns yet is indistinguishable from a session that does not exist, and
+  // `loadSession` could not tell them apart.
+  const genesis: GameEvent = {
+    eventId: input.uuid(),
+    sessionId: input.sessionId,
+    sequence: 0,
+    timestamp: input.clock(),
+    type: "session_snapshot",
+    payload: { encounterId: input.encounterId, rootSeed: input.rootSeed, state },
+  };
+  await input.store.append(input.sessionId, [genesis]);
+
+  return { state, built, nextSequence: 1 };
+}
+
+export async function loadSession(input: {
+  sessionId: string;
+  store: EventStore;
+}): Promise<Session | null> {
+  const events = await input.store.readSince(input.sessionId, -1);
+  const genesis = events[0];
+  if (genesis === undefined) return null;
+
+  const { encounterId, rootSeed } = GenesisPayload.parse(genesis.payload);
+  const built = buildEncounterById(encounterId);
+  const state = fold(
+    initialState({ sessionId: input.sessionId, rootSeed, built }),
+    events.slice(1),
+  );
+
+  const last = events[events.length - 1];
+  return { state, built, nextSequence: (last?.sequence ?? 0) + 1 };
+}
+
+/**
+ * The validator and the resolver want a `CombatWorld`; the projection holds
+ * only its serializable half. This is where the two are married, and the only
+ * place that knows the difference.
+ */
+export function worldFor(session: Session): CombatWorld {
+  return {
+    ...session.built.world,
+    grid: session.state.grid,
+    combatants: session.state.combatants,
+  };
+}
