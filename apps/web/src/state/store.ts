@@ -38,13 +38,18 @@ export function applyFrame(state: ClientState, frame: ServerFrame): ClientState 
   switch (frame.type) {
     case "session_state":
       // Authoritative on arrival. Affordances computed against an older board
-      // go with it — the server sends a fresh set if the player is up.
+      // go with it — the server sends a fresh set if the player is up. A
+      // `session_state` only ever arrives on join or resync, so any
+      // transient UI state from before it — an in-flight error, a rejection
+      // toast — describes a moment that is now stale; both are cleared with
+      // it rather than surviving to render as if they just happened.
       return {
         ...state,
         snapshot: frame.snapshot,
         sequence: frame.sequence,
         affordances: null,
         lastError: null,
+        lastRejection: null,
       };
 
     case "event": {

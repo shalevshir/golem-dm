@@ -1,32 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { ActionEconomy } from "@ai-dm/schemas";
 import type { Combatant, SessionState } from "@ai-dm/schemas";
 import { conclusionOf } from "./conclusion.js";
-
-function combatant(
-  id: string,
-  faction: Combatant["faction"],
-  status: Combatant["status"],
-): Combatant {
-  return {
-    combatantId: id,
-    faction,
-    position: [0, 0],
-    size: "medium",
-    speedFeet: 30,
-    reachFeet: 5,
-    maxHp: 11,
-    currentHp: status === "alive" ? 11 : 0,
-    tempHp: 0,
-    armorClass: 16,
-    conditions: [],
-    exhaustionLevel: 0,
-    attacksPerAction: 1,
-    spellSlots: {},
-    actionEconomy: ActionEconomy.parse({}),
-    status,
-  };
-}
+import { combatant } from "./combatant-fixture.js";
 
 function stateWith(combatants: Combatant[]): SessionState {
   return {
