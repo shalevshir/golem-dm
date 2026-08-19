@@ -209,6 +209,72 @@ function hangingNarrative(): NarrativePort {
   };
 }
 
+/**
+ * A tactical port that never resolves on its own — it only settles once the
+ * turn's `abortSignal` fires, the way a real provider call threads the
+ * signal down to its own HTTP request and rejects when the request is
+ * aborted. Used to pin `enemyTurn`'s `AbortController` timeout (`pipeline.ts`)
+ * without a live model: every actor asked gets the same stalled call, and
+ * every one is rescued by the same abort.
+ */
+function abortingTactical(): TacticalAgent {
+  return {
+    proposeTurn(input) {
+      return new Promise((resolve) => {
+        input.abortSignal?.addEventListener("abort", () => {
+          resolve({ ok: false, kind: "aborted", rejections: [], usage: [] });
+        });
+      });
+    },
+  };
+}
+
+/**
+ * Resolves with a legal dodge after `delayMs` — never aborted, just slow.
+ * Used to prove `enemyTurn` shares ONE deadline between the tactical call
+ * and the narration that follows it, rather than giving each its own fresh
+ * `turnTimeoutMs` (the review's IMPORTANT finding): a tactical call that
+ * eats most of the budget should leave the following narration almost none
+ * of it, not a brand new window.
+ */
+function slowTactical(delayMs: number): TacticalAgent {
+  return {
+    proposeTurn(input) {
+      return new Promise((resolve, reject) => {
+        setTimeout(() => {
+          const actor = input.world.combatants.find(
+            (each) => each.combatantId === input.actorId,
+          );
+          if (actor === undefined) {
+            reject(new Error(`No combatant ${input.actorId} in this encounter`));
+            return;
+          }
+          const turn = {
+            actorId: input.actorId,
+            mainAction: { actionType: "dodge" as const },
+            tacticalRationaleEnglish: "Test fixture: deliberately slow.",
+          };
+          const validation = validateExecuteTurn(turn, actor, input.world);
+          if (!validation.valid) {
+            reject(
+              new Error(`Slow tactical double produced an illegal dodge for ${input.actorId}`),
+            );
+            return;
+          }
+          resolve({
+            ok: true,
+            turn,
+            plan: validation.plan,
+            source: "model",
+            rejections: [],
+            usage: [],
+          });
+        }, delayMs);
+      });
+    },
+  };
+}
+
 describe("handleCommand — join", () => {
   it("sends a snapshot when the client has nothing", async () => {
     const store = createInMemoryEventStore();
@@ -329,6 +395,18 @@ describe("handleCommand — structured action", () => {
       "scene_changed",
     ];
     expect(types).toEqual(["player_input", ...oneActorsTurn, ...oneActorsTurn, ...oneActorsTurn]);
+
+    // The type sequence alone can't tell three same-shaped turns apart — a
+    // bug that ran the same actor's turn three times would produce this
+    // exact list of types too. Pin *which* actor took each turn.
+    const validated = (await store.readSince("s1", 0)).filter(
+      (each) => each.type === "action_validated",
+    );
+    expect(validated.map((each) => each.payload["actorId"])).toEqual([
+      "hero",
+      "goblin-a",
+      "goblin-b",
+    ]);
   });
 
   // Frame/event *identity*, not just matching counts: a frame carrying the
@@ -531,11 +609,20 @@ describe("handleCommand — enemy turns", () => {
     // Back to the top of the order, one round later.
     expect(session.state.currentActorIndex).toBe(0);
     expect(session.state.round).toBe(2);
-    // hero + two goblins each had their proposal validated.
+    // hero + two goblins each had their proposal validated — and in that
+    // exact order. `toHaveLength(3)` alone would still pass if the loop
+    // revisited an actor and skipped another: 3 `action_validated`, 3
+    // `narrative_emitted`, `currentActorIndex === 0` and `round === 2` are
+    // all reachable that way too, since every path emits exactly one
+    // `turn_advanced` regardless of which actor it was for.
     const validated = (await store.readSince("s1", 0)).filter(
       (each) => each.type === "action_validated",
     );
-    expect(validated).toHaveLength(3);
+    expect(validated.map((each) => each.payload["actorId"])).toEqual([
+      "hero",
+      "goblin-a",
+      "goblin-b",
+    ]);
   });
 
   it("logs the tactical agent's rejections as action_rejected events", async () => {
@@ -609,6 +696,42 @@ describe("handleCommand — enemy turns", () => {
     );
     expect(narrated).toHaveLength(3);
   });
+
+  // Pins the `combatant.status !== "alive"` skip in `runEnemyTurns`
+  // (`pipeline.ts`), previously untested: a dead combatant is passed over
+  // with a bare `turn_advanced` rather than asked for a turn.
+  it("skips a dead or unconscious combatant instead of asking it for a turn", async () => {
+    const store = createInMemoryEventStore();
+    const session = await freshSession(store);
+    session.state = {
+      ...session.state,
+      combatants: session.state.combatants.map((each) =>
+        each.combatantId === "goblin-a" ? { ...each, status: "dead" as const } : each,
+      ),
+    };
+    const ports: TurnPorts = {
+      ...portsWith(store),
+      // Only one script entry: if the dead goblin-a were asked for a turn
+      // too, the fake port would reject with "script exhausted" instead of
+      // this call ever completing.
+      tactical: agentProposing([
+        {
+          actorId: "goblin-b",
+          mainAction: { actionType: "dodge" },
+          tacticalRationaleEnglish: "Test fixture.",
+        },
+      ]),
+    };
+
+    await drain(handleCommand(session, dodge("hero"), ports));
+
+    const validated = (await store.readSince("s1", 0)).filter(
+      (each) => each.type === "action_validated",
+    );
+    expect(validated.map((each) => each.payload["actorId"])).toEqual(["hero", "goblin-b"]);
+    expect(session.state.currentActorIndex).toBe(0);
+    expect(session.state.round).toBe(2);
+  });
 });
 
 describe("handleCommand — turn timeout", () => {
@@ -668,6 +791,74 @@ describe("handleCommand — turn timeout", () => {
       turnTimeoutMs: 50,
     };
     await drain(handleCommand(session, dodge("hero"), ports));
+    expect(session.state.round).toBe(2);
+  }, 10_000);
+
+  // Previously untested: both timeout tests above stall only the narrative
+  // port, so the tactical `AbortController` at `enemyTurn`'s `:187-189` and
+  // the "creature forfeits its turn rather than the pipeline stalling"
+  // branch it feeds (`:210-215`) had no coverage — the exact resilience
+  // behaviour the 10s cap exists to provide.
+  it("aborts a stalled tactical proposal and forfeits that creature's turn", async () => {
+    const store = createInMemoryEventStore();
+    const session = await freshSession(store);
+    const ports: TurnPorts = {
+      ...portsWith(store),
+      tactical: abortingTactical(),
+      turnTimeoutMs: 50,
+    };
+
+    await drain(handleCommand(session, dodge("hero"), ports));
+
+    // hero's own turn (no tactical call involved) completes normally; both
+    // goblins' tactical calls stall until the abort fires, and each
+    // forfeits with a bare turn_advanced — no action_validated,
+    // dice_rolled, state_delta_applied or narrative_emitted for either.
+    const types = (await store.readSince("s1", 0)).map((each) => each.type);
+    expect(types).toEqual([
+      "player_input",
+      "action_validated",
+      "dice_rolled",
+      "state_delta_applied",
+      "narrative_emitted",
+      "scene_changed",
+      "scene_changed",
+      "scene_changed",
+    ]);
+    expect(session.state.currentActorIndex).toBe(0);
+    expect(session.state.round).toBe(2);
+  }, 10_000);
+
+  // The review's IMPORTANT finding: the tactical call and the narration
+  // that follows it must share ONE 10s budget, not each get their own —
+  // apps/server/CLAUDE.md's "hard turn timeout 10s" and the spec's "A 10s
+  // hard cap wraps the narrative stream and the tactical call" both read as
+  // a single cap. Pinned here without mocking `Date.now()`: a tactical call
+  // that is slow but never aborted (60ms, under an 80ms budget) should
+  // leave the narration that follows almost none of that budget, not a
+  // fresh 80ms window — so three actors' turns finish in about one
+  // budget's worth of wall-clock time, not the ~1.5-2x a pair of
+  // independent budgets per enemy turn would take.
+  it("shares one budget between the tactical call and the narration, not two", async () => {
+    const store = createInMemoryEventStore();
+    const session = await freshSession(store);
+    const ports: TurnPorts = {
+      ...portsWith(store),
+      tactical: slowTactical(60),
+      narrative: hangingNarrative(),
+      turnTimeoutMs: 80,
+    };
+
+    const start = Date.now();
+    await drain(handleCommand(session, dodge("hero"), ports));
+    const elapsed = Date.now() - start;
+
+    // Shared deadline: hero (~80ms, narration-only) + goblin-a (~80ms: 60ms
+    // tactical + ~20ms remaining narration cap) + goblin-b (~80ms) is
+    // roughly 240ms. Two independent budgets per enemy turn would instead
+    // be hero (~80ms) + goblin-a (60 + 80 = 140ms) + goblin-b (140ms), or
+    // roughly 360ms. 300ms sits between the two with margin on both sides.
+    expect(elapsed).toBeLessThan(300);
     expect(session.state.round).toBe(2);
   }, 10_000);
 });

@@ -54,10 +54,13 @@ function clientMessageIdOf(command: ClientMessage): string | undefined {
 }
 
 /**
- * Yields from `stream` until `ms` elapses, then stops. A wedged provider must
- * not wedge the turn: `apps/server/CLAUDE.md` caps the whole turn at 10s and
- * falls back to terse narration from the rule outcome. The deterministic port
- * never hangs, but a real streaming narrative agent can.
+ * Yields from `stream` until `deadline` (an absolute `Date.now()`-style
+ * timestamp, NOT a duration) passes, then stops. A wedged provider must not
+ * wedge the turn: `apps/server/CLAUDE.md` and the spec both describe ONE 10s
+ * cap wrapping the tactical call and the narrative stream together, not two
+ * independent budgets — so this takes the deadline the caller already
+ * struck (shared with whatever else that turn is doing, see `enemyTurn`)
+ * rather than starting its own clock from a duration.
  *
  * Whatever tokens arrived before the cap are kept — a partial sentence beats
  * an empty one, and the caller decides what to do when nothing arrived at
@@ -69,13 +72,41 @@ function clientMessageIdOf(command: ClientMessage): string | undefined {
  * clears its own timer as soon as the race settles, win or lose, so nothing
  * outlives the loop.
  */
-async function* untilDeadline(stream: AsyncIterable<string>, ms: number): AsyncIterable<string> {
+async function* untilDeadline(
+  stream: AsyncIterable<string>,
+  deadline: number,
+): AsyncIterable<string> {
   const iterator = stream[Symbol.asyncIterator]();
-  const deadline = Date.now() + ms;
+
+  // Best-effort, deliberately NOT awaited: signals a cooperative stream (the
+  // deterministic port never needs this; a real streaming provider does) to
+  // release its connection instead of dangling forever with one abandoned
+  // `next()`. A stream that is truly wedged is, by definition, stuck inside
+  // an internal (non-yield) `await` its own generator body cannot unwind
+  // from until that promise settles — so `iterator.return()` on it never
+  // resolves either, and awaiting it here would hang this function forever,
+  // exactly the failure this cap exists to prevent. Verified empirically:
+  // for a generator suspended on a promise that never settles,
+  // `await iterator.return()` itself never settles; for one merely mid-await
+  // on something that will settle, `return()` correctly reaches and runs its
+  // `finally` block once that step completes, without this caller waiting
+  // on it.
+  const abandon = (): void => {
+    // One `?.` covers the whole chain: if `iterator.return` is absent the
+    // call short-circuits to `undefined` and `.catch` is never reached; if
+    // present, calling it always yields a `Promise` (never `undefined`), so
+    // `.catch` needs no optional marker of its own.
+    iterator.return?.().catch(() => {
+      // Nothing to do with a rejection from a cancelled stream.
+    });
+  };
 
   for (;;) {
     const remaining = deadline - Date.now();
-    if (remaining <= 0) return;
+    if (remaining <= 0) {
+      abandon();
+      return;
+    }
 
     let timer: ReturnType<typeof setTimeout> | undefined;
     const timeout = new Promise<"timeout">((resolve) => {
@@ -87,7 +118,10 @@ async function* untilDeadline(stream: AsyncIterable<string>, ms: number): AsyncI
     const next = await Promise.race([iterator.next(), timeout]);
     clearTimeout(timer);
 
-    if (next === "timeout") return;
+    if (next === "timeout") {
+      abandon();
+      return;
+    }
     if (next.done === true) return;
     yield next.value;
   }
@@ -140,12 +174,24 @@ export async function* handleCommand(
     }
   }
 
-  async function* narrate(actorId: string, effect: TurnEffect): AsyncIterable<ServerFrame> {
+  /**
+   * `deadline` is an absolute timestamp, struck once by the caller for the
+   * whole turn (see `enemyTurn`) — NOT a fresh `ports.turnTimeoutMs` read
+   * here. `apps/server/CLAUDE.md` and the spec both describe one 10s cap
+   * covering the tactical call and the narration together; if this function
+   * started its own clock, a provider that stalled on both would take up to
+   * 2x the budget before the turn resolved.
+   */
+  async function* narrate(
+    actorId: string,
+    effect: TurnEffect,
+    deadline: number,
+  ): AsyncIterable<ServerFrame> {
     const streamId = ports.uuid();
     const actorName = session.built.statBlocks.get(actorId)?.nameEnglish ?? actorId;
     const narrationInput = { actorName, effect, namesByCombatantId: namesFor(session) };
     let text = "";
-    const primary = untilDeadline(ports.narrative.stream(narrationInput), ports.turnTimeoutMs);
+    const primary = untilDeadline(ports.narrative.stream(narrationInput), deadline);
     for await (const chunk of primary) {
       text += chunk;
       yield { type: "narrative_token", streamId, text: chunk };
@@ -179,14 +225,23 @@ export async function* handleCommand(
    * back. Never lets the proposal itself touch state — `applyTurn` below is
    * the only thing that mutates the world, and only after the rules engine
    * has already validated the proposal inside `proposeTurn`.
+   *
+   * One shared 10s budget for the whole turn — the tactical proposal AND the
+   * narration that follows it — per `apps/server/CLAUDE.md` ("hard turn
+   * timeout 10s") and the spec ("A 10s hard cap wraps the narrative stream
+   * and the tactical call"): a single cap, not two independent ones. A
+   * `deadline` struck once here and threaded through both the
+   * `AbortController` and `narrate` means a provider that stalls on both
+   * still resolves within `ports.turnTimeoutMs` total, not up to 2x it.
    */
   async function* enemyTurn(actorId: string): AsyncIterable<ServerFrame> {
     const world = worldFor(session);
     const statBlock = session.built.statBlocks.get(actorId);
+    const deadline = Date.now() + ports.turnTimeoutMs;
     const controller = new AbortController();
     const timer = setTimeout(() => {
       controller.abort();
-    }, ports.turnTimeoutMs);
+    }, Math.max(0, deadline - Date.now()));
 
     let proposal: TurnProposalResult;
     try {
@@ -228,7 +283,7 @@ export async function* handleCommand(
 
     yield* emit("dice_rolled", { actorId, seed, attacks: effect.attacks });
     yield* emit("state_delta_applied", { combatants: after.combatants });
-    yield* narrate(actorId, effect);
+    yield* narrate(actorId, effect, deadline);
     yield* emit("scene_changed", { kind: "turn_advanced" });
   }
 
@@ -390,7 +445,17 @@ export async function* handleCommand(
           return;
         }
 
-        yield* emit("action_validated", { actorId: command.actorId, turn: command.turn });
+        // `source: "human"` mirrors the rejection path just above
+        // (`provider: "human"`, `modelId: "human"`) so both call sites for
+        // this actor read uniformly — the enemy path's `action_validated`
+        // (below, in `enemyTurn`) stamps `source` too, from
+        // `TurnProposalSource`. `reduce` treats the field as a no-op either
+        // way; this is purely for a reader of the log.
+        yield* emit("action_validated", {
+          actorId: command.actorId,
+          turn: command.turn,
+          source: "human",
+        });
 
         const seed = ports.seedFor(session.state.rootSeed, session.nextSequence);
         const { world: after, effect } = applyTurn({
@@ -404,7 +469,12 @@ export async function* handleCommand(
 
         yield* emit("dice_rolled", { actorId: command.actorId, seed, attacks: effect.attacks });
         yield* emit("state_delta_applied", { combatants: after.combatants });
-        yield* narrate(command.actorId, effect);
+        // A single shared cap for this turn's post-validation stretch — see
+        // `enemyTurn`'s identical rationale. The player path has no
+        // tactical call to share the budget with, so the deadline is
+        // simply struck here, immediately before the narration that is
+        // this stretch's only external, potentially-slow call.
+        yield* narrate(command.actorId, effect, Date.now() + ports.turnTimeoutMs);
         yield* emit("scene_changed", { kind: "turn_advanced" });
         yield* runEnemyTurns();
         return;
