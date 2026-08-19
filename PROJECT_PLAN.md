@@ -43,7 +43,7 @@ Status: POC phase · Supersedes `dm-plan.md` (see `dm-plan-review.md` for the fa
 | Schemas | zod (+ zod-to-json-schema) | Types + validation + LLM tool schemas from one source |
 | Rules engine | Pure TS, zero deps, injected RNG | Testability, replay determinism |
 | LLM adapter | Vercel AI SDK (anthropic/google/openai) | Provider-agnostic; streaming + tool calls |
-| Models (Aug 2026) | Intent: Gemini 3 Flash ($0.25/$1.50) or GPT-5.4 nano ($0.20/$1.25) · Tactical: Gemini 3 Flash / GPT-5.4 mini ($0.75/$4.50) · Narrative: **Claude Sonnet 5 ($2/$10)** | Verified pricing; Sonnet 5 replaces Sonnet 4.6 (newer, 33% cheaper) |
+| Models (Aug 2026) | Intent: Gemini 3 Flash ($0.25/$1.50) or GPT-5.4 nano ($0.20/$1.25) · Tactical: **GPT-5.4 nano @ high effort ($0.20/$1.25)** · Narrative: **Claude Sonnet 5 ($2/$10)** | Verified pricing; Sonnet 5 replaces Sonnet 4.6 (newer, 33% cheaper). Tactical is the step 7b benchmark's pick (§4), not a guess — Gemini lost it outright at 86–91% legality |
 | Server | Fastify 5 + @fastify/websocket | Lightweight, fast, schema-validated routes |
 | DB | Postgres 17 + pgvector (single instance, drizzle-orm) | World state + event log + episodic memory transactionally consistent; no Pinecone/Redis at POC scale |
 | Web | React 19 + Vite, Canvas 2D | POC grid ≤30×30 needs no WebGL |
@@ -73,7 +73,7 @@ Status: POC phase · Supersedes `dm-plan.md` (see `dm-plan-review.md` for the fa
 | 4 | **Rules engine:** dice → checks → combat resolution → action economy → grid/A*/LoS | Golden tests pass, ≥90% coverage | 1–2 | ✅ done |
 | 5 | **SRD data:** ~10 monsters, conditions, 4 classes as validated JSON | Loads + validates | 2 | ✅ done |
 | 6 | **Provider adapter:** Vercel AI SDK wrapper, `ModelRouting` config | Mocked-provider tests pass | 3 | ✅ done |
-| 7 | **Tactical agent + sim:** validate→retry→fallback loop; benchmark Flash vs nano/mini | Legality ≥95% after retry on fixture scenarios; model chosen from data | 3–4 | 🟡 7a done, 7b pending |
+| 7 | **Tactical agent + sim:** validate→retry→fallback loop; benchmark Flash vs nano/mini | Legality ≥95% after retry on fixture scenarios; model chosen from data | 3–4 | ✅ done |
 | 8 | **Server + web:** Fastify+WS, event log, replay-on-reconnect, clickable canvas grid | Full combat playable E2E vs scripted enemy | 4–5 | 🟡 server done, web pending |
 | 9 | **Narrative agent:** Sonnet 5 streaming, Hebrew glossary, gendered narration, cache-stable prefix | First token <1.5s p50; Hebrew reviewed by native speaker | 5–6 | ⬜ not started |
 | 10 | **Memory:** pgvector episodic store, scene summarization, quest DAG | Replay test + top-k retrieval test pass | 6 | ⬜ not started |
@@ -164,14 +164,69 @@ Two follow-ups landed after 7a's review, both of which exist for 7b's sake:
   9's "first token < 1.5s" measurable at all, and lets `apps/server` reuse the
   same numbers without depending on `tools/sim`.
 
-**One known gap 7b must handle before publishing any cost figure:** token usage
+**One known gap 7b had to handle before publishing any cost figure:** token usage
 is under-reported on retry paths. `TurnProposalResult.usage` accumulates only on
 adapter calls that produced output, but a `schema_validation_failed` or
 `no_tool_call` attempt was still billed — and `AdapterError`
 (`packages/agents/src/providers/errors.ts`) carries no `usage` field, so that
 spend is invisible. The bias is downward and lands on exactly the paths a model
 comparison most wants to price. Either add `usage?` to `AdapterError` (a step-6
-contract change) or state the bias explicitly alongside the results.
+contract change) or state the bias explicitly alongside the results. *Resolved
+by declaration:* `usage` was threaded onto the failure paths that carry it and
+the report now computes `costIsUnderreported`, which came back **false** for the
+7b run below — no attempt was billed without reporting usage, so its cost column
+is a real figure rather than a lower bound.
+
+### Step 7b result (2026-08-19) — tactical model chosen from data
+
+Run `live-2026-08-19T07-28-03.487Z` in `tools/sim/runs/`: 12 arms (4 candidates
+x low/medium/high effort) x 4 scenarios x 5 seeds, 1800 probe turns and 1880
+encounter turns, all live. `costIsUnderreported: false`, zero attempts missing
+usage, and only 8 `schema_validation_failed` across all 3680 calls.
+
+**Chosen: `gpt-5.4-nano` at `high` effort** — 98.7% legality after retry (tied
+best of any arm) at **$0.0011/turn, $0.034 per 30-turn session**. It is the
+cheapest arm that cleared the ≥95% bar, which is what principle 2 asks for.
+`DEFAULT_MODEL_ROUTING.tactical` now says so.
+
+Seven arms cleared the bar: `gpt-5.4-mini@medium` (98.7%), `gpt-5.4-nano@high`
+(98.7%), `gpt-5.4-mini@high` (98.0%), `claude-sonnet-5@high` (96.7%),
+`claude-sonnet-5@low` (96.7%), `gpt-5.4-nano@medium` (96.0%),
+`claude-sonnet-5@medium` (95.3%).
+
+Three findings worth more than the ranking:
+
+- **The plan's own tactical default was wrong.** All three
+  `gemini-3.1-flash-lite` arms *missed* the bar — 86.0% / 87.3% / 90.7% — so
+  the §2 table's "Tactical: Gemini 3 Flash" is disqualified by measurement.
+  Google's tail was also catastrophic (`@high` p95 **273,695ms**, ~4.5 min).
+  This says nothing about the `intent` role, which still routes to google:
+  classifying a closed-set label is not proposing a legal turn, and no
+  benchmark of it exists yet.
+- **Reasoning effort is load-bearing for OpenAI and inert for Anthropic.**
+  nano climbed 93.3 → 96.0 → 98.7% and mini 92.0 → 98.7 → 98.0% across
+  low/medium/high, while sonnet sat flat at 95.3–96.7%. That matches the
+  adapter: anthropic's effort travels as `output_config.effort`, so
+  `REASONING_BUDGET_TOKENS` never touches it. Note that table is therefore
+  *still unmeasured* — google is its only consumer and google lost.
+- **Every rejection was spatial.** `target_out_of_reach` (295),
+  `destination_occupied` (271), `movement_exceeds_speed` (69),
+  `movement_path_blocked` (15), with zero unresolved action ids. §5's
+  "tactical-model quality on spatial reasoning" is the live risk, exactly as
+  written; the engine's monster-trait gaps never bit.
+
+**The one cost of this choice:** nano@high's p95 is 27.8s against §3's 10s turn
+timeout, so a few percent of turns will hit that timeout and take the
+deterministic fallback. Part of that tail is the AI SDK's own
+retry-with-backoff on transient provider errors rather than model thinking
+time. `claude-sonnet-5` was the only family whose p95 (7.2–7.9s) fits inside
+the timeout, at 3.4x the cost — the fallback choice if the tail proves
+unacceptable once step 8's server enforces the timeout for real.
+
+Encounter-mode win rates (50–75% across all arms, 20 encounters each) did not
+separate the arms meaningfully and were not used to choose. Read them with the
+harness's declared gaps in view: Dodge is inert, so a model that Dodges wisely
+is penalised.
 
 **Known gaps** are tracked in [`RULES_REFERENCE.md`](RULES_REFERENCE.md) §8,
 which is the canonical record of what the engine does and does not implement.

@@ -82,7 +82,10 @@ describe("createTacticalAgent — a legal proposal", () => {
 
     await agent.proposeTurn({ world, actorId: "gob-1" });
 
-    expect(port.calls[0]?.spec.modelId).toBe("gemini-3-flash");
+    // The routed model, not a literal: which model that is belongs to
+    // routing.test.ts, and hardcoding it here made a config change fail three
+    // unrelated tests.
+    expect(port.calls[0]?.spec.modelId).toBe(DEFAULT_MODEL_ROUTING.tactical.modelId);
     expect(port.calls[0]?.request.toolName).toBe("execute_turn");
   });
 
@@ -190,7 +193,7 @@ describe("createTacticalAgent — the single retry", () => {
     expect(result.rejections[0]?.stage).toBe("engine");
     expect(result.rejections[0]?.attempt).toBe(1);
     expect(result.rejections[0]?.reasons).toStrictEqual(["target_not_found"]);
-    expect(result.rejections[0]?.modelId).toBe("gemini-3-flash");
+    expect(result.rejections[0]?.modelId).toBe(DEFAULT_MODEL_ROUTING.tactical.modelId);
   });
 
   it("stamps the rejection with the model the runtime actually called", async () => {

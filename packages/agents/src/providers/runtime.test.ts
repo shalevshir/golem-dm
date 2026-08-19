@@ -27,8 +27,11 @@ describe("createAgentRuntime", () => {
 
     await runtime.structured("tactical", turnRequest);
 
-    expect(port.calls[0]?.spec.provider).toBe("google");
-    expect(port.calls[0]?.spec.modelId).toBe("gemini-3-flash");
+    // Asserts the routing was honoured, not which model it names — that is
+    // routing.test.ts's job, and duplicating the literal here meant a
+    // benchmark-driven config change broke a test about wiring.
+    expect(port.calls[0]?.spec.provider).toBe(DEFAULT_MODEL_ROUTING.tactical.provider);
+    expect(port.calls[0]?.spec.modelId).toBe(DEFAULT_MODEL_ROUTING.tactical.modelId);
   });
 
   it("calls the narrative model for narration, not the tactical one", async () => {

@@ -38,8 +38,18 @@ import type { JsonValue, ModelSpec, ReasoningEffort } from "./routing.js";
  * Thinking budget per effort level. Providers that bill reasoning by tokens
  * need a number, not a word.
  *
- * These are a plausible scale, NOT a measured one — step 7's sim benchmark is
- * what should set them. Exported so tuning is a one-line change.
+ * These are STILL a plausible scale rather than a measured one, and the step
+ * 7b benchmark did not change that — despite an earlier note here saying it
+ * would. Google is the only provider that reads this table (anthropic takes
+ * `output_config.effort`, openai takes `reasoningEffort` by name), and 7b
+ * chose `gpt-5.4-nano`, so the winning arm never touched these numbers. What
+ * 7b did measure is that *effort* matters for openai — nano scored 93.3% /
+ * 96.0% / 98.7% legality across low / medium / high — but that says nothing
+ * about where the token boundaries below should sit.
+ *
+ * This table now only affects the `intent` role, which still routes to
+ * google. Measuring it needs an intent-classifier benchmark, which does not
+ * exist yet. Exported so tuning stays a one-line change.
  */
 export const REASONING_BUDGET_TOKENS: Record<ReasoningEffort, number> = {
   low: 0,

@@ -20,14 +20,21 @@ describe("DEFAULT_MODEL_ROUTING", () => {
     expect(DEFAULT_MODEL_ROUTING.intent.reasoningEffort).toBe("low");
   });
 
-  it("routes tactical to the mid tier pending the step 7 benchmark", () => {
-    expect(DEFAULT_MODEL_ROUTING.tactical.provider).toBe("google");
-    expect(DEFAULT_MODEL_ROUTING.tactical.modelId).toBe("gemini-3-flash");
+  // Set by the step 7b live benchmark (tools/sim run
+  // live-2026-08-19T07-28-03.487Z), not by the plan's original guess. Every
+  // google arm missed the >= 95%-legality-after-retry bar (86.0/87.3/90.7%),
+  // so the pre-benchmark gemini-3-flash default is disqualified by data.
+  it("routes tactical to the arm the step 7b benchmark chose", () => {
+    expect(DEFAULT_MODEL_ROUTING.tactical.provider).toBe("openai");
+    expect(DEFAULT_MODEL_ROUTING.tactical.modelId).toBe("gpt-5.4-nano");
   });
 
+  // 98.7% legality after retry at $0.0011/turn — tied for the highest measured
+  // legality and the cheapest arm that reached it. Effort is load-bearing for
+  // openai: nano measured 93.3% at low, 96.0% at medium, 98.7% at high.
   it("keeps tactical near-deterministic without making every turn identical", () => {
     expect(DEFAULT_MODEL_ROUTING.tactical.temperature).toBe(0.2);
-    expect(DEFAULT_MODEL_ROUTING.tactical.reasoningEffort).toBe("medium");
+    expect(DEFAULT_MODEL_ROUTING.tactical.reasoningEffort).toBe("high");
   });
 
   it("gives narrative room for varied prose", () => {
