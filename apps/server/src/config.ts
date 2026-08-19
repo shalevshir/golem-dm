@@ -7,6 +7,17 @@ import { z } from "zod";
 
 const LogLevel = z.enum(["fatal", "error", "warn", "info", "debug", "trace"]);
 
+// A `.env` loader (dotenv, Node's own --env-file) materialises a blank
+// `KEY=` line as `""`, not as absent. `.env.example` ships every key blank
+// as a self-documenting placeholder, so a blank string must collapse to
+// `undefined` here — otherwise copying the template and filling in only the
+// one provider key you actually have throws on the other two before the
+// "set at least one" check ever runs.
+const optionalSecret = z
+  .string()
+  .optional()
+  .transform((v) => (v === "" ? undefined : v));
+
 const RawEnv = z.object({
   PORT: z
     .string()
@@ -15,9 +26,9 @@ const RawEnv = z.object({
     .pipe(z.number().int().min(1).max(65_535))
     .optional(),
   LOG_LEVEL: LogLevel.optional(),
-  ANTHROPIC_API_KEY: z.string().min(1).optional(),
-  OPENAI_API_KEY: z.string().min(1).optional(),
-  GOOGLE_GENERATIVE_AI_API_KEY: z.string().min(1).optional(),
+  ANTHROPIC_API_KEY: optionalSecret,
+  OPENAI_API_KEY: optionalSecret,
+  GOOGLE_GENERATIVE_AI_API_KEY: optionalSecret,
 });
 
 export interface ServerConfig {
