@@ -48,6 +48,14 @@ describe("buildEncounter", () => {
     const built = buildEncounter({ definition, statBlocks });
     expect(built.world.combatants.map((each) => each.combatantId)).toEqual(["hero", "villain"]);
     expect(built.world.combatants[0]?.position).toEqual([0, 0]);
+    expect(built.world.combatants[1]?.position).toEqual([4, 4]);
+    expect(built.world.combatants[0]?.faction).toBe("party");
+    expect(built.world.combatants[1]?.faction).toBe("hostile");
+    // At least one field pulled from the stat block rather than the spawn —
+    // pins the mapping against a bug that copied only combatantId/position.
+    expect(built.world.combatants[0]?.maxHp).toBe(10);
+    expect(built.world.combatants[0]?.armorClass).toBe(15);
+    expect(built.world.combatants[0]?.size).toBe("small");
     expect([...built.statBlocks.keys()]).toEqual(["hero", "villain"]);
     expect(built.turnOrder).toEqual(["hero", "villain"]);
   });
@@ -59,6 +67,17 @@ describe("buildEncounter", () => {
     });
     expect(built.world.grid.tiles[2]?.[2]).toBe("difficult");
     expect(built.world.grid.tiles[0]?.[1]).toBe("normal");
+  });
+
+  it("rejects a terrain override placed off the grid", () => {
+    // x=9 is out of range on this 5-wide grid; y=2 is in range, so this
+    // exercises the x bound specifically rather than falling through the
+    // "row is undefined" branch that an out-of-range y would also hit.
+    const badTerrain: EncounterDefinition = {
+      ...definition,
+      terrain: [{ tile: [9, 2], terrain: "difficult" }],
+    };
+    expect(() => buildEncounter({ definition: badTerrain, statBlocks })).toThrow(/off the grid/);
   });
 
   it("derives actionRangesFeet from the same stat blocks the validator will see", () => {

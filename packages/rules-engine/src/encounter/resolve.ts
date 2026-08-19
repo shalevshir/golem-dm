@@ -177,9 +177,11 @@ export function applyTurn(input: ApplyTurnInput): ApplyTurnResult {
       for (const extra of attack.extraDamage) damage += damageFrom(extra, critical, rng);
 
       // Combatants built from a monster stat block have no `characterId` and
-      // die at 0 HP; a PC combatant lands on the unconscious/death-save path,
-      // which this package does not yet implement (RULES_REFERENCE.md
-      // section 8).
+      // die at 0 HP. A PC combatant falls Unconscious instead (`applyDamage`'s
+      // default). Nothing here rolls death saves per turn, and damage taken at
+      // 0 HP does not produce death-save failures — RULES_REFERENCE.md §8's
+      // gap. `rollDeathSave` exists in `../combat/`; this file does not drive
+      // it.
       const applied = applyDamage(
         { currentHp: target.currentHp, maxHp: target.maxHp, tempHp: target.tempHp },
         damage,
