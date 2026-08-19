@@ -10,7 +10,7 @@
 // also what the tests drive, since jsdom has no 2D context to inspect.
 import { useEffect, useRef } from "react";
 import type { JSX } from "react";
-import type { SessionState, Tile, TurnAffordances } from "@ai-dm/schemas";
+import type { SessionState, Tile, TerrainType, TurnAffordances } from "@ai-dm/schemas";
 import type { CatalogueCombatant } from "../net/api.js";
 
 export const TILE_PX = 32;
@@ -24,16 +24,20 @@ export interface GridProps {
   onCombatantClick: (combatantId: string) => void;
 }
 
-/** Keyed by `TerrainType`'s five members — there is no "wall" or "water". */
-const TERRAIN_FILL: Record<string, string | undefined> = {
+/**
+ * Keyed by every `TerrainType` member via a mapped type, not an index
+ * signature: if a sixth terrain is ever added to the schema, this object
+ * literal fails to typecheck instead of silently falling through to a
+ * default fill. A tile's terrain read (`tiles[y]?.[x] ?? "normal"`, below)
+ * already has its own fallback, so no `undefined` branch is needed here.
+ */
+const TERRAIN_FILL: Record<TerrainType, string> = {
   normal: "#f4efe6",
   difficult: "#d9cbb2",
   blocking: "#4a4038",
   half_cover: "#c9b79a",
   three_quarters_cover: "#a89474",
 };
-
-const DEFAULT_FILL = "#f4efe6";
 
 export function Grid(props: GridProps): JSX.Element {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -51,7 +55,7 @@ export function Grid(props: GridProps): JSX.Element {
     for (let y = 0; y < snapshot.grid.height; y += 1) {
       for (let x = 0; x < snapshot.grid.width; x += 1) {
         const terrain = snapshot.grid.tiles[y]?.[x] ?? "normal";
-        context.fillStyle = TERRAIN_FILL[terrain] ?? DEFAULT_FILL;
+        context.fillStyle = TERRAIN_FILL[terrain];
         context.fillRect(x * TILE_PX, y * TILE_PX, TILE_PX, TILE_PX);
         context.strokeStyle = "#cbbfae";
         context.strokeRect(x * TILE_PX, y * TILE_PX, TILE_PX, TILE_PX);
@@ -105,9 +109,17 @@ export function Grid(props: GridProps): JSX.Element {
         width={snapshot.grid.width * TILE_PX}
         height={snapshot.grid.height * TILE_PX}
         onClick={(event) => {
-          const bounds = event.currentTarget.getBoundingClientRect();
-          const x = Math.floor((event.clientX - bounds.left) / TILE_PX);
-          const y = Math.floor((event.clientY - bounds.top) / TILE_PX);
+          const canvas = event.currentTarget;
+          const bounds = canvas.getBoundingClientRect();
+          // The canvas's CSS size can differ from its `width`/`height`
+          // attributes (e.g. once a stylesheet exists), so a click position
+          // is scaled back into canvas pixels before dividing into tiles
+          // rather than assuming 1:1 layout. Guarded against a zero/NaN
+          // scale for a canvas that hasn't laid out yet.
+          const scaleX = bounds.width > 0 ? bounds.width / canvas.width : 1;
+          const scaleY = bounds.height > 0 ? bounds.height / canvas.height : 1;
+          const x = Math.floor((event.clientX - bounds.left) / (TILE_PX * scaleX));
+          const y = Math.floor((event.clientY - bounds.top) / (TILE_PX * scaleY));
           const reachable = affordances?.reachableTiles ?? [];
           // A click on a tile the server did not offer is dropped here rather
           // than sent and rejected: the affordance set is the authority the
