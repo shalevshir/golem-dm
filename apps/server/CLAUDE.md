@@ -21,7 +21,9 @@ The orchestrator: Fastify + `@fastify/websocket`. Owns the turn pipeline, sessio
 
 ## Config
 
-Secrets/env via `.env` (see `.env.example`) validated with zod at boot — fail fast on missing keys. Model routing lives in config, not code.
+Secrets/env via `.env` (see [`.env.example`](.env.example)), validated by
+`src/config.ts` with zod at boot — the process refuses to start without at
+least one provider API key. Model routing lives in config, not code.
 
 ## Testing
 
