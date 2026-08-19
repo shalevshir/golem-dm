@@ -8,6 +8,7 @@ export * from "./exhaustion.js";
 export * from "./action-economy.js";
 export * from "./validate-turn.js";
 export * from "./statblock.js";
+export * from "./affordances.js";
 
 export type CoverLevel = "none" | "half" | "three_quarters" | "full";
 
