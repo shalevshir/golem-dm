@@ -326,6 +326,15 @@ rediscovering:
   cost figure computed from `TokenUsage` alone would also be *wrong*, not
   merely incomplete — cache reads bill differently and nothing at this layer
   reports them.
+- **Model routing is not yet config-overridable, though the spec calls for
+  it to be.** The spec's §Config says routing "stays config
+  (`DEFAULT_MODEL_ROUTING` as the default, overridable), never code," but
+  `apps/server/src/config.ts`'s `ServerConfig` carries no routing field and
+  `main.ts` wires `DEFAULT_MODEL_ROUTING` in directly — changing the
+  tactical model today means editing
+  `packages/agents/src/providers/routing.ts` and rebuilding. The final
+  pre-merge fix wave (2026-08-19) ruled against inventing an override
+  mechanism unreviewed; recorded here so the gap is tracked, not lost.
 
 Deferred, as §4.2 already said: Postgres persistence, the intent agent, and
 the web client (spec #2).

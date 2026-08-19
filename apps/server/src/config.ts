@@ -39,8 +39,13 @@ export interface ServerConfig {
 export function loadConfig(env: NodeJS.ProcessEnv): ServerConfig {
   const parsed = RawEnv.parse(env);
 
-  // Which providers are needed depends on `ModelRouting`, which is config; all
-  // this can check is that the process could talk to something at all.
+  // Which providers are actually needed depends on `ModelRouting`
+  // (`packages/agents/src/providers/routing.ts`'s `DEFAULT_MODEL_ROUTING`),
+  // which is a source-level constant today, not env-configurable (Important
+  // 4, `apps/server/CLAUDE.md`) — this boot check has no way to read it, so
+  // all it can verify is that the process could talk to SOME provider at
+  // all, not that it holds the specific key(s) the compiled-in routing
+  // will actually call.
   const hasKey =
     parsed.ANTHROPIC_API_KEY !== undefined ||
     parsed.OPENAI_API_KEY !== undefined ||
