@@ -26,9 +26,12 @@ export function registerWebSocketRoute(app: FastifyInstance, input: WebSocketRou
       // C-36a: `handleCommand` is always drained to completion below, even
       // once the client has gone — a half-drained generator mid-turn would
       // leave the rest of that turn's events unwritten. That means frames
-      // can still arrive here after the socket has closed. Silently
-      // dropping them (rather than calling `socket.send` on a closed
-      // socket, which throws) is what lets the drain finish undisturbed:
+      // can still arrive here after the socket has closed. Guarding here,
+      // rather than letting `socket.send` run on a non-OPEN socket — `ws`
+      // routes that to `sendAfterClose`, which surfaces as an `'error'`
+      // event rather than a thrown exception (verified against
+      // `ws@8.21.3`'s `lib/websocket.js`) — is what lets the drain finish
+      // undisturbed without that stray event needing its own handler:
       // stop *sending*, don't stop *pulling*.
       if (socket.readyState !== socket.OPEN) return;
       socket.send(JSON.stringify(frame));
@@ -49,24 +52,18 @@ export function registerWebSocketRoute(app: FastifyInstance, input: WebSocketRou
         }
         const command = parsed.data;
 
-        if (command.type === "join") {
-          const found = await input.registry.get(command.sessionId);
-          if (found === null) {
-            send({
-              type: "error",
-              code: "unknown_session",
-              message: `No session ${command.sessionId}. Create one with POST /sessions.`,
-            });
-            return;
-          }
-          session = found;
-        }
-
-        if (session === null) {
-          send({ type: "error", code: "unknown_session", message: "Send a join message first." });
-          return;
-        }
-
+        // `busy` must be claimed before ANY `await` in this handler,
+        // including `join`'s registry lookup just below — not only before
+        // `handleCommand`. `ws` delivers two writes that arrive in one TCP
+        // read (e.g. a client that pipelines `join` immediately followed by
+        // its first action) as two synchronous `message` events. If the
+        // busy check ran only after `join`'s `await input.registry.get`,
+        // the second event's handler could reach `session === null` before
+        // the first event's await had resumed and `session` was ever
+        // assigned — misreporting a legitimate pipelined action as
+        // `unknown_session` (review finding, task 14 round 2). Claiming
+        // `busy` here, synchronously, closes that window: the second
+        // event now waits its turn instead.
         if (busy) {
           send({
             type: "error",
@@ -79,6 +76,24 @@ export function registerWebSocketRoute(app: FastifyInstance, input: WebSocketRou
 
         busy = true;
         try {
+          if (command.type === "join") {
+            const found = await input.registry.get(command.sessionId);
+            if (found === null) {
+              send({
+                type: "error",
+                code: "unknown_session",
+                message: `No session ${command.sessionId}. Create one with POST /sessions.`,
+              });
+              return;
+            }
+            session = found;
+          }
+
+          if (session === null) {
+            send({ type: "error", code: "unknown_session", message: "Send a join message first." });
+            return;
+          }
+
           // C-36a: drain to completion — never `break` out of this loop.
           // `handleCommand`'s `emit` writes its periodic snapshot after its
           // `yield`, and the enemy-turn loop appends several events per
@@ -89,6 +104,10 @@ export function registerWebSocketRoute(app: FastifyInstance, input: WebSocketRou
         } catch (error) {
           // The log is already consistent — `emit` appends before it yields —
           // so the socket reporting a failure does not leave a torn session.
+          // Also covers a `registry.get` failure (e.g. a corrupt log):
+          // previously that `await` sat outside this `try`, so it could
+          // reject the whole async handler as an unhandled rejection
+          // instead of a graceful frame.
           send({
             type: "error",
             code: "internal_error",

@@ -14,6 +14,7 @@ import {
   createVercelPort,
   DEFAULT_MODEL_ROUTING,
 } from "@ai-dm/agents";
+import type { FastifyBaseLogger } from "fastify";
 import { buildApp } from "./app.js";
 import { loadConfig } from "./config.js";
 import { createInMemoryEventStore } from "./core/event-store.js";
@@ -35,18 +36,26 @@ const clock = (): string => new Date().toISOString();
 // around the tactical call already cover what `TimingPort` would have
 // offered for this purpose.
 
-// C-23/C-39: one structured JSON line per turn that reached the tactical
-// agent, written straight to stdout rather than through a logging library —
-// `MetricsPort`'s only contract is "one structured log line per turn," and
-// `console.log` is disallowed by this repo's `no-console` lint rule (only
-// `warn`/`error` are), so `process.stdout.write` is the plain way to satisfy
-// both. Cached tokens and cost are not part of this line: `TokenUsage`
-// carries no cache-read field, and a cost figure derived from raw tokens
-// alone would misprice cache reads rather than merely omit them — see the
-// task report.
+// C-23/C-39: one structured log line per turn that reached the tactical
+// agent, written through the app's own pino logger rather than a bare
+// `process.stdout.write` (review finding, task 14 round 2: a bare JSON
+// object carries no `time`/`level`, ignores `LOG_LEVEL` entirely, and can't
+// be told apart from the pino lines Fastify writes to the same stream).
+// The logger is filled in via a holder object, late-bound, because of the
+// ordering this file is stuck with: `metrics` has to exist before
+// `buildApp` is called (it goes into `ports`, one of `buildApp`'s inputs),
+// but the logger to write through only exists once `buildApp` returns the
+// `app` it belongs to. A holder (mutated property) rather than a bare
+// `let` reassigned once: the latter is exactly what this repo's
+// `prefer-const` flags, since it cannot see that the single assignment
+// below is load-bearing rather than incidental. `console.log` was avoided
+// for the same reason as before — this repo's `no-console` lint rule only
+// allows `warn`/`error` — but is moot now that there's a real logger to
+// use instead.
+const logHolder: { current?: FastifyBaseLogger } = {};
 const metrics: MetricsPort = {
   recordTacticalTurn(turn) {
-    process.stdout.write(`${JSON.stringify({ log: "tactical_turn_metrics", ...turn })}\n`);
+    logHolder.current?.info(turn, "tactical_turn_metrics");
   },
 };
 
@@ -74,5 +83,6 @@ const app = buildApp({
     metrics,
   },
 });
+logHolder.current = app.log;
 
 await app.listen({ port: config.port, host: "0.0.0.0" });

@@ -85,7 +85,21 @@ function connect(url: string): Promise<WebSocket> {
   });
 }
 
-/** Collect frames until `stop` says we have what we came for. */
+// Below the default vitest `testTimeout` (5000ms, unconfigured in this repo)
+// so a hung wait fails with THIS module's diagnostic message — which frame
+// showed up, or none at all — rather than vitest's generic "test timed out
+// in 5000ms", which was previously indistinguishable from every other way a
+// test could hang (review finding, task 14 round 2).
+const FRAME_TIMEOUT_MS = 3000;
+
+/**
+ * Collect frames until `stop` says we have what we came for. Cleans up its
+ * own listeners and timer on every path — resolve, reject on timeout, and
+ * reject on a socket error — not just the happy path: a leaked `message`
+ * listener from an earlier test's socket would otherwise go on collecting
+ * frames (and calling that test's now-resolved `stop`) for every socket
+ * this file connects afterward.
+ */
 function framesUntil(
   socket: WebSocket,
   stop: (frame: ServerFrame) => boolean,
@@ -93,17 +107,61 @@ function framesUntil(
   const frames: ServerFrame[] = [];
   return new Promise((resolve, reject) => {
     const timer = setTimeout(() => {
+      cleanup();
       reject(new Error(`timed out after ${String(frames.length)} frames`));
-    }, 5000);
-    socket.on("message", (data: Buffer | string) => {
+    }, FRAME_TIMEOUT_MS);
+    function onMessage(data: Buffer | string): void {
       const frame = JSON.parse(String(data)) as ServerFrame;
       frames.push(frame);
       if (stop(frame)) {
-        clearTimeout(timer);
+        cleanup();
         resolve(frames);
       }
-    });
-    socket.once("error", reject);
+    }
+    function onError(error: Error): void {
+      cleanup();
+      reject(error);
+    }
+    function cleanup(): void {
+      clearTimeout(timer);
+      socket.off("message", onMessage);
+      socket.off("error", onError);
+    }
+    socket.on("message", onMessage);
+    socket.on("error", onError);
+  });
+}
+
+/**
+ * Send `join` and resolve once the server acks with its first reply.
+ * Bounded and diagnostic (Minor 7, task 14 round 2): the ad hoc
+ * `new Promise<void>((resolve) => socket.once("message", resolve))` this
+ * replaces had no timeout and no reject path, so a regression here used to
+ * surface as vitest's generic timeout instead of a message naming what
+ * never arrived.
+ */
+function joinAndWaitForAck(socket: WebSocket, sessionId: string): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      cleanup();
+      reject(new Error("join was never acknowledged"));
+    }, FRAME_TIMEOUT_MS);
+    function onMessage(): void {
+      cleanup();
+      resolve();
+    }
+    function onError(error: Error): void {
+      cleanup();
+      reject(error);
+    }
+    function cleanup(): void {
+      clearTimeout(timer);
+      socket.off("message", onMessage);
+      socket.off("error", onError);
+    }
+    socket.on("message", onMessage);
+    socket.on("error", onError);
+    socket.send(JSON.stringify({ type: "join", sessionId }));
   });
 }
 
@@ -185,12 +243,7 @@ describe("websocket transport", () => {
     const sessionId = await createSessionOver(app);
     const socket = await connect(url);
 
-    await new Promise<void>((resolve) => {
-      socket.once("message", () => {
-        resolve();
-      });
-      socket.send(JSON.stringify({ type: "join", sessionId }));
-    });
+    await joinAndWaitForAck(socket, sessionId);
 
     const pending = framesUntil(
       socket,
@@ -213,5 +266,76 @@ describe("websocket transport", () => {
     expect(frames.some((each) => each.type === "narrative_token")).toBe(true);
     expect(frames.some((each) => each.type === "event")).toBe(true);
     socket.close();
+  });
+
+  // Important 1 (task 14 review round 2): C-36a requires the transport to
+  // DRAIN `handleCommand` to completion, never abandon it mid-turn. Every
+  // test above passes even under the exact violation C-36a forbids:
+  //
+  //   for await (const frame of handleCommand(...)) {
+  //     send(frame);
+  //     if (frame.type === "event" && frame.event.type === "scene_changed") break;
+  //   }
+  //
+  // because the FIRST `scene_changed` on the `structured_action` path is
+  // the PLAYER's OWN turn-advance (pipeline.ts), emitted before
+  // `runEnemyTurns()` is even called — so a `break` there stops before a
+  // single enemy turn has run while still satisfying every frame-type
+  // assertion above. Proof has to come from the server's own event log,
+  // not from the socket: once the client closes there is nothing left to
+  // receive frames on, but a compliant handler keeps the generator running
+  // and keeps appending regardless.
+  it("keeps appending the enemy sweep after the client closes mid-turn (C-36a)", async () => {
+    const { app, url, store } = await startServer();
+    const sessionId = await createSessionOver(app);
+    const socket = await connect(url);
+
+    await joinAndWaitForAck(socket, sessionId);
+
+    // Close the instant the player's OWN scene_changed arrives — strictly
+    // before goblin-a's turn starts.
+    const closedAfterOwnTurn = framesUntil(socket, (frame) => {
+      const isOwnTurnAdvance = frame.type === "event" && frame.event.type === "scene_changed";
+      if (isOwnTurnAdvance) socket.close();
+      return isOwnTurnAdvance;
+    });
+    socket.send(
+      JSON.stringify({
+        type: "structured_action",
+        clientMessageId: "c1",
+        actorId: "hero",
+        turn: {
+          actorId: "hero",
+          mainAction: { actionType: "dodge" },
+          tacticalRationaleEnglish: "Test fixture: hero dodges.",
+        },
+      }),
+    );
+    await closedAfterOwnTurn;
+
+    // `goblin-a` is the first hostile in goblin-ambush's turn order
+    // (apps/server/src/encounters/index.ts) — its `action_validated` event
+    // can only exist in the log if `runEnemyTurns` actually ran, which only
+    // happens if the handler kept draining after the socket above closed.
+    // Polled rather than awaited once: the drain finishes in well under a
+    // second in this in-memory setup, but nothing here should assume a
+    // fixed delay.
+    const sawEnemyTurn = async (): Promise<boolean> => {
+      const events = await store.readSince(sessionId, -1);
+      return events.some(
+        (event) => event.type === "action_validated" && event.payload["actorId"] === "goblin-a",
+      );
+    };
+    const deadline = Date.now() + 2000;
+    for (;;) {
+      if (await sawEnemyTurn()) break;
+      if (Date.now() > deadline) {
+        throw new Error(
+          "goblin-a's action_validated was never appended after the socket closed " +
+            "— the handler abandoned handleCommand instead of draining it (C-36a)",
+        );
+      }
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
   });
 });

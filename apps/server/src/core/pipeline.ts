@@ -55,10 +55,39 @@ export const SNAPSHOT_EVERY = 50;
  */
 export interface TacticalTurnMetrics {
   actorId: string;
-  /** `TurnProposalSuccess.source`, or the failure `kind` when no legal turn came back. */
-  source: TurnProposalSource | TurnProposalFailure["kind"];
-  /** `usage.length`: one entry per billed attempt, including failed ones. */
-  attempts: number;
+  /**
+   * "ok" when a legal turn came back (whatever produced it — see `source`);
+   * otherwise the failure `kind` from `TurnProposalFailure`. Kept separate
+   * from `source` rather than folded into it: this dimension is "did the
+   * turn resolve," `source` below is "which call produced it," and
+   * conflating them made a failed proposal read as if it named a model
+   * tier it never actually had (review finding, task 14 round 2).
+   */
+  outcome: "ok" | TurnProposalFailure["kind"];
+  /**
+   * Present only when `outcome === "ok"` — `TurnProposalFailure` carries no
+   * model tier to report, so there is nothing honest to put here for
+   * `aborted`/`no_legal_turn`.
+   */
+  source?: TurnProposalSource;
+  /**
+   * `usage.length`: attempts the provider actually BILLED for, not every
+   * attempt the agent made. `createTacticalAgent`'s attempt loop
+   * (`packages/agents/src/tactical/index.ts:152`) only pushes onto `usage`
+   * `if (result.error.usage !== undefined)` — an attempt that failed before
+   * the provider reported any usage (e.g. `provider_error`) contributes no
+   * entry, so `usage.length` can undercount attempts. `index.test.ts:254`
+   * pins exactly this: a two-attempt run reporting `usage.length === 1`.
+   * Named for what it actually measures rather than "attempts" (review
+   * finding, task 14 round 2).
+   */
+  billedAttempts: number;
+  /**
+   * `proposal.rejections.length`: every attempt the agent made, billed or
+   * not — the true retry count C-23 asks for, which `billedAttempts` alone
+   * would silently undercount whenever an attempt failed unbilled.
+   */
+  retries: number;
   promptTokens: number;
   completionTokens: number;
   totalTokens: number;
@@ -330,8 +359,10 @@ export async function* handleCommand(
       );
       ports.metrics.recordTacticalTurn({
         actorId,
-        source: proposal.ok ? proposal.source : proposal.kind,
-        attempts: proposal.usage.length,
+        outcome: proposal.ok ? "ok" : proposal.kind,
+        ...(proposal.ok ? { source: proposal.source } : {}),
+        billedAttempts: proposal.usage.length,
+        retries: proposal.rejections.length,
         ...totals,
         latencyMs: Date.now() - proposalStartedAt,
       });

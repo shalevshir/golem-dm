@@ -18,7 +18,7 @@ import type {
 import { createInMemoryEventStore } from "./event-store.js";
 import type { EventStore } from "./event-store.js";
 import { SNAPSHOT_EVERY, handleCommand } from "./pipeline.js";
-import type { TurnPorts } from "./pipeline.js";
+import type { TacticalTurnMetrics, TurnPorts } from "./pipeline.js";
 import { createSession } from "./session.js";
 import type { Session } from "./session.js";
 
@@ -773,6 +773,77 @@ describe("handleCommand — enemy turns", () => {
       (each) => each.type === "action_validated" && each.payload["actorId"] === "hero",
     );
     expect(heroValidations).toHaveLength(2);
+  });
+});
+
+// Important 2 (task 14 review round 2): C-23's "must actually emit" had
+// rested entirely on code reading — no test constructed a `TurnPorts` with
+// `metrics` and drove a turn through it. A `reduce` that summed
+// `promptTokens` into `completionTokens`, or a call site placed on a branch
+// that never runs, would have shipped green.
+describe("handleCommand — tactical metrics", () => {
+  it("records one MetricsPort call per enemy turn, with correct summed token totals", async () => {
+    const store = createInMemoryEventStore();
+    const session = await freshSession(store);
+    const recorded: TacticalTurnMetrics[] = [];
+    const ports: TurnPorts = {
+      ...portsWith(store),
+      tactical: agentProposing([
+        {
+          actorId: "goblin-a",
+          mainAction: { actionType: "dodge" },
+          tacticalRationaleEnglish: "Test fixture.",
+        },
+        {
+          actorId: "goblin-b",
+          mainAction: { actionType: "dodge" },
+          tacticalRationaleEnglish: "Test fixture.",
+        },
+      ]),
+      metrics: {
+        recordTacticalTurn(metrics) {
+          recorded.push(metrics);
+        },
+      },
+    };
+
+    await drain(handleCommand(session, dodge("hero"), ports));
+
+    // One call per enemy turn, in order — and NONE for the hero's own turn,
+    // which makes no tactical call at all. A call recorded for "hero" (or
+    // simply a length of 3) would mean the port fired on a player turn too;
+    // a length of 0 would mean it never fired.
+    expect(recorded.map((each) => each.actorId)).toEqual(["goblin-a", "goblin-b"]);
+
+    for (const metrics of recorded) {
+      // `agentProposing`'s fixture (C-2) scripts exactly this usage per
+      // billed attempt, and each goblin's proposed dodge is legal on the
+      // first try — one billed attempt, zero retries. Distinct
+      // prompt/completion/total values (10/5/15) mean a transposition bug
+      // (e.g. summing promptTokens into completionTokens) shows up as a
+      // wrong number here rather than passing by coincidence.
+      expect(metrics).toMatchObject({
+        outcome: "ok",
+        source: "model",
+        billedAttempts: 1,
+        retries: 0,
+        promptTokens: 10,
+        completionTokens: 5,
+        totalTokens: 15,
+      });
+      expect(metrics.latencyMs).toBeGreaterThanOrEqual(0);
+    }
+  });
+
+  it("still resolves the turn normally when no MetricsPort is supplied", async () => {
+    // `metrics` is optional on `TurnPorts` precisely so the ten other
+    // describe blocks in this file need not supply one — pin that an enemy
+    // turn works the same either way rather than assuming it from the
+    // type alone.
+    const store = createInMemoryEventStore();
+    const session = await freshSession(store);
+    const frames = await drain(handleCommand(session, dodge("hero"), portsWith(store)));
+    expect(frames.some((each) => each.type === "error")).toBe(false);
   });
 });
 
