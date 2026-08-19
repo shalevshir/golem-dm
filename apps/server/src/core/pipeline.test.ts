@@ -1048,22 +1048,31 @@ describe("handleCommand — turn_affordances", () => {
       handleCommand(session, { type: "join", sessionId: "s1" }, portsWith(store)),
     );
     expect(frames.some((each) => each.type === "turn_affordances")).toBe(false);
+    // Review round 1, item 4: pin that the join still produced its normal
+    // response — absence-only would also pass a join that yields nothing.
+    expect(frames.at(-1)?.type).toBe("session_state");
   });
 
+  // Review round 1, item 1: the original `if (index !== -1)` guard let this
+  // test pass vacuously — deleting `yield* playerAffordances();` from the
+  // `structured_action` case left the whole suite green, because nothing
+  // else in this file drives a `structured_action` far enough to observe
+  // the second yield point (the e2e reconnect test only covers `join`).
+  // `defaultTactical` has both goblins dodge, so nobody dies and control
+  // deterministically returns to the hero — the same fixture the
+  // "runs every hostile turn before handing control back to the player"
+  // test (above) already pins to `currentActorIndex === 0` / `round === 2`
+  // after this identical command. The branch always fires here, so the
+  // assertion is unconditional.
   it("follows a completed turn that returns control to the player", async () => {
     const store = createInMemoryEventStore();
     const session = await freshSession(store);
     const frames = await drain(handleCommand(session, dodge("hero"), portsWith(store)));
 
     const last = frames.at(-1);
-    // Either the hero is up again (affordances) or the fight ended during the
-    // hostile sweep (no frame) — both are correct; assert the frame is last
-    // when present and never appears mid-stream.
-    const index = frames.findIndex((each) => each.type === "turn_affordances");
-    if (index !== -1) {
-      expect(index).toBe(frames.length - 1);
-      expect(last?.type === "turn_affordances" && last.actorId).toBe("hero");
-    }
+    expect(last?.type).toBe("turn_affordances");
+    expect(last?.type === "turn_affordances" && last.actorId).toBe("hero");
+    expect(frames.findIndex((each) => each.type === "turn_affordances")).toBe(frames.length - 1);
   });
 
   it("does not follow a rejected action, which does not advance the turn", async () => {

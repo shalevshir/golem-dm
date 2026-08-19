@@ -523,6 +523,20 @@ describe("end to end", () => {
     );
     const roundEndSequence = afterRound.nextSequence - 1;
 
+    // Review round 1, item 3: whether the reconnecting join also gets a
+    // trailing `turn_affordances` frame is keyed on the exact same
+    // condition `waitForProjection`'s predicate above just used to decide
+    // the round was over — not re-derived, and not assumed. If the hero
+    // ever dies mid-round (a seed or HP change), `waitForProjection` above
+    // would have stopped on `alive.size < 2` with control left on whichever
+    // hostile was mid-turn, `backToHero` false, and this flag correctly
+    // predicts no trailing frame — keeping this assertion from failing for
+    // a reason that has nothing to do with reconnect.
+    const roundEndAlive = livingFactions(afterRound.state);
+    const roundEndBackToHero =
+      afterRound.state.turnOrder[afterRound.state.currentActorIndex] === "hero";
+    const expectAffordances = roundEndAlive.size < 2 || roundEndBackToHero;
+
     // A second client resumes from what the first one had.
     const secondSocket = await connect(url);
     const secondLog = new FrameLog(secondSocket);
@@ -532,24 +546,40 @@ describe("end to end", () => {
     // frame: its highest event sequence must reach the exact point the
     // round actually ended at, which is strictly past `cut` by construction
     // (the enemy sweep alone is several events).
+    //
+    // Review round 1, item 2: when a trailing `turn_affordances` frame is
+    // expected, the wait does not settle on the last `event` frame alone —
+    // it also waits for that trailing frame to actually arrive. Settling
+    // early relied on the trailing frame reaching this socket in the same
+    // read as the last event, which `FrameLog` resolving inside the
+    // `message` handler with the `await` resuming on a later microtask does
+    // not guarantee (true on loopback, not guaranteed in general).
     await secondLog.waitFor(
       (frames) => {
         const sequences = eventFrames(frames).map((event) => event.sequence);
-        return sequences.length > 0 && Math.max(...sequences) >= roundEndSequence;
+        const caughtUp = sequences.length > 0 && Math.max(...sequences) >= roundEndSequence;
+        if (!caughtUp) return false;
+        if (!expectAffordances) return true;
+        return frames.some((frame) => frame.type === "turn_affordances");
       },
-      `the second socket to catch up to sequence ${String(roundEndSequence)}`,
+      `the second socket to catch up to sequence ${String(roundEndSequence)}` +
+        (expectAffordances ? " and its trailing turn_affordances frame" : ""),
     );
 
     // No snapshot exists yet (SNAPSHOT_EVERY is 50; one round is nowhere
     // close), so `join`'s snapshot-fallback branch (C-16) does not fire —
     // every frame the second client gets back is a plain `event` replay of
     // exactly what it missed, never a resent session_state or an error.
-    // Task 4: the round this join catches up on ends back on the hero's own
-    // turn, so `join` also pushes one trailing `turn_affordances` frame
-    // after the replayed events — the one frame in this log that is not an
-    // `event`.
-    expect(secondLog.frames.slice(0, -1).every((frame) => frame.type === "event")).toBe(true);
-    expect(secondLog.frames.at(-1)?.type).toBe("turn_affordances");
+    // Task 4: when the round this join catches up on ends back on the
+    // hero's own turn (with the hero alive), `join` also pushes one
+    // trailing `turn_affordances` frame after the replayed events — the one
+    // frame in this log that is not an `event`.
+    if (expectAffordances) {
+      expect(secondLog.frames.slice(0, -1).every((frame) => frame.type === "event")).toBe(true);
+      expect(secondLog.frames.at(-1)?.type).toBe("turn_affordances");
+    } else {
+      expect(secondLog.frames.every((frame) => frame.type === "event")).toBe(true);
+    }
 
     const secondEvents = eventFrames(secondLog.frames);
     const secondSequences = secondEvents.map((event) => event.sequence);

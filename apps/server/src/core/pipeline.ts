@@ -465,10 +465,15 @@ export async function* handleCommand(
     const statBlock = session.built.statBlocks.get(actorId);
     if (statBlock === undefined) return;
 
+    // Review round 1, item 5: the spread comes first and the explicit
+    // fields after, so the pipeline's own `type`/`forSequence` stay
+    // authoritative even if `TurnAffordances` ever grows a field with
+    // either name — previously the spread came last and would have
+    // silently clobbered them.
     yield {
+      ...affordancesFor(worldFor(session), actorId, statBlock),
       type: "turn_affordances",
       forSequence: session.nextSequence - 1,
-      ...affordancesFor(worldFor(session), actorId, statBlock),
     };
   }
 
