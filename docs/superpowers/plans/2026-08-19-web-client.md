@@ -1680,19 +1680,28 @@ one task where that is your own edit rather than collateral from `pnpm format`.
 
 **Interfaces:**
 - Consumes: `ClientMessage`, `ServerFrame`, `SessionState` from `@ai-dm/schemas`;
-  `EncounterCatalogue`'s *shape* (the client declares its own type — it may not
-  import from `apps/server`).
+  `EncounterCatalogue`, `CatalogueCombatant` and `CatalogueAction` — all zod
+  schemas in `@ai-dm/schemas` (moved there in Task 5's fix round; the client
+  must NOT redeclare them, per invariant 4).
 - Produces:
   - `createSession(encounterId: string): Promise<string>` — POSTs and returns the
     session id.
-  - `fetchCatalogue(encounterId: string): Promise<EncounterCatalogue>`.
-  - `interface EncounterCatalogue { encounterId: string; combatants: CatalogueCombatant[]; actions: CatalogueAction[] }`
-    with `CatalogueCombatant = { combatantId: string; nameEnglish: string; maxHp: number; faction: "party" | "hostile" | "neutral" }`
-    and `CatalogueAction = { actionId: string; nameEnglish: string }`.
+  - `fetchCatalogue(encounterId: string): Promise<EncounterCatalogue>`, which
+    **parses** the response with the `EncounterCatalogue` schema rather than
+    casting it.
+  - A re-export of the `CatalogueCombatant` and `CatalogueAction` *types* from
+    `@ai-dm/schemas`, so components import their prop types from one place.
+    It declares no shapes of its own.
   - `connect(input: ConnectInput): Connection` where
     `ConnectInput = { sessionId: string; url?: string; onFrame: (frame: ServerFrame) => void; onStatus: (status: ConnectionStatus) => void; resumeFrom: () => number | undefined; socketFactory?: (url: string) => WebSocketLike }`,
     `ConnectionStatus = "connecting" | "open" | "reconnecting" | "closed"`, and
     `Connection = { send: (message: ClientMessage) => void; close: () => void }`.
+
+**Superseded note.** An earlier draft had the client declare its own copy of
+these shapes. Task 5's review caught that as an invariant-4 violation — a
+hand-written duplicate of a wire contract — so the schemas moved into
+`@ai-dm/schemas` and both ends now read one definition. Ignore the paragraph
+below; it survives only to explain why the plan once said otherwise.
 
 **Faction is spelled out** rather than imported as a type alias so that the
 client's catalogue type is self-describing; `Faction` is also exported from
@@ -1866,31 +1875,21 @@ Expected: FAIL — `./connection.js` does not exist.
 // The two HTTP calls the client makes. Both are same-origin relative paths:
 // the Vite dev server proxies them to the API, so no CORS surface exists and
 // no base URL needs configuring.
+//
+// The catalogue's shape is NOT redeclared here. `EncounterCatalogue` and its
+// members are zod schemas in `@ai-dm/schemas` (invariant 4: schemas define
+// everything once — never hand-write a duplicate interface), and both ends of
+// this request read that one definition. `nameEnglish` is English because
+// there is no Hebrew name data anywhere in the repo and the SRD is English
+// (ADR 0001) — which is why every render of it is wrapped in `<bdi>`.
+import { EncounterCatalogue } from "@ai-dm/schemas";
+import type { CatalogueAction, CatalogueCombatant } from "@ai-dm/schemas";
 
-export interface CatalogueCombatant {
-  combatantId: string;
-  /**
-   * English. There is no Hebrew name data anywhere in the repo and the SRD is
-   * English (ADR 0001), so this is what a token label can show — which is why
-   * every render of it is wrapped in `<bdi>`. Adding `nameHebrew` is a data
-   * question (who writes the translations, and are they licensable alongside
-   * SRD content), not a rendering one.
-   */
-  nameEnglish: string;
-  maxHp: number;
-  faction: "party" | "hostile" | "neutral";
-}
+// Re-exported so the components can import their prop types from one place
+// without each reaching into the schemas package for a type it only renders.
+export type { CatalogueAction, CatalogueCombatant };
 
-export interface CatalogueAction {
-  actionId: string;
-  nameEnglish: string;
-}
-
-export interface EncounterCatalogue {
-  encounterId: string;
-  combatants: CatalogueCombatant[];
-  actions: CatalogueAction[];
-}
+const CreateSessionResponse = z.object({ sessionId: z.string() });
 
 export async function createSession(encounterId: string): Promise<string> {
   const response = await fetch("/sessions", {
@@ -1899,18 +1898,26 @@ export async function createSession(encounterId: string): Promise<string> {
     body: JSON.stringify({ encounterId }),
   });
   if (!response.ok) throw new Error(`POST /sessions failed with ${String(response.status)}`);
-  const body = (await response.json()) as { sessionId: string };
-  return body.sessionId;
+  return CreateSessionResponse.parse(await response.json()).sessionId;
 }
 
-export async function fetchCatalogue(encounterId: string): Promise<EncounterCatalogue> {
+export async function fetchCatalogue(
+  encounterId: string,
+): Promise<z.infer<typeof EncounterCatalogue>> {
   const response = await fetch(`/encounters/${encodeURIComponent(encounterId)}`);
   if (!response.ok) {
     throw new Error(`GET /encounters/${encounterId} failed with ${String(response.status)}`);
   }
-  return (await response.json()) as EncounterCatalogue;
+  // Parsed, never cast — the same rule `net/connection.ts` applies to every
+  // inbound frame. A cast here would suppress exactly the check that proves
+  // the server and client agree about this contract.
+  return EncounterCatalogue.parse(await response.json());
 }
 ```
+
+Add `import { z } from "zod";` at the top, and add `zod` to `apps/web`'s
+dependencies if it is not already there (`@ai-dm/schemas` depends on it, but
+`apps/web` importing `z` directly needs its own entry).
 
 - [ ] **Step 5: Write `net/connection.ts`**
 
