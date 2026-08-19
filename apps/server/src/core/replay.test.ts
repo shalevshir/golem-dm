@@ -240,24 +240,19 @@ describe("replay properties", () => {
 describe("snapshots", () => {
   it("is a cache that agrees exactly with the fold at its own sequence", async () => {
     const store = createInMemoryEventStore();
-    // 40 rounds, not the dozen the brief estimated. DIAGNOSIS (see this
-    // task's report): round 1 plays out for real (hero + both goblins dodge,
-    // 16 events), but every `structured_action` from round 2 onward is
-    // rejected `action_already_used` — `startTurn()`
-    // (`packages/rules-engine/src/combat/action-economy.ts`) is only ever
-    // called once, at combatant construction (`statblock.ts:40`); nothing in
-    // `reduce.ts` or `pipeline.ts` calls it again when `scene_changed`
-    // advances to a combatant's next turn, so `actionEconomy.actionUsed`
-    // stays `true` forever after a combatant's first action. So no session
-    // can ever complete a second round, and each further attempt here adds
-    // exactly 2 events (`player_input`, `action_rejected`) instead of a full
-    // turn's ~5-6. This is real, persisted event-log content either way —
-    // rejections are legitimate log entries, and the property under test
-    // (snapshot-vs-fold agreement) is agnostic to why an event was written —
-    // so the extra rounds are only here to reach a 50-event boundary at all
-    // given that defect; they are not a workaround for anything about this
-    // property's own assertion, which stays the full-equality check below.
-    await playRounds(store, 40);
+    // 5 full rounds of genuine play (16 events each: hero + both goblins,
+    // all legal) comfortably crosses the SNAPSHOT_EVERY=50 boundary, which
+    // lands partway through round 4. This used to need 40 rounds' worth of
+    // mostly-rejected turns to reach the same boundary, because `reduce`
+    // never refreshed a combatant's action economy between their own
+    // turns — every `structured_action` past round 1 was rejected
+    // `action_already_used`, and only the rejection's 2 events
+    // (`player_input`, `action_rejected`) landed per attempt instead of a
+    // full turn's ~5-6. Fixed in `reduce.ts`'s `scene_changed` /
+    // `turn_advanced` case (see this task's report); this asserts what the
+    // property should actually exercise now that a session can play more
+    // than one round.
+    await playRounds(store, 5);
 
     const snapshot = await store.latestSnapshot("s1");
     const events = await store.readSince("s1", -1);

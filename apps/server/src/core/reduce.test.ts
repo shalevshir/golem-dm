@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { startTurn } from "@ai-dm/rules-engine";
 import type { GameEvent, SessionState } from "@ai-dm/schemas";
 import { Combatant } from "@ai-dm/schemas";
 import { fold, reduce } from "./reduce.js";
@@ -120,6 +121,65 @@ describe("reduce", () => {
     expect(next.round).toBe(2);
   });
 
+  // Regression for the defect Task 11's replay properties caught:
+  // `applyTurn` sets `actionEconomy: plan.economyAfter` on whoever just
+  // acted, spending it, and nothing used to clear it again — so a
+  // combatant's second-ever turn was rejected `action_already_used`
+  // forever, and no session could ever complete a second round (see this
+  // task's report). `startTurn()` is the SRD's "fresh economy for a new
+  // turn" — mirrors `tools/sim/src/engine/encounter.ts`'s reset at the same
+  // logical moment.
+  const SPENT_ECONOMY = {
+    actionUsed: true,
+    bonusActionUsed: true,
+    reactionUsed: true,
+    movementUsedFeet: 30,
+    attacksMade: 1,
+  };
+
+  it("refreshes the action economy of whoever's turn is beginning", () => {
+    const withSpentActors: SessionState = {
+      ...base,
+      combatants: Combatant.array().parse([
+        rawCombatant({ combatantId: "hero", actionEconomy: SPENT_ECONOMY }),
+        rawCombatant({ combatantId: "villain", actionEconomy: SPENT_ECONOMY }),
+      ]),
+    };
+    // currentActorIndex 0 -> 1: villain's turn begins.
+    const next = reduce(withSpentActors, event(10, "scene_changed", { kind: "turn_advanced" }));
+
+    const villain = next.combatants.find((each) => each.combatantId === "villain");
+    expect(villain?.actionEconomy).toEqual(startTurn());
+    // hero's turn just ENDED, not begun — `turn_advanced` is not their cue
+    // to refresh, and `state_delta_applied` (a separate event) already
+    // recorded whatever they actually spent.
+    const hero = next.combatants.find((each) => each.combatantId === "hero");
+    expect(hero?.actionEconomy).toEqual(SPENT_ECONOMY);
+  });
+
+  it("refreshes the wrapped-to actor's economy when a round rolls over", () => {
+    const atEndWithSpentActors: SessionState = {
+      ...base,
+      currentActorIndex: 1,
+      combatants: Combatant.array().parse([
+        rawCombatant({ combatantId: "hero", actionEconomy: SPENT_ECONOMY }),
+        rawCombatant({ combatantId: "villain", actionEconomy: SPENT_ECONOMY }),
+      ]),
+    };
+    // currentActorIndex 1 -> wraps to 0: hero's NEW round begins.
+    const next = reduce(
+      atEndWithSpentActors,
+      event(11, "scene_changed", { kind: "turn_advanced" }),
+    );
+
+    expect(next.currentActorIndex).toBe(0);
+    expect(next.round).toBe(2);
+    const hero = next.combatants.find((each) => each.combatantId === "hero");
+    expect(hero?.actionEconomy).toEqual(startTurn());
+    const villain = next.combatants.find((each) => each.combatantId === "villain");
+    expect(villain?.actionEconomy).toEqual(SPENT_ECONOMY);
+  });
+
   it("ignores a scene_changed event that isn't a turn advance", () => {
     const next = reduce(base, event(5, "scene_changed", { kind: "narration_cue" }));
     expect(next).toEqual(base);
@@ -150,6 +210,24 @@ describe("reduce", () => {
     const before = structuredClone(base);
     reduce(base, event(9, "scene_changed", { kind: "turn_advanced" }));
     expect(base).toEqual(before);
+  });
+
+  // `base.combatants` is empty, so the test above never exercises the
+  // economy-reset `.map` at all. With actual combatants present, this pins
+  // that resetting the up-next actor's economy still builds a fresh
+  // `combatants` array and fresh combatant objects rather than writing
+  // through the ones the caller passed in.
+  it("never mutates the combatants given to a turn-advancing scene_changed reduce", () => {
+    const withActors: SessionState = {
+      ...base,
+      combatants: Combatant.array().parse([
+        rawCombatant({ combatantId: "hero", actionEconomy: SPENT_ECONOMY }),
+        rawCombatant({ combatantId: "villain", actionEconomy: SPENT_ECONOMY }),
+      ]),
+    };
+    const before = structuredClone(withActors);
+    reduce(withActors, event(12, "scene_changed", { kind: "turn_advanced" }));
+    expect(withActors).toEqual(before);
   });
 });
 

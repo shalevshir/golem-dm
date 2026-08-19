@@ -14,6 +14,7 @@
 // whose payload does not parse is a bug in whoever wrote it, and throwing is
 // better than folding a half-understood event into state.
 import { z } from "zod";
+import { startTurn } from "@ai-dm/rules-engine";
 import type { GameEvent, SessionState } from "@ai-dm/schemas";
 import { Combatant } from "@ai-dm/schemas";
 
@@ -49,11 +50,29 @@ export function reduce(state: SessionState, event: GameEvent): SessionState {
       if (kind !== "turn_advanced") return state;
       const next = state.currentActorIndex + 1;
       const wrapped = next >= state.turnOrder.length;
-      return {
-        ...state,
-        currentActorIndex: wrapped ? 0 : next,
-        round: wrapped ? state.round + 1 : state.round,
-      };
+      const currentActorIndex = wrapped ? 0 : next;
+      const round = wrapped ? state.round + 1 : state.round;
+
+      // A fresh action economy is the start of a turn (mirrors
+      // `tools/sim/src/engine/encounter.ts`'s reset at the same logical
+      // moment). `applyTurn` sets `actionEconomy: plan.economyAfter` on
+      // whoever just acted, spending it — nothing else ever clears it, so
+      // without this reset here, the combatant whose turn is beginning
+      // would carry forward the *previous* owner's spent economy forever
+      // after their first-ever turn.
+      // `turn_advanced` is exactly the event that marks a new turn
+      // starting, so the fold is where this belongs, not the pipeline: no
+      // new event type, no protocol change, and replay reproduces it by
+      // construction rather than depending on an emitter. Resetting a
+      // dead/unconscious upcoming actor is harmless — nothing here revives
+      // anyone, and `validateExecuteTurn` still refuses a non-`alive` actor
+      // a turn regardless of its economy.
+      const upNextId = state.turnOrder[currentActorIndex];
+      const combatants = state.combatants.map((each) =>
+        each.combatantId === upNextId ? { ...each, actionEconomy: startTurn() } : each,
+      );
+
+      return { ...state, currentActorIndex, round, combatants };
     }
 
     // Recorded for replay, audit and 7b's rejection dataset, but they change

@@ -732,6 +732,48 @@ describe("handleCommand — enemy turns", () => {
     expect(session.state.currentActorIndex).toBe(0);
     expect(session.state.round).toBe(2);
   });
+
+  // Regression for the defect Task 11's replay properties caught: `reduce`
+  // never used to reset a combatant's action economy between their own
+  // turns, so every combatant's SECOND-EVER action was rejected
+  // `action_already_used` — no session could ever complete a second round.
+  // Every other test in this describe block only ever sends the hero one
+  // command (`dodge("hero")`'s hardcoded `clientMessageId: "c1"`), which is
+  // exactly why ten tasks and 66 green tests never caught it: nothing here
+  // exercised a second round before now. Fixed in `reduce.ts`'s
+  // `scene_changed`/`turn_advanced` case.
+  it("lets a combatant act again on their second round, not just their first", async () => {
+    const store = createInMemoryEventStore();
+    const session = await freshSession(store);
+    const ports = portsWith(store);
+
+    await drain(handleCommand(session, dodge("hero"), ports));
+    expect(session.state.round).toBe(2);
+    expect(session.state.currentActorIndex).toBe(0);
+
+    const roundTwoHeroTurn: ClientMessage = {
+      type: "structured_action",
+      clientMessageId: "c2",
+      actorId: "hero",
+      turn: {
+        actorId: "hero",
+        mainAction: { actionType: "dodge" },
+        tacticalRationaleEnglish: "Test fixture: round 2.",
+      },
+    };
+    const frames = await drain(handleCommand(session, roundTwoHeroTurn, ports));
+
+    // Before the fix, this is exactly where the engine answered
+    // `action_already_used` and the round never advanced past hero again.
+    expect(frames.filter((each) => each.type === "rejected")).toEqual([]);
+    expect(session.state.round).toBe(3);
+    expect(session.state.currentActorIndex).toBe(0);
+
+    const heroValidations = (await store.readSince("s1", 0)).filter(
+      (each) => each.type === "action_validated" && each.payload["actorId"] === "hero",
+    );
+    expect(heroValidations).toHaveLength(2);
+  });
 });
 
 describe("handleCommand — turn timeout", () => {
