@@ -15,7 +15,7 @@
 // followed by the hostile sweep and the per-turn narration timeout (Task 10),
 // appended to the same `structured_action` case after a successful player
 // turn.
-import { applyTurn, seeded, validateExecuteTurn } from "@ai-dm/rules-engine";
+import { affordancesFor, applyTurn, seeded, validateExecuteTurn } from "@ai-dm/rules-engine";
 import type { TurnEffect } from "@ai-dm/rules-engine";
 import { availableActionsFor, createDeterministicNarrative } from "@ai-dm/agents";
 import type {
@@ -440,62 +440,110 @@ export async function* handleCommand(
     }
   }
 
+  /**
+   * Push the player's affordances, if it is a party member's turn. Called at
+   * the two points the pipeline knows control sits with the player: the end of
+   * a `join`, and the end of a turn that came back round to them.
+   *
+   * Silent when it is a hostile's turn, when the actor is missing, or when the
+   * encounter has no stat block for them — none of those are error conditions
+   * for the client, they simply mean there is nothing to offer.
+   */
+  // Not `async function*`: unlike `emit`/`runEnemyTurns`, nothing here
+  // awaits — `affordancesFor` is a pure, synchronous call into the rules
+  // engine. `@typescript-eslint/require-await` correctly flags an `async`
+  // generator with no `await` in it, so this is a plain generator instead;
+  // `yield*`-ing it from the async `handleCommand` generator works the same
+  // either way.
+  function* playerAffordances(): Iterable<ServerFrame> {
+    const actorId = session.state.turnOrder[session.state.currentActorIndex];
+    if (actorId === undefined) return;
+
+    const actor = session.state.combatants.find((each) => each.combatantId === actorId);
+    if (actor === undefined || actor.faction !== "party" || actor.status !== "alive") return;
+
+    const statBlock = session.built.statBlocks.get(actorId);
+    if (statBlock === undefined) return;
+
+    yield {
+      type: "turn_affordances",
+      forSequence: session.nextSequence - 1,
+      ...affordancesFor(worldFor(session), actorId, statBlock),
+    };
+  }
+
   try {
     switch (command.type) {
       case "join": {
-        const sessionId = session.state.sessionId;
+        // The existing body, verbatim, moved into a nested generator so all
+        // four of its exits are covered by one affordance push rather than
+        // four copies of it. `command` is narrowed to the "join" member by
+        // the switch above, but that narrowing does not carry into a nested
+        // function's closure over the same binding (TS treats a closed-over
+        // parameter conservatively) — so it is threaded through as its own
+        // explicitly-typed parameter instead, shadowing the outer name. The
+        // body below is otherwise untouched.
+        async function* joinFrames(
+          command: Extract<ClientMessage, { type: "join" }>,
+        ): AsyncIterable<ServerFrame> {
+          const sessionId = session.state.sessionId;
 
-        if (command.resumeFrom === undefined) {
-          // Nothing to resume from: hand back the live projection wholesale.
-          yield {
-            type: "session_state",
-            sequence: session.nextSequence - 1,
-            snapshot: session.state,
-          };
-          return;
-        }
+          if (command.resumeFrom === undefined) {
+            // Nothing to resume from: hand back the live projection wholesale.
+            yield {
+              type: "session_state",
+              sequence: session.nextSequence - 1,
+              snapshot: session.state,
+            };
+            return;
+          }
 
-        // C-16 / spec §Reconnect: "without resumeFrom, or when it predates
-        // the retained log: session_state at the newest snapshot, then the
-        // events since [the snapshot]." A resumeFrom older than the newest
-        // snapshot is exactly the case a store that eventually prunes old
-        // events would no longer be able to serve directly.
-        //
-        // Deliberate approximation: nothing actually prunes today, so
-        // "older than the newest snapshot" is being used as a stand-in for
-        // "predates the retained log" rather than a direct read of a
-        // retention floor. That means a client only 3 events behind a
-        // snapshot at sequence 50 still gets a whole `SessionState` resent
-        // instead of 3 events — correct, but wasteful, and per C-30 that
-        // payload only grows over a session's lifetime. Gate this on a real
-        // retention floor once the store has one.
-        const snapshot = await ports.store.latestSnapshot(sessionId);
-        if (snapshot !== null && command.resumeFrom < snapshot.sequence) {
-          yield { type: "session_state", sequence: snapshot.sequence, snapshot: snapshot.state };
-          for (const event of await ports.store.readSince(sessionId, snapshot.sequence)) {
+          // C-16 / spec §Reconnect: "without resumeFrom, or when it predates
+          // the retained log: session_state at the newest snapshot, then the
+          // events since [the snapshot]." A resumeFrom older than the newest
+          // snapshot is exactly the case a store that eventually prunes old
+          // events would no longer be able to serve directly.
+          //
+          // Deliberate approximation: nothing actually prunes today, so
+          // "older than the newest snapshot" is being used as a stand-in for
+          // "predates the retained log" rather than a direct read of a
+          // retention floor. That means a client only 3 events behind a
+          // snapshot at sequence 50 still gets a whole `SessionState` resent
+          // instead of 3 events — correct, but wasteful, and per C-30 that
+          // payload only grows over a session's lifetime. Gate this on a real
+          // retention floor once the store has one.
+          const snapshot = await ports.store.latestSnapshot(sessionId);
+          if (snapshot !== null && command.resumeFrom < snapshot.sequence) {
+            yield { type: "session_state", sequence: snapshot.sequence, snapshot: snapshot.state };
+            for (const event of await ports.store.readSince(sessionId, snapshot.sequence)) {
+              yield { type: "event", event };
+            }
+            return;
+          }
+
+          const tail = await ports.store.readSince(sessionId, command.resumeFrom);
+          if (tail.length === 0) {
+            // IMPORTANT-2: `resumeFrom` already at (or past) the newest
+            // sequence — a client that missed nothing. `join` must have
+            // exactly one guaranteed response so "you're caught up" is never
+            // indistinguishable from a dropped join; the natural choice is the
+            // same `session_state` frame a resumeFrom-less join gets, at the
+            // current projection.
+            yield {
+              type: "session_state",
+              sequence: session.nextSequence - 1,
+              snapshot: session.state,
+            };
+            return;
+          }
+          for (const event of tail) {
             yield { type: "event", event };
           }
           return;
         }
 
-        const tail = await ports.store.readSince(sessionId, command.resumeFrom);
-        if (tail.length === 0) {
-          // IMPORTANT-2: `resumeFrom` already at (or past) the newest
-          // sequence — a client that missed nothing. `join` must have
-          // exactly one guaranteed response so "you're caught up" is never
-          // indistinguishable from a dropped join; the natural choice is the
-          // same `session_state` frame a resumeFrom-less join gets, at the
-          // current projection.
-          yield {
-            type: "session_state",
-            sequence: session.nextSequence - 1,
-            snapshot: session.state,
-          };
-          return;
-        }
-        for (const event of tail) {
-          yield { type: "event", event };
-        }
+        yield* joinFrames(command);
+        yield* playerAffordances();
         return;
       }
 
@@ -607,6 +655,7 @@ export async function* handleCommand(
         yield* narrate(command.actorId, effect, Date.now() + ports.turnTimeoutMs);
         yield* emit("scene_changed", { kind: "turn_advanced" });
         yield* runEnemyTurns();
+        yield* playerAffordances();
         return;
       }
 

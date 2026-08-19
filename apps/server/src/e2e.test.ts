@@ -544,7 +544,12 @@ describe("end to end", () => {
     // close), so `join`'s snapshot-fallback branch (C-16) does not fire —
     // every frame the second client gets back is a plain `event` replay of
     // exactly what it missed, never a resent session_state or an error.
-    expect(secondLog.frames.every((frame) => frame.type === "event")).toBe(true);
+    // Task 4: the round this join catches up on ends back on the hero's own
+    // turn, so `join` also pushes one trailing `turn_affordances` frame
+    // after the replayed events — the one frame in this log that is not an
+    // `event`.
+    expect(secondLog.frames.slice(0, -1).every((frame) => frame.type === "event")).toBe(true);
+    expect(secondLog.frames.at(-1)?.type).toBe("turn_affordances");
 
     const secondEvents = eventFrames(secondLog.frames);
     const secondSequences = secondEvents.map((event) => event.sequence);

@@ -320,7 +320,11 @@ describe("handleCommand — join", () => {
       handleCommand(session, { type: "join", sessionId: "s1", resumeFrom: 0 }, portsWith(store)),
     );
 
-    expect(frames).toEqual([{ type: "session_state", sequence: 0, snapshot: session.state }]);
+    // Task 4: this join lands on the hero's own turn, so a trailing
+    // `turn_affordances` frame follows the `session_state` frame.
+    expect(frames[0]).toEqual({ type: "session_state", sequence: 0, snapshot: session.state });
+    expect(frames).toHaveLength(2);
+    expect(frames[1]?.type).toBe("turn_affordances");
   });
 
   // C-16: the spec's §Reconnect says "without resumeFrom, OR when it predates
@@ -1003,4 +1007,87 @@ describe("handleCommand — turn timeout", () => {
     expect(elapsed).toBeLessThan(300);
     expect(session.state.round).toBe(2);
   }, 10_000);
+});
+
+describe("handleCommand — turn_affordances", () => {
+  it("follows a join that lands on the player's turn", async () => {
+    const store = createInMemoryEventStore();
+    const session = await freshSession(store);
+    const frames = await drain(
+      handleCommand(session, { type: "join", sessionId: "s1" }, portsWith(store)),
+    );
+
+    const last = frames.at(-1);
+    expect(last?.type).toBe("turn_affordances");
+    expect(last?.type === "turn_affordances" && last.actorId).toBe("hero");
+    expect(last?.type === "turn_affordances" && last.forSequence).toBe(session.nextSequence - 1);
+  });
+
+  it("offers the hero a reachable set and the spear against an adjacent goblin", async () => {
+    const store = createInMemoryEventStore();
+    const session = await freshSession(store);
+    const frames = await drain(
+      handleCommand(session, { type: "join", sessionId: "s1" }, portsWith(store)),
+    );
+    const affordances = frames.at(-1);
+
+    if (affordances?.type !== "turn_affordances") throw new Error("expected affordances");
+    expect(affordances.reachableTiles.length).toBeGreaterThan(0);
+
+    const spear = affordances.actions.find((each) => each.actionId === "spear");
+    expect(spear?.targetableCombatantIds).toContain("goblin-a");
+  });
+
+  it("does NOT follow a join that lands on a hostile's turn", async () => {
+    const store = createInMemoryEventStore();
+    const session = await freshSession(store);
+    // Advance past the hero so a goblin is up.
+    session.state = { ...session.state, currentActorIndex: 1 };
+
+    const frames = await drain(
+      handleCommand(session, { type: "join", sessionId: "s1" }, portsWith(store)),
+    );
+    expect(frames.some((each) => each.type === "turn_affordances")).toBe(false);
+  });
+
+  it("follows a completed turn that returns control to the player", async () => {
+    const store = createInMemoryEventStore();
+    const session = await freshSession(store);
+    const frames = await drain(handleCommand(session, dodge("hero"), portsWith(store)));
+
+    const last = frames.at(-1);
+    // Either the hero is up again (affordances) or the fight ended during the
+    // hostile sweep (no frame) — both are correct; assert the frame is last
+    // when present and never appears mid-stream.
+    const index = frames.findIndex((each) => each.type === "turn_affordances");
+    if (index !== -1) {
+      expect(index).toBe(frames.length - 1);
+      expect(last?.type === "turn_affordances" && last.actorId).toBe("hero");
+    }
+  });
+
+  it("does not follow a rejected action, which does not advance the turn", async () => {
+    const store = createInMemoryEventStore();
+    const session = await freshSession(store);
+    const frames = await drain(
+      handleCommand(
+        session,
+        {
+          type: "structured_action",
+          clientMessageId: "c2",
+          actorId: "hero",
+          turn: {
+            actorId: "hero",
+            movement: [{ destinationTile: [-1, -1], pathType: "direct" }],
+            mainAction: { actionType: "dodge" },
+            tacticalRationaleEnglish: "Test fixture: deliberately illegal.",
+          },
+        },
+        portsWith(store),
+      ),
+    );
+
+    expect(frames.some((each) => each.type === "turn_affordances")).toBe(false);
+    expect(frames.at(-1)?.type).toBe("rejected");
+  });
 });
