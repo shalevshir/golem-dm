@@ -67,14 +67,27 @@ on `schemas` — another reason the protocol lives there).
   already imports only from `@ai-dm/rules-engine` and `@ai-dm/schemas` — a
   move, not a rewrite. Its header comment changes to say the sim and server
   both consume it.
-- **`buildEncounter(definition)`** → `{ world, statBlocks, turnOrder,
-  maxRounds }` — the agents-free half of the sim's `buildScenario`, together
-  with `EncounterDefinition` / `SpawnSpec` / `TerrainOverride` (renamed from
-  `ScenarioDefinition`; a scenario is a benchmark fixture, an encounter is a
-  game object) and the `data/srd/monsters/` loader. The split is forced:
-  `buildScenario` imports `AvailableAction` from `@ai-dm/agents`, which the
-  engine may not depend on. The `availableActions` derivation moves to
-  `@ai-dm/agents` as `availableActionsFor(statBlock)`.
+- **`buildEncounter({ definition, statBlocks })`** → `{ world, statBlocks,
+  turnOrder, maxRounds }` — the agents-free half of the sim's
+  `buildScenario`, together with `EncounterDefinition` / `SpawnSpec` /
+  `TerrainOverride` (renamed from `ScenarioDefinition`; a scenario is a
+  benchmark fixture, an encounter is a game object). Two constraints shape
+  the signature. The `availableActions` derivation moves to `@ai-dm/agents`
+  as `availableActionsFor(statBlock)`, because `buildScenario` imports
+  `AvailableAction` from a package the engine may not depend on. And stat
+  blocks are **injected, already parsed**, because the engine's boundary is
+  "pure functions only, no I/O" — `loadMonster`'s `readFileSync` cannot move
+  here.
+- **`seeded(seed)`** (mulberry32) is added to `src/dice/` and exported. It
+  is pure, so the boundary allows it, and `tools/sim/src/rng.ts` currently
+  keeps a byte-identical copy precisely because the engine does not export
+  it. The server would be a third copy; instead both import one.
+
+The SRD file loader stays outside the engine and is duplicated: the sim
+keeps `scenarios/srd.ts`, and the server gets its own
+`encounters/srd.ts`. Sharing it has no good home — the engine forbids I/O,
+and `@ai-dm/schemas` is imported by `apps/web`, so putting `node:fs` there
+would drag it into the browser bundle.
 
 `tools/sim` keeps `runEncounter` (a batch driver; the server's loop is
 message-driven, the opposite shape) and `policy.ts`, and imports the moved
