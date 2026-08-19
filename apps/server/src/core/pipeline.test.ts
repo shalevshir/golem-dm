@@ -995,9 +995,24 @@ describe("handleCommand — turn timeout", () => {
       turnTimeoutMs: 80,
     };
 
+    // Review round 2: this used to time the whole `drain(...)`, but since
+    // Task 4 that drain ends with a `turn_affordances` frame — pure
+    // computation (`affordancesFor` probing ~143 candidate tiles through
+    // `validateExecuteTurn`) that no deadline governs. Folding that fixed
+    // ~100ms of real work into a 300ms budget-sharing assertion erased the
+    // margin the comment below describes. Consuming the generator by hand
+    // and stamping a timestamp only on frames the turn timeout actually
+    // governs — i.e. everything except `turn_affordances` — excludes that
+    // trailing computation by construction, so this keeps measuring the
+    // deadline-governed stretch the test claims to measure. Do not
+    // "simplify" this back to timing the whole drain: that would silently
+    // reconflate pipeline throughput with timeout-budget sharing.
     const start = Date.now();
-    await drain(handleCommand(session, dodge("hero"), ports));
-    const elapsed = Date.now() - start;
+    let lastGovernedFrameAt = start;
+    for await (const frame of handleCommand(session, dodge("hero"), ports)) {
+      if (frame.type !== "turn_affordances") lastGovernedFrameAt = Date.now();
+    }
+    const elapsed = lastGovernedFrameAt - start;
 
     // Shared deadline: hero (~80ms, narration-only) + goblin-a (~80ms: 60ms
     // tactical + ~20ms remaining narration cap) + goblin-b (~80ms) is
