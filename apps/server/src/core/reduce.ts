@@ -1,7 +1,13 @@
 // The projection. State is a fold of the event log and nothing else
 // (invariant 3), so this function is the only place a `SessionState` changes
-// shape — and it is pure, total and never mutates its input, which is what
-// lets the same fold run on the client.
+// shape — and it is pure, total and never mutates its input. That purity is
+// what makes the projection serializable and replayable, so a real client can
+// run an *equivalent* fold over the same events — not a reuse of this exact
+// module, since invariant 5 (`web` depends only on `@ai-dm/schemas`; nothing
+// depends on `server`) forbids importing it from here. If sharing the
+// function itself proves necessary, it moves to `@ai-dm/schemas`' sibling
+// utility space — the spec's own stated fallback — rather than being
+// imported from the server.
 //
 // `GameEvent.payload` is `z.record(z.string(), z.unknown())` on the wire, so
 // every payload this cares about is parsed here rather than cast. An event
