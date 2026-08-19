@@ -1,8 +1,20 @@
 import { describe, expect, it } from "vitest";
 import { validateExecuteTurn } from "@ai-dm/rules-engine";
-import type { TacticalAgent } from "@ai-dm/agents";
-import { createDeterministicNarrative } from "@ai-dm/agents";
-import type { ClientMessage, GameEvent, ServerFrame, SessionState } from "@ai-dm/schemas";
+import type { NarrativePort, TacticalAgent } from "@ai-dm/agents";
+import {
+  createAgentRuntime,
+  createDeterministicNarrative,
+  createFakePort,
+  createTacticalAgent,
+  DEFAULT_MODEL_ROUTING,
+} from "@ai-dm/agents";
+import type {
+  ClientMessage,
+  ExecuteTurn,
+  GameEvent,
+  ServerFrame,
+  SessionState,
+} from "@ai-dm/schemas";
 import { createInMemoryEventStore } from "./event-store.js";
 import type { EventStore } from "./event-store.js";
 import { SNAPSHOT_EVERY, handleCommand } from "./pipeline.js";
@@ -108,6 +120,95 @@ function syntheticEvent(sequence: number): GameEvent {
   };
 }
 
+/**
+ * A tactical port that proposes exactly the given turns, one per call to
+ * `proposeTurn`, in order. Every element must be a full `ExecuteTurn` — C-1:
+ * `tacticalRationaleEnglish` is required, not optional, so an untyped
+ * fixture would fail at runtime and a typed one fails `pnpm typecheck`.
+ *
+ * C-2: `TokenUsage` is `{ promptTokens, completionTokens, totalTokens }`
+ * (`packages/agents/src/providers/usage.ts`), not `{ inputTokens,
+ * outputTokens }`.
+ */
+function agentProposing(turns: readonly ExecuteTurn[]): TacticalAgent {
+  const port = createFakePort({
+    structured: turns.map((turn) => ({
+      ok: true as const,
+      value: {
+        value: turn,
+        usage: { promptTokens: 10, completionTokens: 5, totalTokens: 15 },
+      },
+    })),
+  });
+  return createTacticalAgent({
+    runtime: createAgentRuntime({ routing: DEFAULT_MODEL_ROUTING, port }),
+  });
+}
+
+/**
+ * goblin-a's first proposal moves to an off-grid tile — illegal on any
+ * geometry, unlike the brief's original "attack a target 45 ft away"
+ * fixture, which stopped being illegal once C-14 moved goblin-ambush's
+ * combatants into melee range of each other. The agent's own retry-once
+ * loop (step 7a, `packages/agents/src/tactical/index.ts`) recovers with a
+ * legal dodge; goblin-b then dodges cleanly on the first attempt.
+ */
+function agentRejectingThenRecovering(): TacticalAgent {
+  const port = createFakePort({
+    structured: [
+      {
+        ok: true as const,
+        value: {
+          value: {
+            actorId: "goblin-a",
+            movement: [{ destinationTile: [-1, -1], pathType: "direct" }],
+            mainAction: { actionType: "dodge" },
+            tacticalRationaleEnglish: "Test fixture: deliberately illegal.",
+          },
+          usage: { promptTokens: 10, completionTokens: 5, totalTokens: 15 },
+        },
+      },
+      {
+        ok: true as const,
+        value: {
+          value: {
+            actorId: "goblin-a",
+            mainAction: { actionType: "dodge" },
+            tacticalRationaleEnglish: "Retry: legal dodge.",
+          },
+          usage: { promptTokens: 10, completionTokens: 5, totalTokens: 15 },
+        },
+      },
+      {
+        ok: true as const,
+        value: {
+          value: {
+            actorId: "goblin-b",
+            mainAction: { actionType: "dodge" },
+            tacticalRationaleEnglish: "Test fixture.",
+          },
+          usage: { promptTokens: 10, completionTokens: 5, totalTokens: 15 },
+        },
+      },
+    ],
+  });
+  return createTacticalAgent({
+    runtime: createAgentRuntime({ routing: DEFAULT_MODEL_ROUTING, port }),
+  });
+}
+
+/** Yields one token, then never resolves. What a wedged provider looks like. */
+function hangingNarrative(): NarrativePort {
+  return {
+    // eslint-disable-next-line require-yield
+    async *stream() {
+      await new Promise(() => {
+        // never resolves
+      });
+    },
+  };
+}
+
 describe("handleCommand — join", () => {
   it("sends a snapshot when the client has nothing", async () => {
     const store = createInMemoryEventStore();
@@ -208,19 +309,26 @@ describe("handleCommand — structured action", () => {
   // a `slice(0, 4)` prefix. Both `clock`/`uuid`/`seedFor` are fixed by
   // `portsWith`, so nothing about a successful dodge is nondeterministic;
   // there is no excuse for a weaker assertion here.
+  //
+  // C-18: a "successful turn" now cascades — the hero's own six events are
+  // immediately followed by the hostile sweep (Task 10's `runEnemyTurns`),
+  // so the exact sequence is hero's six plus five each for goblin-a and
+  // goblin-b (no `player_input`; only a human client sends that). This test
+  // predates the enemy loop; its assertion is widened to match, not
+  // weakened — it is still the full sequence, not a prefix.
   it("appends the exact event type sequence for a successful turn", async () => {
     const store = createInMemoryEventStore();
     const session = await freshSession(store);
     await drain(handleCommand(session, dodge("hero"), portsWith(store)));
     const types = (await store.readSince("s1", 0)).map((each) => each.type);
-    expect(types).toEqual([
-      "player_input",
+    const oneActorsTurn = [
       "action_validated",
       "dice_rolled",
       "state_delta_applied",
       "narrative_emitted",
       "scene_changed",
-    ]);
+    ];
+    expect(types).toEqual(["player_input", ...oneActorsTurn, ...oneActorsTurn, ...oneActorsTurn]);
   });
 
   // Frame/event *identity*, not just matching counts: a frame carrying the
@@ -259,18 +367,27 @@ describe("handleCommand — structured action", () => {
   // from what replay produces, silently. The deterministic stand-in used by
   // `portsWith` happens to need no trimming, so this only catches a real
   // regression here, not a quirk of that one port.
+  //
+  // C-18: one hero dodge now yields three `narrative_emitted` events (the
+  // hero's own, then each hostile's), each with its own `streamId`. The
+  // guarantee is per-stream, so this checks every one of them against only
+  // its own `narrative_token` frames rather than the whole turn's tokens.
   it("narrative_emitted carries exactly the concatenation of its streamed tokens", async () => {
     const store = createInMemoryEventStore();
     const session = await freshSession(store);
     const frames = await drain(handleCommand(session, dodge("hero"), portsWith(store)));
-    const streamed = frames
-      .filter((each) => each.type === "narrative_token")
-      .map((each) => each.text)
-      .join("");
-    const emitted = (await store.readSince("s1", 0)).find(
+    const emitted = (await store.readSince("s1", 0)).filter(
       (each) => each.type === "narrative_emitted",
     );
-    expect(emitted?.payload).toMatchObject({ text: streamed });
+    expect(emitted.length).toBeGreaterThan(0);
+    for (const event of emitted) {
+      const streamId = event.payload["streamId"];
+      const streamed = frames
+        .filter((each) => each.type === "narrative_token" && each.streamId === streamId)
+        .map((each) => (each.type === "narrative_token" ? each.text : ""))
+        .join("");
+      expect(event.payload).toMatchObject({ text: streamed });
+    }
   });
 
   it("drops a duplicate clientMessageId without applying it twice", async () => {
@@ -353,24 +470,204 @@ describe("handleCommand — structured action", () => {
 describe("handleCommand — snapshot cadence", () => {
   // `SNAPSHOT_EVERY`'s only production use is inside `emit`; the C-16 test
   // above writes its snapshot by hand via `store.putSnapshot` and proves
-  // nothing about the pipeline actually calling it. A single hero turn can
-  // only reach one actor per `handleCommand` call (enemy turns are Task 10),
-  // so driving 50 real turns through `handleCommand` isn't possible yet —
-  // instead, fast-forward the session's own sequence counter so the one
-  // dodge turn's six events land on 45..50 and the last one crosses the
-  // boundary. `EventStore.append`'s only invariant is "no duplicate
-  // sequence for this session" (event-store.ts) — it does not require a
-  // contiguous log — so this is a legitimate way to reach the boundary
-  // without inventing a multi-actor turn loop this task doesn't have yet.
+  // nothing about the pipeline actually calling it. Fast-forward the
+  // session's own sequence counter so the hero's dodge turn's six events
+  // land on 45..50 and the last one crosses the boundary.
+  // `EventStore.append`'s only invariant is "no duplicate sequence for this
+  // session" (event-store.ts) — it does not require a contiguous log — so
+  // this is a legitimate way to reach the boundary without a 44-turn setup.
+  //
+  // C-18: the hero's turn is immediately followed by the hostile sweep
+  // (Task 10), which keeps advancing `session.state` past sequence 50
+  // within this same `handleCommand` call — by the time `drain` resolves,
+  // `session.state` reflects the whole cascade, not just the moment the
+  // snapshot was taken. So the expected state is captured live, the instant
+  // the sequence-50 event frame is seen, rather than read back off
+  // `session.state` afterwards. `reduce` never mutates in place
+  // (`session.ts`'s doc comment), so that captured reference stays exactly
+  // what it was at sequence 50 even as later turns replace `session.state`
+  // with newer objects.
   it("writes a snapshot via the store once the running sequence crosses SNAPSHOT_EVERY", async () => {
     const store = createInMemoryEventStore();
     const session = await freshSession(store);
     session.nextSequence = SNAPSHOT_EVERY - 5;
 
     expect(await store.latestSnapshot("s1")).toBeNull();
-    await drain(handleCommand(session, dodge("hero"), portsWith(store)));
+
+    let stateAtSnapshot: SessionState | undefined;
+    for await (const frame of handleCommand(session, dodge("hero"), portsWith(store))) {
+      if (frame.type === "event" && frame.event.sequence === SNAPSHOT_EVERY) {
+        stateAtSnapshot = session.state;
+      }
+    }
 
     const snapshot = await store.latestSnapshot("s1");
-    expect(snapshot).toEqual({ sequence: SNAPSHOT_EVERY, state: session.state });
+    expect(snapshot).toEqual({ sequence: SNAPSHOT_EVERY, state: stateAtSnapshot });
   });
+});
+
+describe("handleCommand — enemy turns", () => {
+  it("runs every hostile turn before handing control back to the player", async () => {
+    const store = createInMemoryEventStore();
+    const session = await freshSession(store);
+    const ports: TurnPorts = {
+      ...portsWith(store),
+      tactical: agentProposing([
+        {
+          actorId: "goblin-a",
+          mainAction: { actionType: "dodge" },
+          tacticalRationaleEnglish: "Test fixture.",
+        },
+        {
+          actorId: "goblin-b",
+          mainAction: { actionType: "dodge" },
+          tacticalRationaleEnglish: "Test fixture.",
+        },
+      ]),
+    };
+
+    await drain(handleCommand(session, dodge("hero"), ports));
+
+    // Back to the top of the order, one round later.
+    expect(session.state.currentActorIndex).toBe(0);
+    expect(session.state.round).toBe(2);
+    // hero + two goblins each had their proposal validated.
+    const validated = (await store.readSince("s1", 0)).filter(
+      (each) => each.type === "action_validated",
+    );
+    expect(validated).toHaveLength(3);
+  });
+
+  it("logs the tactical agent's rejections as action_rejected events", async () => {
+    const store = createInMemoryEventStore();
+    const session = await freshSession(store);
+    const ports: TurnPorts = {
+      ...portsWith(store),
+      tactical: agentRejectingThenRecovering(),
+    };
+
+    await drain(handleCommand(session, dodge("hero"), ports));
+
+    const rejected = (await store.readSince("s1", 0)).filter(
+      (each) => each.type === "action_rejected",
+    );
+    expect(rejected.length).toBeGreaterThan(0);
+    expect(rejected[0]?.payload).toMatchObject({ actorId: "goblin-a", stage: "engine" });
+  });
+
+  // C-20: the brief's original version of this test asserted only
+  // `validated.toHaveLength(3)` against a scenario that produced no
+  // rejections at all — it checked nothing about stamping. This drives a
+  // real rejection (goblin-a's first proposal is an off-grid move, illegal
+  // on any geometry) and asserts the resulting `action_rejected` payload
+  // names the model that actually produced it, read from the routing the
+  // ports were configured with rather than a hardcoded literal —
+  // `DEFAULT_MODEL_ROUTING.tactical` is a placeholder step 7b's benchmark
+  // will change.
+  it("stamps action_rejected events with the model that produced them", async () => {
+    const store = createInMemoryEventStore();
+    const session = await freshSession(store);
+    const ports: TurnPorts = {
+      ...portsWith(store),
+      tactical: agentRejectingThenRecovering(),
+    };
+
+    await drain(handleCommand(session, dodge("hero"), ports));
+
+    const rejected = (await store.readSince("s1", 0)).filter(
+      (each) => each.type === "action_rejected",
+    );
+    expect(rejected.length).toBeGreaterThan(0);
+    const spec = DEFAULT_MODEL_ROUTING.tactical;
+    expect(rejected[0]?.payload).toMatchObject({
+      provider: spec.provider,
+      modelId: spec.modelId,
+    });
+  });
+
+  it("narrates each enemy turn", async () => {
+    const store = createInMemoryEventStore();
+    const session = await freshSession(store);
+    const ports: TurnPorts = {
+      ...portsWith(store),
+      tactical: agentProposing([
+        {
+          actorId: "goblin-a",
+          mainAction: { actionType: "dodge" },
+          tacticalRationaleEnglish: "Test fixture.",
+        },
+        {
+          actorId: "goblin-b",
+          mainAction: { actionType: "dodge" },
+          tacticalRationaleEnglish: "Test fixture.",
+        },
+      ]),
+    };
+    await drain(handleCommand(session, dodge("hero"), ports));
+    const narrated = (await store.readSince("s1", 0)).filter(
+      (each) => each.type === "narrative_emitted",
+    );
+    expect(narrated).toHaveLength(3);
+  });
+});
+
+describe("handleCommand — turn timeout", () => {
+  it("falls back to terse narration when the narrative stream hangs", async () => {
+    const store = createInMemoryEventStore();
+    const session = await freshSession(store);
+    const ports: TurnPorts = {
+      ...portsWith(store),
+      tactical: agentProposing([
+        {
+          actorId: "goblin-a",
+          mainAction: { actionType: "dodge" },
+          tacticalRationaleEnglish: "Test fixture.",
+        },
+        {
+          actorId: "goblin-b",
+          mainAction: { actionType: "dodge" },
+          tacticalRationaleEnglish: "Test fixture.",
+        },
+      ]),
+      narrative: hangingNarrative(),
+      turnTimeoutMs: 50,
+    };
+
+    const frames = await drain(handleCommand(session, dodge("hero"), ports));
+
+    // The turn completed rather than hanging, and it still produced prose.
+    const emitted = (await store.readSince("s1", 0)).filter(
+      (each) => each.type === "narrative_emitted",
+    );
+    expect(emitted.length).toBeGreaterThan(0);
+    // "Guard": goblin-ambush's hero borrows the "guard" stat block (C-13).
+    expect(emitted[0]?.payload).toMatchObject({
+      text: expect.stringContaining("Guard") as string,
+    });
+    expect(frames.some((each) => each.type === "event")).toBe(true);
+  }, 10_000);
+
+  it("still advances the turn after a narrative timeout", async () => {
+    const store = createInMemoryEventStore();
+    const session = await freshSession(store);
+    const ports: TurnPorts = {
+      ...portsWith(store),
+      tactical: agentProposing([
+        {
+          actorId: "goblin-a",
+          mainAction: { actionType: "dodge" },
+          tacticalRationaleEnglish: "Test fixture.",
+        },
+        {
+          actorId: "goblin-b",
+          mainAction: { actionType: "dodge" },
+          tacticalRationaleEnglish: "Test fixture.",
+        },
+      ]),
+      narrative: hangingNarrative(),
+      turnTimeoutMs: 50,
+    };
+    await drain(handleCommand(session, dodge("hero"), ports));
+    expect(session.state.round).toBe(2);
+  }, 10_000);
 });

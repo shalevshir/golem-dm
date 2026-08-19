@@ -11,12 +11,14 @@
 // test assert an exact event stream, and what makes a replayed session
 // reproduce the fight rather than a new one.
 //
-// This task (9) covers `join`, `free_text` and the player's own
-// `structured_action`. Enemy turns are Task 10, appended to the same
-// `structured_action` case after a successful player turn.
+// `join`, `free_text` and the player's own `structured_action` (Task 9) are
+// followed by the hostile sweep and the per-turn narration timeout (Task 10),
+// appended to the same `structured_action` case after a successful player
+// turn.
 import { applyTurn, seeded, validateExecuteTurn } from "@ai-dm/rules-engine";
 import type { TurnEffect } from "@ai-dm/rules-engine";
-import type { NarrativePort, TacticalAgent } from "@ai-dm/agents";
+import { availableActionsFor, createDeterministicNarrative } from "@ai-dm/agents";
+import type { NarrativePort, TacticalAgent, TurnProposalResult } from "@ai-dm/agents";
 import type { ClientMessage, GameEvent, ServerFrame } from "@ai-dm/schemas";
 import { SequenceConflictError, SessionMismatchError } from "./event-store.js";
 import type { EventStore } from "./event-store.js";
@@ -49,6 +51,46 @@ function namesFor(session: Session): Record<string, string | undefined> {
 /** `structured_action` and `free_text` carry one; `join` does not. */
 function clientMessageIdOf(command: ClientMessage): string | undefined {
   return command.type === "join" ? undefined : command.clientMessageId;
+}
+
+/**
+ * Yields from `stream` until `ms` elapses, then stops. A wedged provider must
+ * not wedge the turn: `apps/server/CLAUDE.md` caps the whole turn at 10s and
+ * falls back to terse narration from the rule outcome. The deterministic port
+ * never hangs, but a real streaming narrative agent can.
+ *
+ * Whatever tokens arrived before the cap are kept — a partial sentence beats
+ * an empty one, and the caller decides what to do when nothing arrived at
+ * all.
+ *
+ * C-19: a naive version of this races `iterator.next()` against a fresh
+ * `setTimeout` every loop iteration and never clears it on the fast path, so
+ * a long stream leaves one live ~10s timer per chunk. Each iteration here
+ * clears its own timer as soon as the race settles, win or lose, so nothing
+ * outlives the loop.
+ */
+async function* untilDeadline(stream: AsyncIterable<string>, ms: number): AsyncIterable<string> {
+  const iterator = stream[Symbol.asyncIterator]();
+  const deadline = Date.now() + ms;
+
+  for (;;) {
+    const remaining = deadline - Date.now();
+    if (remaining <= 0) return;
+
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const timeout = new Promise<"timeout">((resolve) => {
+      timer = setTimeout(() => {
+        resolve("timeout");
+      }, remaining);
+    });
+
+    const next = await Promise.race([iterator.next(), timeout]);
+    clearTimeout(timer);
+
+    if (next === "timeout") return;
+    if (next.done === true) return;
+    yield next.value;
+  }
 }
 
 export async function* handleCommand(
@@ -101,23 +143,131 @@ export async function* handleCommand(
   async function* narrate(actorId: string, effect: TurnEffect): AsyncIterable<ServerFrame> {
     const streamId = ports.uuid();
     const actorName = session.built.statBlocks.get(actorId)?.nameEnglish ?? actorId;
+    const narrationInput = { actorName, effect, namesByCombatantId: namesFor(session) };
     let text = "";
-    for await (const chunk of ports.narrative.stream({
-      actorName,
-      effect,
-      namesByCombatantId: namesFor(session),
-    })) {
+    const primary = untilDeadline(ports.narrative.stream(narrationInput), ports.turnTimeoutMs);
+    for await (const chunk of primary) {
       text += chunk;
       yield { type: "narrative_token", streamId, text: chunk };
     }
-    // No `.trim()`: this must carry exactly the concatenation of the
+
+    // The cap fired before a single token of `ports.narrative`'s own stream
+    // arrived. Render the rule outcome directly through the same terse,
+    // always-available port `apps/server/CLAUDE.md` names as the fallback —
+    // still streamed as narrative_token frames, just from a source that
+    // cannot itself hang.
+    if (text.trim() === "") {
+      for await (const chunk of createDeterministicNarrative().stream(narrationInput)) {
+        text += chunk;
+        yield { type: "narrative_token", streamId, text: chunk };
+      }
+    }
+    // No further `.trim()`: this must carry exactly the concatenation of the
     // narrative_token chunks yielded above (the other half of the guarantee
-    // Task 5's narrative port makes about its own streamed chunks). The
-    // deterministic stand-in happens to need no trimming, but that is a
-    // property of that port, not of this pipeline — a real LLM port with a
+    // Task 5's narrative port makes about its own streamed chunks). Both
+    // sources used here happen to need no trimming, but that is a property
+    // of those ports, not of this pipeline — a real LLM port with a
     // leading/trailing space must not make replay diverge from what the
     // client already rendered optimistically while streaming.
     yield* emit("narrative_emitted", { actorId, streamId, text });
+  }
+
+  /**
+   * One hostile turn. The validate -> retry-once -> fallback loop is the
+   * agent's own (step 7a, `packages/agents/src/tactical/index.ts`); this only
+   * stamps its rejections into the log and applies whatever legal turn came
+   * back. Never lets the proposal itself touch state — `applyTurn` below is
+   * the only thing that mutates the world, and only after the rules engine
+   * has already validated the proposal inside `proposeTurn`.
+   */
+  async function* enemyTurn(actorId: string): AsyncIterable<ServerFrame> {
+    const world = worldFor(session);
+    const statBlock = session.built.statBlocks.get(actorId);
+    const controller = new AbortController();
+    const timer = setTimeout(() => {
+      controller.abort();
+    }, ports.turnTimeoutMs);
+
+    let proposal: TurnProposalResult;
+    try {
+      proposal = await ports.tactical.proposeTurn({
+        world,
+        actorId,
+        availableActions: statBlock === undefined ? [] : availableActionsFor(statBlock),
+        turnOrder: session.state.turnOrder,
+        abortSignal: controller.signal,
+      });
+    } finally {
+      clearTimeout(timer);
+    }
+
+    // Every attempt the agent made, whether or not one succeeded. This is the
+    // dataset step 7b's rejection analysis reads.
+    for (const rejection of proposal.rejections) {
+      yield* emit("action_rejected", { ...rejection });
+    }
+
+    if (!proposal.ok) {
+      // `aborted` (the 10s budget) or `no_legal_turn`. Either way the creature
+      // forfeits its turn rather than the pipeline stalling.
+      yield* emit("scene_changed", { kind: "turn_advanced" });
+      return;
+    }
+
+    yield* emit("action_validated", { actorId, turn: proposal.turn, source: proposal.source });
+
+    const seed = ports.seedFor(session.state.rootSeed, session.nextSequence);
+    const { world: after, effect } = applyTurn({
+      world,
+      actorId,
+      turn: proposal.turn,
+      plan: proposal.plan,
+      context: { statBlocks: session.built.statBlocks },
+      rng: seeded(seed),
+    });
+
+    yield* emit("dice_rolled", { actorId, seed, attacks: effect.attacks });
+    yield* emit("state_delta_applied", { combatants: after.combatants });
+    yield* narrate(actorId, effect);
+    yield* emit("scene_changed", { kind: "turn_advanced" });
+  }
+
+  /**
+   * Run hostiles until it is a party member's turn again, or nobody is left
+   * to fight. Bounded by the turn order's length rather than an unbounded
+   * loop: each pass through the body either returns or emits exactly one
+   * `turn_advanced`, which `reduce` turns into exactly one step of
+   * `currentActorIndex` — so a bug that failed to ever return control to the
+   * party (or a fight that somehow never runs out of a second living
+   * faction) still cannot spin more than `turnOrder.length + 1` iterations
+   * here. The encounter's own termination — someone eventually dies — is a
+   * property of the combat math (C-31), not of this loop; this bound exists
+   * purely so a defect in that math or in `reduce` cannot hang the pipeline.
+   */
+  async function* runEnemyTurns(): AsyncIterable<ServerFrame> {
+    for (let guard = 0; guard <= session.state.turnOrder.length; guard += 1) {
+      const actorId = session.state.turnOrder[session.state.currentActorIndex];
+      if (actorId === undefined) return;
+
+      const combatant = session.state.combatants.find((each) => each.combatantId === actorId);
+      if (combatant === undefined) return;
+      if (combatant.faction === "party") return;
+
+      // A downed or dead creature is skipped, not asked for a turn.
+      if (combatant.status !== "alive") {
+        yield* emit("scene_changed", { kind: "turn_advanced" });
+        continue;
+      }
+
+      const livingFactions = new Set(
+        session.state.combatants
+          .filter((each) => each.status === "alive")
+          .map((each) => each.faction),
+      );
+      if (livingFactions.size < 2) return;
+
+      yield* enemyTurn(actorId);
+    }
   }
 
   try {
@@ -256,6 +406,7 @@ export async function* handleCommand(
         yield* emit("state_delta_applied", { combatants: after.combatants });
         yield* narrate(command.actorId, effect);
         yield* emit("scene_changed", { kind: "turn_advanced" });
+        yield* runEnemyTurns();
         return;
       }
 
