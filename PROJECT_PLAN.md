@@ -74,7 +74,7 @@ Status: POC phase · Supersedes `dm-plan.md` (see `dm-plan-review.md` for the fa
 | 5 | **SRD data:** ~10 monsters, conditions, 4 classes as validated JSON | Loads + validates | 2 | ✅ done |
 | 6 | **Provider adapter:** Vercel AI SDK wrapper, `ModelRouting` config | Mocked-provider tests pass | 3 | ✅ done |
 | 7 | **Tactical agent + sim:** validate→retry→fallback loop; benchmark Flash vs nano/mini | Legality ≥95% after retry on fixture scenarios; model chosen from data | 3–4 | 🟡 7a done, 7b pending |
-| 8 | **Server + web:** Fastify+WS, event log, replay-on-reconnect, clickable canvas grid | Full combat playable E2E vs scripted enemy | 4–5 | 🟡 designed, not built (§4.2) |
+| 8 | **Server + web:** Fastify+WS, event log, replay-on-reconnect, clickable canvas grid | Full combat playable E2E vs scripted enemy | 4–5 | 🟡 server done, web pending |
 | 9 | **Narrative agent:** Sonnet 5 streaming, Hebrew glossary, gendered narration, cache-stable prefix | First token <1.5s p50; Hebrew reviewed by native speaker | 5–6 | ⬜ not started |
 | 10 | **Memory:** pgvector episodic store, scene summarization, quest DAG | Replay test + top-k retrieval test pass | 6 | ⬜ not started |
 | 11 | **Closed beta:** 5–10 Hebrew-speaking playtesters; per-turn token/latency/cost dashboards | Measured cost table replaces §3 estimates; go/no-go review | 7–8 | ⬜ not started |
@@ -267,3 +267,65 @@ engine's "no I/O" boundary means `buildEncounter` must take **injected**,
 already-parsed stat blocks, and the SRD file loader has no shared home at all
 — `@ai-dm/schemas` is bundled for the browser by `apps/web`, so `node:fs`
 cannot go there either. The sim and the server each keep a copy.
+
+### 4.3 Step 8 server slice — execution notes (2026-08-19)
+
+Spec #1 (§4.2) is built and its exit criterion is asserted:
+`apps/server/src/e2e.test.ts` plays a full `goblin-ambush` combat over a real
+WebSocket, against a mocked tactical provider and the deterministic
+narrative stand-in, and separately proves a mid-fight reconnect over a
+second real socket reproduces the server's own projection exactly, not just
+its combatant count. `apps/server` carries 101 tests; the full repo —
+`packages/schemas` (60), `packages/rules-engine` (319, having absorbed the
+seven cases moved out of `tools/sim`'s old `resolve.test.ts`),
+`packages/agents` (176), `apps/server` (101) and `tools/sim` (129) — is
+green under `pnpm typecheck && pnpm lint && pnpm test`.
+
+The protocol that shipped: a client sends `join` (optionally with
+`resumeFrom`), `structured_action`, or `free_text` over `/ws`; the server
+answers with `session_state` snapshots, `event` frames (the same
+`GameEvent`s the store persists), streamed `narrative_token` frames, and
+`rejected`/`error` frames on an illegal or malformed turn. `POST /sessions`
+creates a session against one of the catalogue's encounters (`goblin-ambush`
+is the only one so far) and returns a `sessionId`; everything after that
+happens over the socket. A client is never handed state directly — it is
+always a fold of the event log (`apps/server/src/core/reduce.ts`), which is
+what makes a reconnecting client and the server's own in-memory projection
+provably the same function of the same events, rather than two
+implementations that happen to agree.
+
+Three things the E2E run surfaced that are worth recording rather than
+rediscovering:
+
+- **The hero dies rather than falling unconscious, and that is what lets the
+  fight end at all.** `combatantFromStatBlock`
+  (`packages/rules-engine/src/combat/statblock.ts`) never sets
+  `characterId`, so `resolve.ts`'s
+  `diesAtZeroHp: target.characterId === undefined` is true for every
+  combatant in `goblin-ambush` — the hero included, since no
+  player-character data exists yet and it borrows the `guard` stat block. An
+  unconscious hero, with no death-save loop implemented, would leave the
+  pipeline with nothing to conclude on; a dead one lets `runEnemyTurns`'
+  living-faction check fire and the fight actually stop. This guarantee
+  disappears the moment real `CharacterSheet`-backed heroes arrive, and
+  whatever step adds them also has to decide what ends a fight the party can
+  survive.
+- **`EncounterDefinition.maxRounds` is inert.** It is set (20, for
+  `goblin-ambush`) and threaded through `buildEncounter`, but nothing under
+  `apps/server/src` or `packages/rules-engine/src` reads it — there is no
+  round cap anywhere in the pipeline. Termination rests entirely on the
+  combat math above; a caller that needs a bound (the E2E test included) has
+  to impose its own.
+- **Per-turn metrics are missing two of the spec's five fields, honestly
+  rather than silently.** `TurnPorts.metrics` (`apps/server/src/core/
+  pipeline.ts`) records tokens in/out, retries and latency per tactical
+  call, but not cached tokens or cost: `TokenUsage`
+  (`packages/agents/src/providers/usage.ts`) has no cache-read field to
+  report, and the cost table lives in `tools/sim`, which nothing under
+  `apps/server` may depend on (dependency direction, root `CLAUDE.md` §5). A
+  cost figure computed from `TokenUsage` alone would also be *wrong*, not
+  merely incomplete — cache reads bill differently and nothing at this layer
+  reports them.
+
+Deferred, as §4.2 already said: Postgres persistence, the intent agent, and
+the web client (spec #2).
