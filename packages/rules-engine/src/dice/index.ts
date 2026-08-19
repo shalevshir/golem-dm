@@ -80,3 +80,5 @@ export function roll(notation: string, rng: Rng, options: RollOptions = {}): Rol
   const sum = rolls.reduce((acc, value) => acc + value, 0);
   return { notation, rolls, modifier, total: Math.max(0, sum + modifier) };
 }
+
+export * from "./rng.js";
