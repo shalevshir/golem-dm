@@ -1,0 +1,116 @@
+import { describe, expect, it } from "vitest";
+import type { MonsterStatBlock } from "@ai-dm/schemas";
+import { buildEncounter } from "./build.js";
+import type { EncounterDefinition } from "./build.js";
+
+const goblin: MonsterStatBlock = {
+  monsterId: "goblin_warrior",
+  nameEnglish: "Goblin Warrior",
+  size: "small",
+  creatureType: "Fey (Goblinoid)",
+  alignment: "Chaotic Neutral",
+  armorClass: 15,
+  hitPoints: { average: 10, diceNotation: "3d6" },
+  speedFeet: 30,
+  abilities: { str: 8, dex: 15, con: 10, int: 10, wis: 8, cha: 8 },
+  challengeRating: "1/4",
+  proficiencyBonus: 2,
+  attacksPerAction: 1,
+  actions: [
+    {
+      actionId: "scimitar",
+      nameEnglish: "Scimitar",
+      attackBonus: 4,
+      reachFeet: 5,
+      damage: { diceNotation: "1d6+2", averageDamage: 5, damageType: "slashing" },
+      extraDamage: [],
+    },
+  ],
+};
+
+const definition: EncounterDefinition = {
+  encounterId: "test-duel",
+  descriptionEnglish: "Two goblins, open floor.",
+  width: 5,
+  height: 5,
+  spawns: [
+    { combatantId: "hero", monsterId: "goblin_warrior", faction: "party", position: [0, 0] },
+    { combatantId: "villain", monsterId: "goblin_warrior", faction: "hostile", position: [4, 4] },
+  ],
+  turnOrder: ["hero", "villain"],
+  maxRounds: 10,
+};
+
+const statBlocks = new Map([["goblin_warrior", goblin]]);
+
+describe("buildEncounter", () => {
+  it("places every spawn and keys stat blocks by combatantId", () => {
+    const built = buildEncounter({ definition, statBlocks });
+    expect(built.world.combatants.map((each) => each.combatantId)).toEqual(["hero", "villain"]);
+    expect(built.world.combatants[0]?.position).toEqual([0, 0]);
+    expect([...built.statBlocks.keys()]).toEqual(["hero", "villain"]);
+    expect(built.turnOrder).toEqual(["hero", "villain"]);
+  });
+
+  it("defaults every unlisted tile to normal and applies overrides", () => {
+    const built = buildEncounter({
+      definition: { ...definition, terrain: [{ tile: [2, 2], terrain: "difficult" }] },
+      statBlocks,
+    });
+    expect(built.world.grid.tiles[2]?.[2]).toBe("difficult");
+    expect(built.world.grid.tiles[0]?.[1]).toBe("normal");
+  });
+
+  it("derives actionRangesFeet from the same stat blocks the validator will see", () => {
+    const built = buildEncounter({ definition, statBlocks });
+    expect(built.world.actionRangesFeet?.["scimitar"]).toBe(5);
+  });
+
+  it("rejects a spawn whose stat block was not supplied", () => {
+    expect(() =>
+      buildEncounter({ definition, statBlocks: new Map<string, MonsterStatBlock>() }),
+    ).toThrow(/No stat block supplied for monsterId goblin_warrior/);
+  });
+
+  it("rejects a spawn placed off the grid", () => {
+    const offGrid: EncounterDefinition = {
+      ...definition,
+      spawns: [
+        {
+          combatantId: "hero",
+          monsterId: "goblin_warrior",
+          faction: "party",
+          position: [9, 9],
+        },
+      ],
+      turnOrder: ["hero"],
+    };
+    expect(() => buildEncounter({ definition: offGrid, statBlocks })).toThrow(/off the grid/);
+  });
+
+  it("rejects two spawns sharing a tile", () => {
+    const stacked: EncounterDefinition = {
+      ...definition,
+      spawns: [
+        {
+          combatantId: "hero",
+          monsterId: "goblin_warrior",
+          faction: "party",
+          position: [1, 1],
+        },
+        {
+          combatantId: "villain",
+          monsterId: "goblin_warrior",
+          faction: "hostile",
+          position: [1, 1],
+        },
+      ],
+    };
+    expect(() => buildEncounter({ definition: stacked, statBlocks })).toThrow(/collides/);
+  });
+
+  it("rejects a combatant missing from turnOrder", () => {
+    const partial: EncounterDefinition = { ...definition, turnOrder: ["hero"] };
+    expect(() => buildEncounter({ definition: partial, statBlocks })).toThrow(/turnOrder/);
+  });
+});

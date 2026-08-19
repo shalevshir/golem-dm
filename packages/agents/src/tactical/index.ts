@@ -26,6 +26,7 @@ import type { AvailableAction } from "./snapshot.js";
 import { buildCapabilityCard, buildSnapshot } from "./snapshot.js";
 
 export * from "./action-rejected.js";
+export * from "./available-actions.js";
 export * from "./fallback.js";
 export * from "./prompt.js";
 export * from "./prompt-text.js";

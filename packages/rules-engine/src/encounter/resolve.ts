@@ -8,12 +8,12 @@
 // die — plus the arithmetic inputs the engine cannot supply, because
 // `resolveAttack` needs an attack bonus and `Combatant` has no such field.
 //
-// Deliberately NOT modelled, all of them RULES_REFERENCE.md section 8 gaps the
-// sim must not invent around: opportunity attacks, monster traits and reactions
-// (Pack Tactics, Nimble Escape, Undead Fortitude, Parry), and conditional
-// damage riders. Most consequentially, Dodge has no mechanical effect, because
-// the engine models no dodging state — `TurnEffect.nonAttackAction` exists so
-// no report reads a win rate without that in view.
+// Deliberately NOT modelled, all of them RULES_REFERENCE.md section 8 gaps:
+// opportunity attacks, monster traits and reactions (Pack Tactics, Nimble
+// Escape, Undead Fortitude, Parry), and conditional damage riders. Most
+// consequentially, Dodge has no mechanical effect, because the engine models
+// no dodging state — `TurnEffect.nonAttackAction` exists so no report reads a
+// win rate without that in view.
 import { roll } from "../dice/index.js";
 import type { Rng } from "../dice/index.js";
 import { applyDamage, coverAgainst, resolveAttack } from "../combat/index.js";
@@ -47,7 +47,7 @@ export interface TurnEffect {
   damageDealt: number;
   killed: readonly string[];
   movedFeet: number;
-  /** Dodge, Dash, Hide and friends. Legal, but inert in this harness. */
+  /** Dodge, Dash, Hide and friends. Legal, but mechanically inert. */
   nonAttackAction: boolean;
   /**
    * Action ids the engine accepted but the actor's stat block does not contain.
@@ -176,10 +176,10 @@ export function applyTurn(input: ApplyTurnInput): ApplyTurnResult {
       damage = damageFrom(attack.damage, critical, rng);
       for (const extra of attack.extraDamage) damage += damageFrom(extra, critical, rng);
 
-      // Every combatant here is built from a monster stat block and so has no
-      // `characterId`: it dies at 0 HP instead of rolling death saves. That
-      // keeps the sim off the death-save path, which the engine does not
-      // implement (RULES_REFERENCE.md section 8).
+      // Combatants built from a monster stat block have no `characterId` and
+      // die at 0 HP; a PC combatant lands on the unconscious/death-save path,
+      // which this package does not yet implement (RULES_REFERENCE.md
+      // section 8).
       const applied = applyDamage(
         { currentHp: target.currentHp, maxHp: target.maxHp, tempHp: target.tempHp },
         damage,

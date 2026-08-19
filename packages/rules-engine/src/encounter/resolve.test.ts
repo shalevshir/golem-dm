@@ -1,12 +1,112 @@
 import { describe, expect, it } from "vitest";
-import { validateExecuteTurn } from "@ai-dm/rules-engine";
-import type { ExecuteTurn } from "@ai-dm/schemas";
-import { buildScenario } from "../scenarios/build.js";
-import { MELEE_BRAWL } from "../scenarios/melee-brawl.js";
-import { d20Exactly, scripted } from "../rng.js";
+import type { ExecuteTurn, MonsterStatBlock } from "@ai-dm/schemas";
+import { validateExecuteTurn } from "../combat/index.js";
+import type { Rng } from "../dice/index.js";
+import { buildEncounter } from "./build.js";
+import type { EncounterDefinition } from "./build.js";
 import { applyTurn } from "./resolve.js";
 
-const built = buildScenario(MELEE_BRAWL);
+function scripted(values: readonly number[]): Rng {
+  let i = 0;
+  return () => {
+    const v = values[i++];
+    if (v === undefined) throw new Error("scripted RNG exhausted");
+    return v;
+  };
+}
+
+/** rng value that makes rollDie(20) produce exactly `target`. */
+function d20Exactly(target: number): number {
+  return (target - 1) / 20 + 0.0001;
+}
+
+// Reproduces the geometry of tools/sim/src/scenarios/melee-brawl.ts's
+// MELEE_BRAWL fixture: two goblin warriors meet two guards at close quarters
+// on an empty 12x12 field. Stat blocks copied from data/srd/monsters/.
+const GOBLIN_WARRIOR: MonsterStatBlock = {
+  monsterId: "goblin_warrior",
+  nameEnglish: "Goblin Warrior",
+  size: "small",
+  creatureType: "Fey (Goblinoid)",
+  alignment: "Chaotic Neutral",
+  armorClass: 15,
+  hitPoints: { average: 10, diceNotation: "3d6" },
+  speedFeet: 30,
+  abilities: { str: 8, dex: 15, con: 10, int: 10, wis: 8, cha: 8 },
+  challengeRating: "1/4",
+  proficiencyBonus: 2,
+  attacksPerAction: 1,
+  actions: [
+    {
+      actionId: "scimitar",
+      nameEnglish: "Scimitar",
+      attackBonus: 4,
+      reachFeet: 5,
+      damage: { diceNotation: "1d6+2", averageDamage: 5, damageType: "slashing" },
+      extraDamage: [],
+    },
+    {
+      actionId: "shortbow",
+      nameEnglish: "Shortbow",
+      attackBonus: 4,
+      rangeFeet: 80,
+      longRangeFeet: 320,
+      damage: { diceNotation: "1d6+2", averageDamage: 5, damageType: "piercing" },
+      extraDamage: [],
+    },
+  ],
+};
+
+const GUARD: MonsterStatBlock = {
+  monsterId: "guard",
+  nameEnglish: "Guard",
+  size: "medium",
+  creatureType: "Humanoid",
+  alignment: "Neutral",
+  armorClass: 16,
+  hitPoints: { average: 11, diceNotation: "2d8+2" },
+  speedFeet: 30,
+  abilities: { str: 13, dex: 12, con: 12, int: 10, wis: 11, cha: 10 },
+  challengeRating: "1/8",
+  proficiencyBonus: 2,
+  attacksPerAction: 1,
+  actions: [
+    {
+      actionId: "spear",
+      nameEnglish: "Spear",
+      attackBonus: 3,
+      reachFeet: 5,
+      rangeFeet: 20,
+      longRangeFeet: 60,
+      damage: { diceNotation: "1d6+1", averageDamage: 4, damageType: "piercing" },
+      extraDamage: [],
+    },
+  ],
+};
+
+const DEFINITION: EncounterDefinition = {
+  encounterId: "melee-brawl",
+  descriptionEnglish:
+    "Two goblin warriors meet two guards at close quarters on an empty 12x12 field. " +
+    "Baseline legality with no spatial reasoning required.",
+  width: 12,
+  height: 12,
+  spawns: [
+    { combatantId: "goblin_1", monsterId: "goblin_warrior", faction: "hostile", position: [4, 5] },
+    { combatantId: "goblin_2", monsterId: "goblin_warrior", faction: "hostile", position: [4, 7] },
+    { combatantId: "guard_1", monsterId: "guard", faction: "party", position: [5, 5] },
+    { combatantId: "guard_2", monsterId: "guard", faction: "party", position: [5, 7] },
+  ],
+  turnOrder: ["goblin_1", "guard_1", "goblin_2", "guard_2"],
+  maxRounds: 15,
+};
+
+const STAT_BLOCKS = new Map<string, MonsterStatBlock>([
+  ["goblin_warrior", GOBLIN_WARRIOR],
+  ["guard", GUARD],
+]);
+
+const built = buildEncounter({ definition: DEFINITION, statBlocks: STAT_BLOCKS });
 
 function attack(actorId: string, targetId: string, actionId: string): ExecuteTurn {
   return {
