@@ -21,7 +21,12 @@ The orchestrator: Fastify + `@fastify/websocket`. Owns the turn pipeline, sessio
 
 ## Config
 
-Secrets/env via `.env` (see `.env.example`) validated with zod at boot — fail fast on missing keys. Model routing lives in config, not code.
+Secrets/env via `.env` (see [`.env.example`](.env.example)), validated by
+`src/config.ts` with zod at boot — the process refuses to start without at
+least one provider API key. Model routing is a source-level data edit in
+`packages/agents/src/providers/routing.ts` (`DEFAULT_MODEL_ROUTING`), not an
+env var — the spec calls for it to be config-overridable, and that override
+is not yet implemented (see `PROJECT_PLAN.md` §4.3).
 
 ## Testing
 

@@ -1,21 +1,10 @@
 // A scenario is a fixture: a map, a cast, and a fixed turn order. Everything
 // here is data. `buildScenario` is the only thing that turns it into state.
-import type { CombatWorld } from "@ai-dm/rules-engine";
+import type { CombatWorld, SpawnSpec, TerrainOverride } from "@ai-dm/rules-engine";
 import type { AvailableAction } from "@ai-dm/agents";
-import type { Faction, MonsterStatBlock, TerrainType, Tile } from "@ai-dm/schemas";
+import type { MonsterStatBlock } from "@ai-dm/schemas";
 
-export interface SpawnSpec {
-  combatantId: string;
-  /** Basename of a file in `data/srd/monsters/`, without the extension. */
-  monsterId: string;
-  faction: Faction;
-  position: Tile;
-}
-
-export interface TerrainOverride {
-  tile: Tile;
-  terrain: TerrainType;
-}
+export type { SpawnSpec, TerrainOverride };
 
 export interface ScenarioDefinition {
   scenarioId: string;
