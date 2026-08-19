@@ -145,10 +145,12 @@ rather than falling back, because the abort signal is the caller's.
 `deterministicFallback` is exported so the server can choose otherwise at no
 cost.
 
-Two things there are **deliberately unmeasured**: the tactical row still points
-at Gemini 3 Flash by default, and `REASONING_BUDGET_TOKENS` (0 / 4096 / 16384)
-is a plausible scale rather than an observed one. Step 7b's benchmark is what
-should set both.
+Two things were, at the time of 7a, **deliberately unmeasured**: the tactical
+row still pointed at Gemini 3 Flash by default, and `REASONING_BUDGET_TOKENS`
+(0 / 4096 / 16384) was a plausible scale rather than an observed one. 7b's
+benchmark settled the first and *not* the second — see "Step 7b result" below.
+The budget table's only consumer is google, which lost the tactical role, so it
+remains unmeasured and now bears only on `intent`.
 
 Two follow-ups landed after 7a's review, both of which exist for 7b's sake:
 

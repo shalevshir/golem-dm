@@ -1,7 +1,7 @@
 // Single provider-agnostic adapter (Vercel AI SDK). Model choice per role is
 // CONFIG, not code — see `routing.ts` and PROJECT_PLAN.md section 3:
-//   intent:    gemini-3-flash | gpt-5.4-nano
-//   tactical:  gemini-3-flash | gpt-5.4-mini   (benchmark in tools/sim)
+//   intent:    gemini-3-flash                   (unbenchmarked — plan's pick)
+//   tactical:  gpt-5.4-nano @ high effort       (set by the step 7b benchmark)
 //   narrative: claude-sonnet-5                  (streaming, prompt caching)
 //
 // Agents depend on `LanguageModelPort`, never on the SDK. `vercel.ts` is the
