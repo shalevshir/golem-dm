@@ -75,6 +75,35 @@ describe("createDeterministicNarrative", () => {
     expect(text).not.toContain("damage");
   });
 
+  it("narrates a zero-damage hit as a hit, keying on outcome rather than the damage number", async () => {
+    // { outcome: "hit", damage: 0 } is constructible: damage rolls floor at
+    // 0 (dice/index.ts) and a flat DamageRoll can print an average of 0.
+    // The engine's verdict is `outcome`; the renderer must not second-guess
+    // it from the derived damage number.
+    const narrative = createDeterministicNarrative();
+    const text = await collect(
+      narrative.stream({
+        actorName: "Goblin",
+        namesByCombatantId: names,
+        effect: effectWith({
+          attacks: [
+            {
+              attackerId: "villain",
+              targetId: "hero",
+              actionId: "scimitar",
+              outcome: "hit",
+              cover: "none",
+              damage: 0,
+              targetStatusAfter: "alive",
+            },
+          ],
+        }),
+      }),
+    );
+    expect(text).toBe("Goblin hits Fighter for 0 damage.");
+    expect(text).not.toContain("misses");
+  });
+
   it("narrates movement when nothing else happened", async () => {
     const narrative = createDeterministicNarrative();
     const text = await collect(
@@ -98,7 +127,7 @@ describe("createDeterministicNarrative", () => {
       chunks.push(chunk);
     }
     expect(chunks.length).toBeGreaterThan(0);
-    expect(chunks.join("")).not.toBe("");
+    expect(chunks.join("")).toBe("Fighter holds position.");
   });
 
   it("falls back to the id when a name is unknown", async () => {
@@ -150,13 +179,12 @@ describe("createDeterministicNarrative", () => {
       chunks.push(chunk);
     }
 
-    // Naive concatenation ("" join) is exactly what a consumer does to
-    // reassemble the completed text — it must match the array's own join,
-    // and the result must be a single well-formed string with no dropped or
-    // duplicated separators between sentences.
-    const joined = chunks.reduce((acc, chunk) => acc + chunk, "");
-    expect(joined).toBe(chunks.join(""));
-    expect(joined).toBe("Goblin moves 10 feet. Goblin hits Fighter for 5 damage. ");
+    // Naive "" concatenation is exactly what a consumer does to reassemble
+    // the completed text stored verbatim in the narrative_emitted event.
+    // Pinned to an exact literal — with no trailing space — so a regression
+    // in chunk boundaries or separator handling cannot hide behind a
+    // substring check.
+    expect(chunks.join("")).toBe("Goblin moves 10 feet. Goblin hits Fighter for 5 damage.");
   });
 
   it("narrates a critical hit distinctly from a normal hit", async () => {
@@ -208,7 +236,37 @@ describe("createDeterministicNarrative", () => {
         }),
       }),
     );
-    expect(text).toContain("falls");
+    expect(text).toBe("Fighter hits Goblin for 8 damage. Goblin falls.");
+  });
+
+  it("narrates a downed-but-alive target distinctly from a kill (ADR 0002: solo game)", async () => {
+    // diesAtZeroHp is false for any combatant with a characterId
+    // (resolve.ts), so a player character dropped to 0 HP always lands here,
+    // never in "dead" — this is the default narration the player sees on a
+    // losing turn, not a corner case.
+    const narrative = createDeterministicNarrative();
+    const text = await collect(
+      narrative.stream({
+        actorName: "Goblin",
+        namesByCombatantId: names,
+        effect: effectWith({
+          damageDealt: 6,
+          attacks: [
+            {
+              attackerId: "villain",
+              targetId: "hero",
+              actionId: "scimitar",
+              outcome: "hit",
+              cover: "none",
+              damage: 6,
+              targetStatusAfter: "unconscious",
+            },
+          ],
+        }),
+      }),
+    );
+    expect(text).toBe("Goblin hits Fighter for 6 damage. Fighter falls unconscious.");
+    expect(text).not.toContain("Fighter falls.");
   });
 
   it("narrates multiple attacks in one turn, in order", async () => {
@@ -257,7 +315,7 @@ describe("createDeterministicNarrative", () => {
         effect: effectWith({ movedFeet: 20 }),
       }),
     );
-    expect(text).toBe("Fighter moves 20 feet. ");
+    expect(text).toBe("Fighter moves 20 feet.");
   });
 
   it("notes an unresolved action instead of narrating a silent turn", async () => {
@@ -269,7 +327,6 @@ describe("createDeterministicNarrative", () => {
         effect: effectWith({ unresolvedActionIds: ["mystery-move"] }),
       }),
     );
-    expect(text).not.toBe("Fighter holds position. ");
-    expect(text.length).toBeGreaterThan(0);
+    expect(text).toBe("Fighter attempts an action the engine could not resolve.");
   });
 });

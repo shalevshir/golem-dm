@@ -12,17 +12,52 @@ function nameOf(input: NarrationInput, combatantId: string): string {
   return input.namesByCombatantId[combatantId] ?? combatantId;
 }
 
-function sentenceFor(input: NarrationInput, attack: AttackRecord): string {
+/**
+ * The target's status after this swing, as its own sentence — never folded
+ * into the hit sentence. ADR 0002 makes this a solo game, so a player
+ * character going down is not an edge case, it is the losing beat of the
+ * fight, and "dead" and "unconscious" have to read as distinctly different
+ * news.
+ *
+ * No clause for `"fled"`: `applyDamage` (`combat/index.ts`) only ever derives
+ * `"alive" | "unconscious" | "dead"` from a resolved attack, so this function
+ * can never actually observe `"fled"` on a hit here — a clause for it would
+ * be untestable dead code standing in for a status this code path cannot
+ * produce. `"alive"` needs nothing said about it either.
+ */
+function statusSentence(
+  target: string,
+  status: AttackRecord["targetStatusAfter"],
+): string | undefined {
+  if (status === "dead") return `${target} falls.`;
+  if (status === "unconscious") return `${target} falls unconscious.`;
+  return undefined;
+}
+
+/**
+ * The sentence(s) for one swing. A miss and a hit that downs its target are
+ * returned as separate list entries — not concatenated — so each becomes its
+ * own stream chunk.
+ */
+function sentencesForAttack(input: NarrationInput, attack: AttackRecord): string[] {
   const target = nameOf(input, attack.targetId);
-  if (attack.damage === 0) return `${input.actorName} misses ${target}.`;
+
+  // The engine's verdict is `outcome`, not a derived number: a
+  // `{ outcome: "hit", damage: 0 }` swing is constructible (damage rolls
+  // floor at 0), and narrating that as a miss would second-guess the
+  // engine's call instead of reporting what it produced.
+  if (attack.outcome === "miss" || attack.outcome === "critical_miss") {
+    return [`${input.actorName} misses ${target}.`];
+  }
 
   const critical = attack.outcome === "critical_hit" ? " critically" : "";
-  const killed = attack.targetStatusAfter === "dead" ? ` ${target} falls.` : "";
-  return `${input.actorName}${critical} hits ${target} for ${String(attack.damage)} damage.${killed}`;
+  const hit = `${input.actorName}${critical} hits ${target} for ${String(attack.damage)} damage.`;
+  const status = statusSentence(target, attack.targetStatusAfter);
+  return status === undefined ? [hit] : [hit, status];
 }
 
 function sentencesFor(input: NarrationInput): string[] {
-  const sentences = input.effect.attacks.map((attack) => sentenceFor(input, attack));
+  const sentences = input.effect.attacks.flatMap((attack) => sentencesForAttack(input, attack));
 
   if (input.effect.movedFeet > 0) {
     sentences.unshift(`${input.actorName} moves ${String(input.effect.movedFeet)} feet.`);
@@ -40,6 +75,18 @@ function sentencesFor(input: NarrationInput): string[] {
   // connection, and the client has nothing else to render for this turn.
   if (sentences.length === 0) sentences.push(`${input.actorName} holds position.`);
   return sentences;
+}
+
+/**
+ * Sentences joined with a single space between them and no trailing space on
+ * the last one. The concatenation of every yielded chunk is exactly what
+ * `narrative_emitted` stores (`protocol.ts`), and trailing whitespace has no
+ * business going into that permanent log.
+ */
+function chunksFor(sentences: readonly string[]): string[] {
+  return sentences.map((sentence, index) =>
+    index === sentences.length - 1 ? sentence : `${sentence} `,
+  );
 }
 
 /**
@@ -66,7 +113,7 @@ export function createDeterministicNarrative(): NarrativePort {
     // Chunked per sentence rather than emitted whole: the client's streaming
     // path is then exercised by the default port, not only by step 9's.
     stream(input: NarrationInput): AsyncIterable<string> {
-      return toAsyncIterable(sentencesFor(input).map((sentence) => `${sentence} `));
+      return toAsyncIterable(chunksFor(sentencesFor(input)));
     },
   };
 }
