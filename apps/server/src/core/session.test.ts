@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
+import { fold } from "@ai-dm/schemas";
 import type { GameEvent } from "@ai-dm/schemas";
 import { createInMemoryEventStore } from "./event-store.js";
-import { fold } from "./reduce.js";
 import { createSession, loadSession, worldFor } from "./session.js";
 
 const clock = (): string => "2026-08-19T10:00:00.000Z";

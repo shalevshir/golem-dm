@@ -17,10 +17,10 @@
 // anything on top of it.
 import { z } from "zod";
 import type { BuiltEncounter, CombatWorld } from "@ai-dm/rules-engine";
+import { fold } from "@ai-dm/schemas";
 import type { GameEvent, SessionState } from "@ai-dm/schemas";
 import { buildEncounterById } from "../encounters/index.js";
 import type { EventStore } from "./event-store.js";
-import { fold } from "./reduce.js";
 
 /** Sequence 0's payload. Parsed rather than cast — it is the only thing that
  * tells a reloaded session which encounter it is. */

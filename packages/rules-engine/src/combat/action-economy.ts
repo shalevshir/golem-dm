@@ -1,7 +1,8 @@
 // Action-economy state machine: what a creature has left to spend this turn.
 // Every transition is total — it either returns the next economy or a stable
 // reason code. Nothing here throws; `validateExecuteTurn` forwards the codes.
-import type { ActionEconomy, Combatant, Condition } from "@ai-dm/schemas";
+import type { Combatant, Condition } from "@ai-dm/schemas";
+import { ActionEconomy } from "@ai-dm/schemas";
 import { exhaustionSpeedPenaltyFeet } from "./exhaustion.js";
 
 export type EconomyRejectionReason =
@@ -41,15 +42,16 @@ function hasAnyCondition(actor: Combatant, conditions: readonly Condition[]): bo
   return actor.conditions.some((active) => conditions.includes(active.condition));
 }
 
-/** The economy a creature opens its turn with. Reactions refresh here. */
+/**
+ * The economy a creature opens its turn with. Reactions refresh here.
+ *
+ * Defined as the schema's own defaults rather than a hand-written literal so
+ * that `@ai-dm/schemas`' `reduce` — which resets the economy on
+ * `turn_advanced` and may not import this package (invariant 5) — shares one
+ * definition with the engine instead of maintaining a copy that must agree.
+ */
 export function startTurn(): ActionEconomy {
-  return {
-    actionUsed: false,
-    bonusActionUsed: false,
-    reactionUsed: false,
-    movementUsedFeet: 0,
-    attacksMade: 0,
-  };
+  return ActionEconomy.parse({});
 }
 
 export function spendAction(economy: ActionEconomy): EconomyResult {

@@ -1,22 +1,27 @@
 // The projection. State is a fold of the event log and nothing else
 // (invariant 3), so this function is the only place a `SessionState` changes
-// shape — and it is pure, total and never mutates its input. That purity is
-// what makes the projection serializable and replayable, so a real client can
-// run an *equivalent* fold over the same events — not a reuse of this exact
-// module, since invariant 5 (`web` depends only on `@ai-dm/schemas`; nothing
-// depends on `server`) forbids importing it from here. If sharing the
-// function itself proves necessary, it moves to `@ai-dm/schemas`' sibling
-// utility space — the spec's own stated fallback — rather than being
-// imported from the server.
+// shape — and it is pure, total and never mutates its input.
+//
+// It lives in `@ai-dm/schemas` rather than in `apps/server` so that client and
+// server run the SAME fold, not two that must agree. `apps/web` may depend on
+// this package and only this package (invariant 5); an equivalent-but-separate
+// client fold was the alternative, and the drift it invites is exactly what
+// this placement removes. `apps/server/src/core/` imports it from here.
+//
+// Nothing here may import a Node built-in, or `apps/web`'s bundle breaks — and
+// nothing here may import `@ai-dm/rules-engine`, which would invert the
+// dependency direction. The fresh action economy below is
+// `ActionEconomy.parse({})` for that second reason; the engine's `startTurn()`
+// is defined as the same expression, so there is one definition, not two.
 //
 // `GameEvent.payload` is `z.record(z.string(), z.unknown())` on the wire, so
 // every payload this cares about is parsed here rather than cast. An event
 // whose payload does not parse is a bug in whoever wrote it, and throwing is
 // better than folding a half-understood event into state.
 import { z } from "zod";
-import { startTurn } from "@ai-dm/rules-engine";
-import type { GameEvent, SessionState } from "@ai-dm/schemas";
-import { Combatant } from "@ai-dm/schemas";
+import { Combatant, ActionEconomy } from "./world.js";
+import type { GameEvent } from "./events.js";
+import type { SessionState } from "./protocol.js";
 
 // The task brief's "Interfaces" preview names this pair `SessionStartedPayload`
 // and `TurnAdvancedPayload`, but `GameEvent.type` has no `session_started` or
@@ -70,7 +75,7 @@ export function reduce(state: SessionState, event: GameEvent): SessionState {
       // a turn regardless of its economy.
       const upNextId = state.turnOrder[currentActorIndex];
       const combatants = state.combatants.map((each) =>
-        each.combatantId === upNextId ? { ...each, actionEconomy: startTurn() } : each,
+        each.combatantId === upNextId ? { ...each, actionEconomy: ActionEconomy.parse({}) } : each,
       );
 
       return { ...state, currentActorIndex, round, combatants };

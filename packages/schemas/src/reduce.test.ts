@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { startTurn } from "@ai-dm/rules-engine";
-import type { GameEvent, SessionState } from "@ai-dm/schemas";
-import { Combatant } from "@ai-dm/schemas";
 import { fold, reduce } from "./reduce.js";
+import { ActionEconomy, Combatant } from "./world.js";
+import type { GameEvent } from "./events.js";
+import type { SessionState } from "./protocol.js";
 
 const base: SessionState = {
   sessionId: "s1",
@@ -149,7 +149,7 @@ describe("reduce", () => {
     const next = reduce(withSpentActors, event(10, "scene_changed", { kind: "turn_advanced" }));
 
     const villain = next.combatants.find((each) => each.combatantId === "villain");
-    expect(villain?.actionEconomy).toEqual(startTurn());
+    expect(villain?.actionEconomy).toEqual(ActionEconomy.parse({}));
     // hero's turn just ENDED, not begun — `turn_advanced` is not their cue
     // to refresh, and `state_delta_applied` (a separate event) already
     // recorded whatever they actually spent.
@@ -175,7 +175,7 @@ describe("reduce", () => {
     expect(next.currentActorIndex).toBe(0);
     expect(next.round).toBe(2);
     const hero = next.combatants.find((each) => each.combatantId === "hero");
-    expect(hero?.actionEconomy).toEqual(startTurn());
+    expect(hero?.actionEconomy).toEqual(ActionEconomy.parse({}));
     const villain = next.combatants.find((each) => each.combatantId === "villain");
     expect(villain?.actionEconomy).toEqual(SPENT_ECONOMY);
   });

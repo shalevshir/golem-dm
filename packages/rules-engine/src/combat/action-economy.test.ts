@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import type { ActionEconomy, Combatant } from "@ai-dm/schemas";
+import type { Combatant } from "@ai-dm/schemas";
+import { ActionEconomy } from "@ai-dm/schemas";
 import {
   effectiveSpeedFeet,
   isIncapacitated,
@@ -24,6 +25,13 @@ const FRESH: ActionEconomy = {
 describe("startTurn", () => {
   it("opens the turn with nothing spent, including a refreshed reaction", () => {
     expect(startTurn()).toStrictEqual(FRESH);
+  });
+
+  it("startTurn is exactly the ActionEconomy schema's defaults", () => {
+    // One definition, two call sites: `@ai-dm/schemas`' `reduce` needs a fresh
+    // economy but may not import this package (invariant 5), so it calls
+    // `ActionEconomy.parse({})`. This test is what stops the two drifting.
+    expect(startTurn()).toEqual(ActionEconomy.parse({}));
   });
 });
 

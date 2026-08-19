@@ -6,6 +6,7 @@ import { describe, expect, it } from "vitest";
 import { validateExecuteTurn } from "@ai-dm/rules-engine";
 import type { TacticalAgent } from "@ai-dm/agents";
 import { createDeterministicNarrative } from "@ai-dm/agents";
+import { fold } from "@ai-dm/schemas";
 import type {
   ClientMessage,
   ExecuteTurn,
@@ -17,7 +18,6 @@ import { createInMemoryEventStore } from "./event-store.js";
 import type { EventStore } from "./event-store.js";
 import { SNAPSHOT_EVERY, handleCommand } from "./pipeline.js";
 import type { TurnPorts } from "./pipeline.js";
-import { fold } from "./reduce.js";
 import { createSession, loadSession } from "./session.js";
 import type { Session } from "./session.js";
 

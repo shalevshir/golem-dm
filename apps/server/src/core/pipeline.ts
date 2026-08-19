@@ -25,10 +25,10 @@ import type {
   TurnProposalResult,
   TurnProposalSource,
 } from "@ai-dm/agents";
+import { reduce } from "@ai-dm/schemas";
 import type { ClientMessage, GameEvent, ServerFrame } from "@ai-dm/schemas";
 import { SequenceConflictError, SessionMismatchError } from "./event-store.js";
 import type { EventStore } from "./event-store.js";
-import { reduce } from "./reduce.js";
 import type { Session } from "./session.js";
 import { worldFor } from "./session.js";
 
