@@ -104,8 +104,28 @@ superseded by this spec and must be rewritten, not left contradicting it.
 
 ## Rules engine: affordances derived from the validator
 
-A new `affordancesFor(world: CombatWorld, actorId: string)` in
-`packages/rules-engine/src/combat/`, beside `validate-turn.ts`.
+A new function in `packages/rules-engine/src/combat/`, beside
+`validate-turn.ts`:
+
+```ts
+affordancesFor(
+  world: CombatWorld,
+  actorId: string,
+  statBlock: MonsterStatBlock,
+): TurnAffordances
+```
+
+The stat block is a parameter because `CombatWorld` cannot supply one.
+`CombatWorld` is `{grid, combatants, lineOfSight?, actionRangesFeet?}`
+(`validate-turn.ts:46-57`) — it carries reach and range keyed by `actionId`,
+but no list of the actions an actor *has*, so a two-argument version could
+not enumerate them. The existing type for that list, `AvailableAction`,
+lives in `@ai-dm/agents` (`tactical/snapshot.ts:26`) and is unusable here:
+importing it would invert `schemas ← rules-engine ← agents` (invariant 5).
+`MonsterStatBlock` is a `@ai-dm/schemas` type, so the engine may take it
+freely, and the server already has one per combatant —
+`BuiltEncounter.statBlocks` is keyed by `combatantId`
+(`packages/rules-engine/src/encounter/build.ts:46-53`).
 
 **It must not be a parallel implementation of legality.** The failure this
 design exists to prevent is a client highlighting a tile the server then
@@ -116,8 +136,8 @@ the real validator*:
   budget (`speedFeet` minus `actionEconomy.movementUsedFeet`, so a partially
   moved actor narrows correctly), and keep each one `validateExecuteTurn`
   accepts as a move destination.
-- Targetable combatants: for each action the actor's stat block grants,
-  keep each combatant `validateExecuteTurn` accepts as a target.
+- Targetable combatants: for each action in `statBlock.actions`, keep each
+  combatant `validateExecuteTurn` accepts as a target.
 
 A 30 ft mover on a 5 ft grid reaches a diamond of ~113 tiles, so this is
 low hundreds of validator calls per turn — irrelevant next to a model call,
@@ -181,6 +201,14 @@ fetched once at join and cached for the session:
   actions: Array<{ actionId, nameEnglish }>,
 }
 ```
+
+`actions` is flattened across every stat block in the encounter and
+**deduped by `actionId`, first occurrence winning**. Two monsters sharing an
+`actionId` would otherwise appear twice. Today `goblin-ambush` has no
+collision (`goblin_warrior` grants `scimitar` and `shortbow`, `guard` grants
+`spear`), so this is a rule for the next encounter rather than a fix for
+this one — but the list is display labels only, so first-wins is harmless
+even when the underlying attack bonuses differ.
 
 It is not a websocket frame because it never changes; sending it per turn
 would waste wire on every turn of every session, on a socket already
