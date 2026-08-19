@@ -71,8 +71,10 @@ describe("affordancesFor", () => {
     const result = affordancesFor(openWorld([actor]), "goblin-a", goblinStatBlock);
 
     // 30 ft on a 5 ft grid is 6 tiles of Chebyshev distance (ADR-0003), so the
-    // reachable set is the 13x13 square around the actor minus its own tile,
-    // clipped to the 12x12 grid.
+    // candidate square is 13x13 around the actor, clipped to the 12x12 grid:
+    // x and y each range over [0, 11] (13 candidate values clipped to 12),
+    // giving 12*12 = 144 on-grid tiles minus the actor's own tile = 143.
+    expect(result.reachableTiles).toHaveLength(143);
     expect(result.reachableTiles).toContainEqual([11, 11]);
     expect(result.reachableTiles).not.toContainEqual([5, 5]);
     expect(result.reachableTiles.every(([x, y]) => x >= 0 && x < 12 && y >= 0 && y < 12)).toBe(
@@ -103,7 +105,11 @@ describe("affordancesFor", () => {
     ).reachableTiles;
 
     expect(movedTiles.length).toBeLessThan(freshTiles.length);
-    // 5 ft left is exactly one tile in any direction.
+    // 5 ft left is exactly one tile in any direction: the 3x3 ring around the
+    // actor minus its own tile, all on-grid — 9 - 1 = 8 tiles. A pinned count
+    // guards against an implementation that only drops one tile from the ring
+    // rather than the whole outer shell.
+    expect(movedTiles).toHaveLength(8);
     for (const [x, y] of movedTiles) {
       expect(Math.max(Math.abs(x - 5), Math.abs(y - 5))).toBe(1);
     }
@@ -167,12 +173,38 @@ describe("affordancesFor", () => {
   it("offers the universal no-target actions with no targets", () => {
     const actor = combatant({ combatantId: "goblin-a" });
     const result = affordancesFor(openWorld([actor]), "goblin-a", goblinStatBlock);
-    const dodge = result.actions.find((each) => each.actionType === "dodge");
 
-    expect(dodge).toBeDefined();
-    expect(dodge?.requiresTarget).toBe(false);
-    expect(dodge?.targetableCombatantIds).toEqual([]);
-    expect(dodge?.actionId).toBeUndefined();
+    for (const actionType of ["dodge", "dash", "disengage"] as const) {
+      const found = result.actions.find((each) => each.actionType === actionType);
+      expect(found).toBeDefined();
+      // Narrow away `undefined` without a non-null assertion.
+      if (found === undefined) {
+        throw new Error(`expected a ${actionType} affordance`);
+      }
+      expect(found.requiresTarget).toBe(false);
+      expect(found.targetableCombatantIds).toEqual([]);
+      // `toBeUndefined()` would also pass if `actionId` were present and set
+      // to `undefined`, which `exactOptionalPropertyTypes` forbids but a
+      // loosened implementation could still produce at runtime. Assert the
+      // key itself is absent.
+      expect("actionId" in found).toBe(false);
+    }
+  });
+
+  it("offers a stat-block attack with an empty target list when nothing is in range", () => {
+    // `requiresTarget: true` with no targetable combatants is the whole point
+    // of carrying `requiresTarget` separately from an empty target list: the
+    // client must still render the action (as disabled), not omit it.
+    const actor = combatant({ combatantId: "goblin-a", position: [5, 5] });
+    const result = affordancesFor(openWorld([actor]), "goblin-a", goblinStatBlock);
+    const scimitar = result.actions.find((each) => each.actionId === "scimitar");
+
+    expect(scimitar).toBeDefined();
+    if (scimitar === undefined) {
+      throw new Error("expected a scimitar affordance");
+    }
+    expect(scimitar.requiresTarget).toBe(true);
+    expect(scimitar.targetableCombatantIds).toEqual([]);
   });
 
   it("offers no actions at all once the action is spent", () => {
@@ -219,9 +251,30 @@ describe("affordancesFor", () => {
   });
 
   it("agrees with validateExecuteTurn on every tile it does offer", () => {
-    // The other direction: nothing affordances offers may be refused.
-    const actor = combatant({ combatantId: "goblin-a", position: [5, 5] });
-    const world = openWorld([actor]);
+    // The other direction: nothing affordances offers may be refused. This
+    // must run against a *constrained* world, not an open field: on an open
+    // field every candidate tile in the bounding box is already valid, so the
+    // loop below would pass even if the `permits(verdict, BLOCKS_MOVEMENT)`
+    // gate in affordances.ts were deleted and every candidate tile pushed
+    // unconditionally — it would just be re-checking the bounding-box math.
+    // The walled 5x5 world (reused from the blocking-terrain test) makes the
+    // offered set a strict subset of the candidate square, so each tile this
+    // loop accepts is load-bearing: drop the gate and tiles beyond the wall
+    // enter `reachableTiles`, and the validator then rejects them here.
+    // Fresh (default) action economy is deliberate: `action_already_used` is
+    // absent from `BLOCKS_MOVEMENT` by design (movement legality does not
+    // depend on the action budget), so an actor who has already acted would
+    // still validly reach the same tiles, but the probe's filler `dodge`
+    // action would make `verdict.valid` false for a reason unrelated to
+    // movement and break this assertion for the wrong reason.
+    const actor = combatant({ combatantId: "goblin-a", position: [1, 1] });
+    const world = openWorld([actor], 5);
+    for (let y = 0; y < 5; y += 1) {
+      const row = world.grid.tiles[y];
+      // `noUncheckedIndexedAccess` makes this `T | undefined`; a non-null
+      // assertion would fail `@typescript-eslint/no-non-null-assertion`.
+      if (row !== undefined) row[2] = "blocking";
+    }
 
     for (const tile of affordancesFor(world, "goblin-a", goblinStatBlock).reachableTiles) {
       const verdict = validateExecuteTurn(

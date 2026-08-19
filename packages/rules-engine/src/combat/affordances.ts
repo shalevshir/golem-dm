@@ -110,6 +110,21 @@ export function affordancesFor(
   const actions: ActionAffordance[] = [];
 
   for (const action of statBlock.actions) {
+    // `status === "alive"` is a presentation-layer narrowing, not a rules
+    // decision: `checkTarget` in validate-turn.ts accepts any combatant
+    // present within reach regardless of status, and attacking a downed
+    // (unconscious) creature is legal and mechanically meaningful in 5e
+    // (e.g. a coup de grace). This filter simply keeps the client from
+    // suggesting attacks on corpses.
+    //
+    // It is unreachable today: every combatant in the current encounter
+    // pipeline is built via `combatantFromStatBlock`, which never sets
+    // `characterId`, so `resolve.ts`'s `diesAtZeroHp: target.characterId ===
+    // undefined` is always true and nobody ever ends up "unconscious" — they
+    // go straight to "dead". It becomes load-bearing once real player
+    // character data gives combatants a genuine `characterId`: PCs will then
+    // fall unconscious instead of dying, and this filter should be revisited
+    // so the client still offers attacks against them.
     const targetableCombatantIds = world.combatants
       .filter((each) => each.combatantId !== actorId && each.status === "alive")
       .filter((candidate) =>
