@@ -40,33 +40,47 @@ describe("connect", () => {
 
   it("re-joins with resumeFrom read fresh at reconnect time, not captured once", () => {
     vi.useFakeTimers();
-    const socket = fakeSocket();
+    // A fresh socket per factory call, all recorded: this is what proves the
+    // retry timer genuinely re-invoked `open()` rather than the test merely
+    // re-firing a listener still registered on the original socket.
+    const sockets: ReturnType<typeof fakeSocket>[] = [];
     // A plain mutable value, not a constant thunk: it changes between the
     // first join and the reconnect, the same way the store's folded
     // sequence actually changes while a session is live. A `connect` that
-    // captured `resumeFrom()` once (at `connect()` time, or once per `open`
-    // call before the socket has actually reopened) would still send
-    // `undefined` on the second join here — this is what catches that bug.
+    // captured `resumeFrom()` once — at `connect()` time, or once per
+    // `open()` call rather than inside the "open" listener — is
+    // behaviourally identical here (no frames arrive during the reconnect
+    // window either way), so this only proves the value is re-read on each
+    // connection attempt, not captured once at `connect()`.
     let sequence: number | undefined = undefined;
     connect({
       sessionId: "s1",
       onFrame: () => undefined,
       onStatus: () => undefined,
       resumeFrom: () => sequence,
-      socketFactory: () => socket,
+      socketFactory: () => {
+        const socket = fakeSocket();
+        sockets.push(socket);
+        return socket;
+      },
     });
 
-    socket.emitOpen();
-    expect(JSON.parse(socket.sent[0] ?? "{}")).toEqual({ type: "join", sessionId: "s1" });
+    expect(sockets).toHaveLength(1);
+    sockets[0]?.emitOpen();
+    expect(JSON.parse(sockets[0]?.sent[0] ?? "{}")).toEqual({ type: "join", sessionId: "s1" });
 
     // The store folds events after the first join lands; a later drop must
     // resume from what has actually been folded by then.
     sequence = 7;
-    socket.emitClose(); // the drop
+    sockets[0]?.emitClose(); // the drop
     vi.advanceTimersByTime(1000); // the retry delay
-    socket.emitOpen(); // the reconnected socket's open event
 
-    expect(JSON.parse(socket.sent[1] ?? "{}")).toEqual({
+    // The timer must have genuinely constructed a second socket, not just
+    // scheduled nothing.
+    expect(sockets).toHaveLength(2);
+    sockets[1]?.emitOpen(); // the reconnected socket's own open event
+
+    expect(JSON.parse(sockets[1]?.sent[0] ?? "{}")).toEqual({
       type: "join",
       sessionId: "s1",
       resumeFrom: 7,
@@ -135,23 +149,33 @@ describe("connect", () => {
   it("cancels a scheduled reconnect when closed deliberately before it fires", () => {
     vi.useFakeTimers();
     const onStatus = vi.fn();
-    const socket = fakeSocket();
+    // Recorded per factory call, same as the reconnect test above: this is
+    // the positive counterpart proving the timer was actually cancelled,
+    // not merely that nothing happened to be observable — a suite with the
+    // `clearTimeout` deleted would still build a second socket here.
+    const sockets: ReturnType<typeof fakeSocket>[] = [];
     const connection = connect({
       sessionId: "s1",
       onFrame: () => undefined,
       onStatus,
       resumeFrom: () => undefined,
-      socketFactory: () => socket,
+      socketFactory: () => {
+        const socket = fakeSocket();
+        sockets.push(socket);
+        return socket;
+      },
     });
 
-    socket.emitOpen(); // the first join is sent
-    socket.emitClose(); // an unexpected drop — schedules a retry ~1000ms out
+    sockets[0]?.emitOpen(); // the first join is sent
+    sockets[0]?.emitClose(); // an unexpected drop — schedules a retry ~1000ms out
     connection.close(); // must cancel that pending retry, not just ignore it
 
     vi.advanceTimersByTime(5000); // well past the retry delay
 
-    // No second join was ever sent: the scheduled retry never fired.
-    expect(socket.sent).toHaveLength(1);
+    // The scheduled retry never fired: no second socket was ever built, and
+    // no second join was ever sent on the first one.
+    expect(sockets).toHaveLength(1);
+    expect(sockets[0]?.sent).toHaveLength(1);
     expect(onStatus).toHaveBeenLastCalledWith("closed");
   });
 });
