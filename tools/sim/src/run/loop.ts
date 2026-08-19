@@ -31,6 +31,8 @@ export interface RunEncounterArmInput {
    * from the actual board rather than an unreachable guess.
    */
   beforeTurn?: (decide: DecideInput) => void;
+  /** Called after each turn's record is built, e.g. so a live run can log progress. */
+  onTurn?: (record: TurnRecord) => void;
 }
 
 export interface EncounterArmResult {
@@ -85,17 +87,17 @@ export async function runEncounterArm(input: RunEncounterArmInput): Promise<Enco
       turnOrder: built.turnOrder,
     });
 
-    records.push(
-      recordFrom({
-        armId: input.armId,
-        scenarioId: input.scenarioId,
-        seed: input.seed,
-        round: decide.round,
-        actorId: decide.actorId,
-        result,
-        timings,
-      }),
-    );
+    const record = recordFrom({
+      armId: input.armId,
+      scenarioId: input.scenarioId,
+      seed: input.seed,
+      round: decide.round,
+      actorId: decide.actorId,
+      result,
+      timings,
+    });
+    records.push(record);
+    input.onTurn?.(record);
 
     return result.ok ? { turn: result.turn, plan: result.plan } : null;
   };

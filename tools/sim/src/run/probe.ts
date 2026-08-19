@@ -83,6 +83,8 @@ export interface RunProbeArmInput {
   timingPort: TimingPort;
   /** Called before each turn so the smoke run can load its scripted responses. */
   beforeTurn?: (state: ProbeState) => void;
+  /** Called after each turn's record is built, e.g. so a live run can log progress. */
+  onTurn?: (record: TurnRecord) => void;
 }
 
 export async function runProbeArm(input: RunProbeArmInput): Promise<TurnRecord[]> {
@@ -98,17 +100,17 @@ export async function runProbeArm(input: RunProbeArmInput): Promise<TurnRecord[]
       turnOrder: state.turnOrder,
     });
 
-    records.push(
-      recordFrom({
-        armId: input.armId,
-        scenarioId: state.scenarioId,
-        seed: state.seed,
-        round: state.round,
-        actorId: state.actorId,
-        result,
-        timings,
-      }),
-    );
+    const record = recordFrom({
+      armId: input.armId,
+      scenarioId: state.scenarioId,
+      seed: state.seed,
+      round: state.round,
+      actorId: state.actorId,
+      result,
+      timings,
+    });
+    records.push(record);
+    input.onTurn?.(record);
   }
 
   return records;

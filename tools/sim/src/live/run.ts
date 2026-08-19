@@ -21,6 +21,22 @@ import type { EncounterSummary, RunReport } from "../run/report.js";
 import { buildReport } from "../run/report.js";
 import type { TurnRecord } from "../run/records.js";
 
+/**
+ * A live run's only feedback otherwise is the two "Wrote ..." lines at the
+ * very end (`index.ts`) — for a matrix with thousands of real, billed calls,
+ * each taking multiple seconds, that reads as a hang. One line per turn on
+ * stderr (`console.warn`, matching `index.ts`'s own choice, so a report can
+ * still be piped from stdout) is enough to see it moving without drowning the
+ * terminal.
+ */
+function logTurn(record: TurnRecord): void {
+  const errors = record.adapterErrorCodes.length > 0 ? ` [${record.adapterErrorCodes.join(",")}]` : "";
+  console.warn(
+    `    ${record.scenarioId} seed=${String(record.seed)} round=${String(record.round)} ${record.actorId}: ` +
+      `${record.outcome}${errors} (${String(record.durationMs)}ms, ${String(record.attempts)} attempt${record.attempts === 1 ? "" : "s"})`,
+  );
+}
+
 export interface RunLiveInput {
   runId: string;
   generatedAt: string;
@@ -60,7 +76,9 @@ export async function runLive(input: RunLiveInput): Promise<RunReport> {
   const encounterRecords: TurnRecord[] = [];
   const encounters: EncounterSummary[] = [];
 
-  for (const arm of input.arms) {
+  for (const [armIndex, arm] of input.arms.entries()) {
+    console.warn(`\n=== [${String(armIndex + 1)}/${String(input.arms.length)}] ${arm.armId} ===`);
+
     const timingPort = createTimingPort(
       createVercelPort(
         input.resolveModel === undefined ? {} : { resolveModel: input.resolveModel },
@@ -70,19 +88,28 @@ export async function runLive(input: RunLiveInput): Promise<RunReport> {
     const agent = createTacticalAgent({ runtime });
 
     if (wantsProbe) {
-      probeRecords.push(...(await runProbeArm({ armId: arm.armId, corpus, agent, timingPort })));
+      console.warn(`  probe: ${String(corpus.length)} states`);
+      probeRecords.push(
+        ...(await runProbeArm({ armId: arm.armId, corpus, agent, timingPort, onTurn: logTurn })),
+      );
     }
 
     if (wantsEncounter) {
       for (const scenarioId of input.scenarioIds) {
         for (const seed of input.seeds) {
+          console.warn(`  encounter: ${scenarioId} seed=${String(seed)}`);
           const armResult = await runEncounterArm({
             armId: arm.armId,
             scenarioId,
             seed,
             agent,
             timingPort,
+            onTurn: logTurn,
           });
+
+          console.warn(
+            `  encounter result: winner=${String(armResult.result.winner)} rounds=${String(armResult.result.rounds)}`,
+          );
 
           encounterRecords.push(...armResult.records);
           encounters.push({

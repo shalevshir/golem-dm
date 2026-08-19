@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { deriveProbeCorpus } from "./probe.js";
+import { adapterSuccess, createAgentRuntime, createTacticalAgent, createTimingPort } from "@ai-dm/agents";
+import { SMOKE_ARM } from "../config.js";
+import { scriptedTurn } from "../engine/policy.js";
+import { createScriptedPort } from "../smoke/port.js";
+import { deriveProbeCorpus, runProbeArm } from "./probe.js";
+import type { TurnRecord } from "./records.js";
 
 describe("deriveProbeCorpus", () => {
   it("is model-independent and reproducible", async () => {
@@ -41,5 +46,46 @@ describe("deriveProbeCorpus", () => {
 
     expect(two.length).toBeGreaterThan(one.length);
     expect(both.length).toBeGreaterThan(one.length);
+  });
+});
+
+describe("runProbeArm", () => {
+  it("calls onTurn once per corpus state, with that state's finished record — so a live run can log progress turn by turn", async () => {
+    const corpus = await deriveProbeCorpus({ scenarioIds: ["melee-brawl"], seeds: [1] });
+    const port = createScriptedPort();
+    const timingPort = createTimingPort(port);
+    const runtime = createAgentRuntime({
+      routing: { intent: SMOKE_ARM.spec, tactical: SMOKE_ARM.spec, narrative: SMOKE_ARM.spec },
+      port: timingPort,
+    });
+    const agent = createTacticalAgent({ runtime });
+
+    const seen: TurnRecord[] = [];
+    await runProbeArm({
+      armId: "test-arm@low",
+      corpus,
+      agent,
+      timingPort,
+      beforeTurn: (state) => {
+        const baseline = scriptedTurn({
+          world: state.world,
+          actorId: state.actorId,
+          availableActions: state.availableActions,
+        });
+        if (baseline === null) throw new Error("expected a legal baseline turn in this fixture");
+        port.load({
+          structured: [
+            adapterSuccess({
+              value: baseline.turn,
+              usage: { promptTokens: 1, completionTokens: 1, totalTokens: 2 },
+            }),
+          ],
+        });
+      },
+      onTurn: (record) => seen.push(record),
+    });
+
+    expect(seen).toHaveLength(corpus.length);
+    expect(seen.map((record) => record.actorId)).toEqual(corpus.map((state) => state.actorId));
   });
 });
