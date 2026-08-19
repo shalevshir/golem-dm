@@ -79,9 +79,9 @@ describe("in-memory EventStore", () => {
 
   it("rejects an event whose own sessionId disagrees with the append target", async () => {
     const store = createInMemoryEventStore();
-    await expect(
-      store.append("s1", [{ ...event(0), sessionId: "s2" }]),
-    ).rejects.toBeInstanceOf(SessionMismatchError);
+    await expect(store.append("s1", [{ ...event(0), sessionId: "s2" }])).rejects.toBeInstanceOf(
+      SessionMismatchError,
+    );
     // Neither the target session nor the event's own session gained a
     // record — a rejected batch must leave no trace on either side.
     expect(await store.readSince("s1", -1)).toEqual([]);

@@ -20,8 +20,7 @@ export { loadMonster };
 const GOBLIN_AMBUSH: EncounterDefinition = {
   encounterId: "goblin-ambush",
   descriptionEnglish:
-    "A lone guard is ambushed by two goblin warriors in melee range on an " +
-    "open 12x12 field.",
+    "A lone guard is ambushed by two goblin warriors in melee range on an " + "open 12x12 field.",
   width: 12,
   height: 12,
   spawns: [

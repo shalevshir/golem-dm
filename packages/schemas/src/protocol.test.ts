@@ -32,9 +32,7 @@ describe("ClientMessage", () => {
 
   it("rejects free text over the length cap before it can reach a prompt", () => {
     const text = "a".repeat(MAX_FREE_TEXT_LENGTH + 1);
-    expect(() =>
-      ClientMessage.parse({ type: "free_text", clientMessageId: "c1", text }),
-    ).toThrow();
+    expect(() => ClientMessage.parse({ type: "free_text", clientMessageId: "c1", text })).toThrow();
   });
 
   it("accepts free text at exactly the cap", () => {
