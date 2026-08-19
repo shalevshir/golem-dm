@@ -74,7 +74,7 @@ Status: POC phase · Supersedes `dm-plan.md` (see `dm-plan-review.md` for the fa
 | 5 | **SRD data:** ~10 monsters, conditions, 4 classes as validated JSON | Loads + validates | 2 | ✅ done |
 | 6 | **Provider adapter:** Vercel AI SDK wrapper, `ModelRouting` config | Mocked-provider tests pass | 3 | ✅ done |
 | 7 | **Tactical agent + sim:** validate→retry→fallback loop; benchmark Flash vs nano/mini | Legality ≥95% after retry on fixture scenarios; model chosen from data | 3–4 | 🟡 7a done, 7b pending |
-| 8 | **Server + web:** Fastify+WS, event log, replay-on-reconnect, clickable canvas grid | Full combat playable E2E vs scripted enemy | 4–5 | ⬜ not started |
+| 8 | **Server + web:** Fastify+WS, event log, replay-on-reconnect, clickable canvas grid | Full combat playable E2E vs scripted enemy | 4–5 | 🟡 designed, not built (§4.2) |
 | 9 | **Narrative agent:** Sonnet 5 streaming, Hebrew glossary, gendered narration, cache-stable prefix | First token <1.5s p50; Hebrew reviewed by native speaker | 5–6 | ⬜ not started |
 | 10 | **Memory:** pgvector episodic store, scene summarization, quest DAG | Replay test + top-k retrieval test pass | 6 | ⬜ not started |
 | 11 | **Closed beta:** 5–10 Hebrew-speaking playtesters; per-turn token/latency/cost dashboards | Measured cost table replaces §3 estimates; go/no-go review | 7–8 | ⬜ not started |
@@ -232,3 +232,38 @@ rule).
 ## 5. Open Risks
 
 Tactical-model quality on spatial reasoning (mitigated by sim benchmarking + fallback); Hebrew narrative register (native-speaker review in step 9); sequential-call latency stacking (streaming + intent bypass); licensing discipline as content grows (SRD-only rule in `data/srd/README.md`); solo→party scope creep (deferred by ADR-0002).
+
+### 4.2 Step 8 decomposition (designed 2026-08-19)
+
+Step 8 turned out to span four independent pieces, so it is split into two
+specs, each with its own plan → implementation cycle.
+
+**Spec #1 — the server slice.**
+[`docs/superpowers/specs/2026-08-19-server-slice-design.md`](docs/superpowers/specs/2026-08-19-server-slice-design.md),
+plan at
+[`docs/superpowers/plans/2026-08-19-server-slice.md`](docs/superpowers/plans/2026-08-19-server-slice.md)
+(15 tasks). Promotes `applyTurn`, `buildEncounter` and `seeded` out of
+`tools/sim` into `@ai-dm/rules-engine` — the sim is a package nothing may
+depend on, and its `resolve.ts` header always called itself "the sim's
+stand-in for the server's turn pipeline (step 8)". Adds the wire protocol to
+`@ai-dm/schemas` (so `apps/web` can read it under invariant 5), a
+`NarrativePort` plus deterministic stand-in to `@ai-dm/agents`, and builds
+`apps/server` as an event-sourced core (`handleCommand` async generator, pure
+`reduce`, `EventStore` port) behind a thin Fastify/WS transport. Verified by a
+scripted WS client playing a full combat with a mocked provider.
+
+**Spec #2 — the web client**, against the protocol spec #1 freezes. Not yet
+written.
+
+Deferred out of step 8 deliberately: Postgres persistence (the `EventStore`
+port ships with an in-memory implementation; `@ai-dm/memory` is still empty
+stubs and gets its own spec) and the intent agent (it classifies free text
+into five buckets, but nothing downstream can turn language into an
+`ExecuteTurn`, so it has no consumer until that exists — `free_text` is
+reserved in the protocol envelope and answered with a stable error code).
+
+Two facts the design turned up that are worth not rediscovering: the rules
+engine's "no I/O" boundary means `buildEncounter` must take **injected**,
+already-parsed stat blocks, and the SRD file loader has no shared home at all
+— `@ai-dm/schemas` is bundled for the browser by `apps/web`, so `node:fs`
+cannot go there either. The sim and the server each keep a copy.
