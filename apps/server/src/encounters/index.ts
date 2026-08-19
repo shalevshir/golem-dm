@@ -3,7 +3,7 @@
 // half-valid world.
 import { buildEncounter } from "@ai-dm/rules-engine";
 import type { BuiltEncounter, EncounterDefinition } from "@ai-dm/rules-engine";
-import type { Faction, MonsterStatBlock } from "@ai-dm/schemas";
+import type { EncounterCatalogue, MonsterStatBlock } from "@ai-dm/schemas";
 import { loadMonster } from "./srd.js";
 
 export { loadMonster };
@@ -77,19 +77,11 @@ export function buildEncounterById(encounterId: string): BuiltEncounter {
  * The static per-encounter facts a client needs to label what it draws:
  * display names, max HP and faction. Static is the point — this is fetched
  * once over HTTP and cached, rather than re-sent on a socket that already
- * carries a `SessionState` growing without bound (C-30).
+ * carries a `SessionState` growing without bound (C-30). The shape itself
+ * lives in `@ai-dm/schemas` (`EncounterCatalogue`), not here — it is the one
+ * response body a browser client also parses, so invariant 4 puts it in the
+ * shared package rather than a hand-rolled interface duplicated on each end.
  */
-export interface EncounterCatalogue {
-  encounterId: string;
-  combatants: {
-    combatantId: string;
-    nameEnglish: string;
-    maxHp: number;
-    faction: Faction;
-  }[];
-  actions: { actionId: string; nameEnglish: string }[];
-}
-
 export function encounterCatalogue(encounterId: string): EncounterCatalogue {
   const built = buildEncounterById(encounterId);
 
@@ -107,11 +99,15 @@ export function encounterCatalogue(encounterId: string): EncounterCatalogue {
   });
 
   // Flattened across every stat block and deduped by `actionId`, first
-  // occurrence winning. Two monsters sharing an id would otherwise appear
-  // twice; `goblin-ambush` has no collision today (scimitar/shortbow vs
-  // spear), so this is a rule for the next encounter. These are display labels
-  // only, so first-wins is harmless even when the underlying attack bonuses
-  // differ — legality still comes from affordances, never from this list.
+  // occurrence winning. This is NOT speculative: `built.statBlocks` is keyed
+  // by `combatantId`, not `monsterId`, so `goblin_warrior` appears twice in
+  // `.values()` here (once for `goblin-a`, once for `goblin-b`) even though
+  // the *input* map to `buildEncounter` only had one entry for it. Without
+  // the dedupe, `goblin-ambush` today flattens to
+  // `[spear, scimitar, shortbow, scimitar, shortbow]`. These are display
+  // labels only, so first-wins is harmless even when the underlying attack
+  // bonuses differ — legality still comes from affordances, never from this
+  // list.
   const actions = new Map<string, string>();
   for (const statBlock of built.statBlocks.values()) {
     for (const action of statBlock.actions) {

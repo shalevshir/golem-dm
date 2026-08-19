@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   ActionAffordance,
   ClientMessage,
+  EncounterCatalogue,
   MAX_FREE_TEXT_LENGTH,
   ServerFrame,
   SessionState,
@@ -130,6 +131,41 @@ describe("turn_affordances frame", () => {
       actions: [],
     });
     expect(affordances.reachableTiles).toEqual([[5, 3]]);
+  });
+});
+
+describe("EncounterCatalogue", () => {
+  const hero = { combatantId: "hero", nameEnglish: "Guard", maxHp: 11, faction: "party" };
+  const goblin = {
+    combatantId: "goblin-a",
+    nameEnglish: "Goblin Warrior",
+    maxHp: 9,
+    faction: "hostile",
+  };
+  const catalogue = {
+    encounterId: "goblin-ambush",
+    combatants: [hero, goblin],
+    actions: [
+      { actionId: "spear", nameEnglish: "Spear" },
+      { actionId: "scimitar", nameEnglish: "Scimitar" },
+    ],
+  };
+
+  it("parses a valid catalogue", () => {
+    const parsed = EncounterCatalogue.parse(catalogue);
+    expect(parsed.combatants).toHaveLength(2);
+  });
+
+  it("rejects a combatant with a non-positive maxHp", () => {
+    expect(() =>
+      EncounterCatalogue.parse({ ...catalogue, combatants: [{ ...hero, maxHp: 0 }] }),
+    ).toThrow();
+  });
+
+  it("rejects a combatant with an unknown faction", () => {
+    expect(() =>
+      EncounterCatalogue.parse({ ...catalogue, combatants: [{ ...hero, faction: "wildling" }] }),
+    ).toThrow();
   });
 });
 

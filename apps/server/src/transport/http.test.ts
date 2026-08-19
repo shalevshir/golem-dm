@@ -170,6 +170,7 @@ describe("GET /encounters/:encounterId", () => {
   it("dedupes actions by actionId across stat blocks", async () => {
     const { app } = appWith();
     const response = await app.inject({ method: "GET", url: "/encounters/goblin-ambush" });
+    expect(response.statusCode).toBe(200);
     const body = response.json<{ actions: { actionId: string; nameEnglish: string }[] }>();
 
     const ids = body.actions.map((each) => each.actionId);

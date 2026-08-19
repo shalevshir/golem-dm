@@ -7,7 +7,7 @@
 import { z } from "zod";
 import { ActionType, ExecuteTurn, Tile } from "./actions.js";
 import { GameEvent } from "./events.js";
-import { Combatant, GridMap } from "./world.js";
+import { Combatant, Faction, GridMap } from "./world.js";
 
 /**
  * Player free text is untrusted. Capping it in the schema means an oversized
@@ -136,6 +136,50 @@ export const TurnAffordances = z.object({
 });
 
 export type TurnAffordances = z.infer<typeof TurnAffordances>;
+
+/**
+ * One combatant's display facts for the encounter catalogue: what a client
+ * needs to label what it draws. Nothing here changes turn to turn — current
+ * HP, position and conditions live in `SessionState`/`GameEvent` instead;
+ * this is only ever `maxHp`, the ceiling that never moves.
+ */
+export const CatalogueCombatant = z.object({
+  combatantId: z.string(),
+  nameEnglish: z.string(),
+  maxHp: z.number().int().min(1),
+  faction: Faction,
+});
+
+export type CatalogueCombatant = z.infer<typeof CatalogueCombatant>;
+
+/** One action's display label in the encounter catalogue. */
+export const CatalogueAction = z.object({
+  actionId: z.string(),
+  nameEnglish: z.string(),
+});
+
+export type CatalogueAction = z.infer<typeof CatalogueAction>;
+
+/**
+ * The response body of `GET /encounters/:encounterId`. It is HTTP rather
+ * than a frame because it is static per encounter — pushing it on the socket
+ * would re-send unchanging text on every turn of every session, on a
+ * connection that already carries a `SessionState` which only grows (C-30).
+ * A client fetches it once at join and caches it for the session.
+ *
+ * It is also the one contract in this file that both ends *parse*: every
+ * other schema here is server-authored and only ever read by the client.
+ * That is exactly what invariant 4 means by "schemas define everything
+ * once" — defining the shape here, rather than a second hand-rolled copy on
+ * the client, is what makes that parsing possible on both sides.
+ */
+export const EncounterCatalogue = z.object({
+  encounterId: z.string(),
+  combatants: z.array(CatalogueCombatant),
+  actions: z.array(CatalogueAction),
+});
+
+export type EncounterCatalogue = z.infer<typeof EncounterCatalogue>;
 
 export const ServerFrame = z.discriminatedUnion("type", [
   z.object({
