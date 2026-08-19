@@ -4,7 +4,13 @@ import { APICallError, NoObjectGeneratedError, simulateReadableStream } from "ai
 import { MockLanguageModelV1 } from "ai/test";
 import { beforeEach, describe, expect, it } from "vitest";
 import type { ModelSpec } from "./routing.js";
-import { callSettingsFor, createVercelPort, providerOptionsFor, resolveLanguageModel } from "./vercel.js";
+import {
+  anthropicBodyFor,
+  callSettingsFor,
+  createVercelPort,
+  providerOptionsFor,
+  resolveLanguageModel,
+} from "./vercel.js";
 
 const flash: ModelSpec = { provider: "google", modelId: "gemini-3-flash" };
 
@@ -217,6 +223,38 @@ describe("generateStructured", () => {
     const mode = captured?.mode;
     expect(JSON.stringify(mode)).toContain("execute_turn");
   });
+
+  // Live-confirmed 2026-08-18: Gemini's function-declaration schema rejects
+  // `items` as an array of per-position schemas ("Proto field is not
+  // repeating, cannot start list") — @ai-sdk/google@1.2.22 passes tuple-style
+  // JSON Schema through unchanged, and zod-to-json-schema emits exactly that
+  // shape for `Tile = z.tuple([...])`, used by `ExecuteTurn`'s
+  // `destinationTile` and `targetTile`. Anthropic and OpenAI both accept it
+  // fine; this is a google-only incompatibility.
+  it("sends google a schema with no tuple-style `items` array — Gemini rejects those with a 400", async () => {
+    await portFor(returningToolCall(legalTurn)).generateStructured(flash, turnRequest);
+
+    // eslint-disable-next-line @typescript-eslint/no-deprecated
+    const mode = captured?.mode;
+    expect(JSON.stringify(mode)).not.toMatch(/"items":\[/);
+  });
+
+  // Live-confirmed 2026-08-18, discovered after the fix above: with the
+  // tuple bug fixed, live calls to gemini-3.1-flash-lite still failed.
+  // `zodToJsonSchema` deduplicates repeated schemas with a `$ref` by
+  // default, and `Tile` is used twice in `ExecuteTurn` (`destinationTile`
+  // and `targetTile`), so the second occurrence became a JSON Pointer
+  // rather than an inline schema. Gemini's function-declaration schema has
+  // no `$ref` support (it is not general JSON Schema, only a restricted
+  // OpenAPI-like subset), so this needs the same google-only detour as the
+  // tuple fix.
+  it("sends google a fully inlined schema — Gemini's function schema has no $ref support", async () => {
+    await portFor(returningToolCall(legalTurn)).generateStructured(flash, turnRequest);
+
+    // eslint-disable-next-line @typescript-eslint/no-deprecated
+    const mode = captured?.mode;
+    expect(JSON.stringify(mode)).not.toMatch(/"\$ref"/);
+  });
 });
 
 describe("usage on failed structured calls", () => {
@@ -352,6 +390,61 @@ describe("resolveLanguageModel", () => {
     const model = resolveLanguageModel({ provider: "openai", modelId: "gpt-5.4-nano" });
     expect(model.constructor.name).toBe("OpenAIResponsesLanguageModel");
   });
+
+  // The anthropic case builds its own client so the request rewrite can close
+  // over the spec. Resolving one must still read no credential: the whole
+  // no-key-exported sim path depends on the failure arriving as a provider
+  // error at call time, not as a throw at construction.
+  it("resolves anthropic without touching the API key", () => {
+    const key = process.env.ANTHROPIC_API_KEY;
+    delete process.env.ANTHROPIC_API_KEY;
+    try {
+      const model = resolveLanguageModel({ provider: "anthropic", modelId: "claude-sonnet-5" });
+      expect(model.modelId).toBe("claude-sonnet-5");
+    } finally {
+      if (key !== undefined) process.env.ANTHROPIC_API_KEY = key;
+    }
+  });
+});
+
+describe("anthropicBodyFor", () => {
+  const claude: ModelSpec = { provider: "anthropic", modelId: "claude-sonnet-5" };
+
+  // `ai@4.3.19` substitutes temperature 0 for every request that omits one,
+  // and claude-sonnet-5 answers any explicit value with a 400. callSettingsFor
+  // cannot prevent that — only removing it from the body can.
+  it("removes the temperature the SDK forces onto every request", () => {
+    const body = anthropicBodyFor(claude, { model: "claude-sonnet-5", temperature: 0 });
+
+    expect(body).not.toHaveProperty("temperature");
+  });
+
+  it("leaves the rest of the request alone", () => {
+    const body = anthropicBodyFor(claude, {
+      model: "claude-sonnet-5",
+      temperature: 0,
+      max_tokens: 512,
+      tool_choice: { type: "tool", name: "execute_turn" },
+    });
+
+    expect(body).toStrictEqual({
+      model: "claude-sonnet-5",
+      max_tokens: 512,
+      tool_choice: { type: "tool", name: "execute_turn" },
+    });
+  });
+
+  // Adaptive-thinking models take reasoning depth as an effort level, and the
+  // neutral names happen to be Anthropic's own, so they pass through unmapped.
+  it.each(["low", "medium", "high"] as const)("carries %s effort as output_config", (effort) => {
+    const body = anthropicBodyFor({ ...claude, reasoningEffort: effort }, { model: "x" });
+
+    expect(body.output_config).toStrictEqual({ effort });
+  });
+
+  it("omits output_config when the spec asks for no particular effort", () => {
+    expect(anthropicBodyFor(claude, { model: "x" })).not.toHaveProperty("output_config");
+  });
 });
 
 describe("providerOptionsFor", () => {
@@ -362,31 +455,43 @@ describe("providerOptionsFor", () => {
       reasoningEffort: "high",
     });
 
-    expect(options).toStrictEqual({ openai: { reasoningEffort: "high" } });
+    expect(options.openai?.reasoningEffort).toBe("high");
   });
 
-  it("encodes reasoning effort as an Anthropic thinking budget", () => {
-    const options = providerOptionsFor({
-      provider: "anthropic",
-      modelId: "claude-sonnet-5",
-      reasoningEffort: "high",
-    });
+  // The SDK defaults strictSchemas to true, and OpenAI's strict subset cannot
+  // express either the Tile tuple or ExecuteTurn's optional properties — it
+  // 400s on the tool definition before the model runs. Confirmed live on both
+  // gpt-5.4-nano and gpt-5.4-mini, which fail 10/10 turns with it on.
+  it.each([undefined, "low", "high"] as const)(
+    "turns OpenAI strict schemas off at %s effort",
+    (effort) => {
+      const options = providerOptionsFor({
+        provider: "openai",
+        modelId: "gpt-5.4-mini",
+        ...(effort === undefined ? {} : { reasoningEffort: effort }),
+      });
 
-    expect(options.anthropic?.thinking).toStrictEqual({
-      type: "enabled",
-      budgetTokens: 16384,
-    });
-  });
+      expect(options.openai?.strictSchemas).toBe(false);
+    },
+  );
 
-  it("disables Anthropic thinking at the lowest effort", () => {
-    const options = providerOptionsFor({
-      provider: "anthropic",
-      modelId: "claude-sonnet-5",
-      reasoningEffort: "low",
-    });
+  // Emitting `thinking` here is exactly what broke every anthropic call:
+  // `{type:"enabled"}` collides with generateObject's forced tool choice
+  // ("Thinking may not be enabled when tool_choice forces tool use"), and
+  // claude-sonnet-5 rejects manual thinking outright. Effort now rides on the
+  // request body instead — see the anthropicBodyFor block.
+  it.each(["low", "medium", "high"] as const)(
+    "sends no Anthropic thinking option at %s effort",
+    (effort) => {
+      const options = providerOptionsFor({
+        provider: "anthropic",
+        modelId: "claude-sonnet-5",
+        reasoningEffort: effort,
+      });
 
-    expect(options.anthropic?.thinking).toStrictEqual({ type: "disabled" });
-  });
+      expect(options).toStrictEqual({});
+    },
+  );
 
   it("encodes reasoning effort as a Gemini thinking budget", () => {
     const options = providerOptionsFor({ ...flash, reasoningEffort: "medium" });

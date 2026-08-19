@@ -4,19 +4,21 @@
 //
 // `resolveModel` is the test seam: injecting `MockLanguageModelV1` exercises
 // this whole file with no network and no API keys.
-import { anthropic } from "@ai-sdk/anthropic";
+import { createAnthropic } from "@ai-sdk/anthropic";
 import { google } from "@ai-sdk/google";
 import { openai } from "@ai-sdk/openai";
-import type { CoreMessage, LanguageModelV1 } from "ai";
+import type { CoreMessage, LanguageModelV1, Schema } from "ai";
 import {
   APICallError,
   NoObjectGeneratedError,
   TypeValidationError,
   generateObject,
   generateText,
+  jsonSchema,
   streamText as sdkStreamText,
 } from "ai";
 import type { ZodType } from "zod";
+import { zodToJsonSchema } from "zod-to-json-schema";
 import type { AdapterError, AdapterResult } from "./errors.js";
 import { adapterFailure, adapterSuccess } from "./errors.js";
 import type {
@@ -30,7 +32,7 @@ import type {
 } from "./port.js";
 import type { ProviderOptionsMap, PromptMessage } from "./prompt.js";
 import { assemblePrompt } from "./prompt.js";
-import type { ModelSpec, ReasoningEffort } from "./routing.js";
+import type { JsonValue, ModelSpec, ReasoningEffort } from "./routing.js";
 
 /**
  * Thinking budget per effort level. Providers that bill reasoning by tokens
@@ -61,6 +63,12 @@ export interface SdkCallSettings {
  * silently dropped rather than risking a hard failure on every anthropic
  * call; there is currently no anthropic model in this repo's config that
  * still accepts it.
+ *
+ * Dropping it here is necessary but NOT sufficient: `ai@4.3.19` substitutes
+ * its own `temperature: 0` for every request that omits one (see
+ * `anthropicBodyFor`, which takes it back off the wire). Both layers are
+ * needed — this one keeps the SDK's own view of the call honest, that one
+ * keeps the forced default out of the request.
  */
 export function callSettingsFor(spec: ModelSpec): SdkCallSettings {
   const temperature = spec.provider === "anthropic" ? undefined : spec.temperature;
@@ -73,28 +81,52 @@ export function callSettingsFor(spec: ModelSpec): SdkCallSettings {
   };
 }
 
-/** Encode a neutral reasoning effort the way each provider expects it. */
+/**
+ * Encode a neutral reasoning effort the way each provider expects it.
+ *
+ * Anthropic is absent on purpose. Its effort travels as `output_config.effort`
+ * (see `anthropicBodyFor`), which `@ai-sdk/anthropic@1.2.12` has no
+ * `providerOptions` key for — its schema accepts only `thinking`, the older
+ * manual-budget control that `claude-sonnet-5` rejects outright.
+ *
+ * OpenAI gets `strictSchemas: false` on every call, effort or not. The SDK
+ * defaults it to `true`, which makes OpenAI validate the tool schema against
+ * its strict structured-output subset and reject `ExecuteTurn` with a 400
+ * before the model is ever reached — on two counts, confirmed live:
+ * `Invalid schema for function 'execute_turn': [{'type': 'integer'},
+ * {'type': 'integer'}] is not of type 'object', 'boolean'` (the `Tile` tuple,
+ * which strict mode has no representation for) and `'required' is required to
+ * be supplied and to be an array including every key in properties` (strict
+ * mode forbids optional properties, and most of `ExecuteTurn` is optional).
+ *
+ * Turning it off costs nothing this repo relies on. Strict mode is a
+ * provider-side schema check, not the forced tool call — `tool_choice` still
+ * forces `execute_turn` — and invariant 1 puts validation on our side of the
+ * line anyway: `generateStructured` parses every tool call with the same zod
+ * schema and reports a violation as `schema_validation_failed` with the zod
+ * issues the tactical agent's retry quotes back to the model.
+ */
 export function providerOptionsFor(spec: ModelSpec): ProviderOptionsMap {
   const options: ProviderOptionsMap = {};
   const effort = spec.reasoningEffort;
 
-  if (effort !== undefined) {
-    switch (spec.provider) {
-      case "openai":
-        options.openai = { reasoningEffort: effort };
-        break;
-      case "anthropic":
-        options.anthropic = {
-          thinking:
-            effort === "low"
-              ? { type: "disabled" }
-              : { type: "enabled", budgetTokens: REASONING_BUDGET_TOKENS[effort] },
-        };
-        break;
-      case "google":
+  switch (spec.provider) {
+    case "openai":
+      options.openai = {
+        strictSchemas: false,
+        ...(effort === undefined ? {} : { reasoningEffort: effort }),
+      };
+      break;
+    case "anthropic":
+      // Deliberately nothing: `anthropicBodyFor` writes the effort straight
+      // onto the request body. Emitting `thinking` here is what made every
+      // anthropic call fail — see that function for the two 400s.
+      break;
+    case "google":
+      if (effort !== undefined) {
         options.google = { thinkingConfig: { thinkingBudget: REASONING_BUDGET_TOKENS[effort] } };
-        break;
-    }
+      }
+      break;
   }
 
   // Explicit provider options win — that is what the escape hatch is for.
@@ -105,10 +137,130 @@ export function providerOptionsFor(spec: ModelSpec): ProviderOptionsMap {
   return options;
 }
 
+/**
+ * Rewrite an outgoing Anthropic Messages request into the shape
+ * `claude-sonnet-5` actually accepts. Pure, and exported, because it encodes
+ * two live-confirmed 400s that no unit test could otherwise pin.
+ *
+ * - **`temperature` comes off.** Anthropic answers any explicit value with
+ *   400 "`temperature` is deprecated for this model", and `ai@4.3.19` inserts
+ *   `temperature: 0` into every request that omits one (`// TODO v5 remove
+ *   default 0 for temperature`, `prepareCallSettings`). `callSettingsFor` not
+ *   sending one is therefore not enough; the default has to be removed here,
+ *   on the wire.
+ * - **`output_config.effort` goes on.** `claude-sonnet-5` is an
+ *   adaptive-thinking model: it rejects the manual
+ *   `thinking: {type:"enabled", budget_tokens}` that `@ai-sdk/anthropic@1.2.12`
+ *   is built around, and takes reasoning depth as an effort level instead.
+ *   The neutral `ReasoningEffort` names are Anthropic's own effort names, so
+ *   they pass through unmapped.
+ *
+ * Forced tool choice survives both. `generateObject({ mode: "tool" })` always
+ * sends `tool_choice: {type:"tool"}`, which is incompatible with *manual*
+ * extended thinking ("Thinking may not be enabled when tool_choice forces tool
+ * use") but explicitly supported with adaptive thinking — so dropping the
+ * `thinking` option is what makes the forced call legal, and the tactical
+ * agent's guarantee that every attempt forces the tool is untouched.
+ */
+export function anthropicBodyFor(
+  spec: ModelSpec,
+  body: Record<string, JsonValue>,
+): Record<string, JsonValue> {
+  // Destructuring the key away would leave an unused binding, which this
+  // repo's ESLint config rejects even when it is `_`-prefixed.
+  const rest: Record<string, JsonValue> = { ...body };
+  delete rest.temperature;
+
+  return {
+    ...rest,
+    ...(spec.reasoningEffort === undefined
+      ? {}
+      : { output_config: { effort: spec.reasoningEffort } }),
+  };
+}
+
+/** Bind `anthropicBodyFor` to the one call the SDK is about to make. */
+function anthropicFetch(spec: ModelSpec): typeof globalThis.fetch {
+  return async (input, init) => {
+    if (init === undefined || typeof init.body !== "string") {
+      return globalThis.fetch(input, init);
+    }
+    const body = anthropicBodyFor(spec, JSON.parse(init.body) as Record<string, JsonValue>);
+    return globalThis.fetch(input, { ...init, body: JSON.stringify(body) });
+  };
+}
+
+/**
+ * Gemini's function-declaration schema has no representation for JSON
+ * Schema's tuple form (`items` as an array of per-position schemas). Live
+ * against `gemini-3.1-flash-lite`, it answers with a 400: "Proto field is
+ * not repeating, cannot start list." `@ai-sdk/google@1.2.22` does not paper
+ * over this — `convertJSONSchemaToOpenAPISchema` maps an array `items`
+ * straight through — and `zod-to-json-schema` emits exactly that shape for
+ * `Tile = z.tuple([z.number().int(), z.number().int()])`, used by
+ * `ExecuteTurn.movement[].destinationTile` and `.mainAction.targetTile`.
+ *
+ * Collapsing to the first element's schema is safe here: every tuple this
+ * repo's schemas define is homogeneous (`Tile` is two integers), so nothing
+ * Gemini needs is lost — `minItems`/`maxItems` still constrain it to
+ * exactly two, and the field's own name already carries the [x, y] order.
+ */
+export function collapseTupleItemsForGoogle(node: unknown): unknown {
+  if (Array.isArray(node)) {
+    return node.map(collapseTupleItemsForGoogle);
+  }
+  if (typeof node !== "object" || node === null) {
+    return node;
+  }
+  return Object.fromEntries(
+    Object.entries(node as Record<string, unknown>).map(([key, value]) => [
+      key,
+      key === "items" && Array.isArray(value)
+        ? collapseTupleItemsForGoogle(value[0])
+        : collapseTupleItemsForGoogle(value),
+    ]),
+  );
+}
+
+/**
+ * The google-only detour around the tuple incompatibility above. Anthropic
+ * and OpenAI accept tuple-style `items` fine, so this only ever runs for
+ * `spec.provider === "google"` (see `generateStructured`) rather than
+ * changing what `packages/schemas` hands every provider. It does not weaken
+ * validation either: `validate` still parses with the same zod schema the
+ * caller passed in, so a response is held to the exact same contract as
+ * anthropic/openai — only the JSON Schema google is shown on the wire, to
+ * describe the tool, is reshaped.
+ */
+function googleCompatibleSchema<T>(schema: ZodType<T>): Schema<T> {
+  // `$refStrategy: "none"` fully inlines the schema instead of deduplicating
+  // repeated subschemas behind a `$ref`. Default `zodToJsonSchema` turns the
+  // second occurrence of a repeated schema — `Tile`, used by both
+  // `destinationTile` and `targetTile` — into a JSON Pointer. Gemini's
+  // function-declaration schema is not general JSON Schema; it has no `$ref`
+  // support at all, confirmed live: with the tuple fix alone, every call
+  // still failed as `provider_error`.
+  const collapsed = collapseTupleItemsForGoogle(
+    zodToJsonSchema(schema, { $refStrategy: "none" }),
+  ) as Parameters<typeof jsonSchema>[0];
+  return jsonSchema<T>(collapsed, {
+    validate: (value) => {
+      const result = schema.safeParse(value);
+      return result.success
+        ? { success: true, value: result.data }
+        : { success: false, error: result.error };
+    },
+  });
+}
+
 export function resolveLanguageModel(spec: ModelSpec): LanguageModelV1 {
   switch (spec.provider) {
     case "anthropic":
-      return anthropic(spec.modelId);
+      // A per-spec client, because the request rewrite depends on the spec's
+      // effort. `createAnthropic` reads ANTHROPIC_API_KEY through a header
+      // thunk, so building one here still touches no credential until a call
+      // is actually made.
+      return createAnthropic({ fetch: anthropicFetch(spec) })(spec.modelId);
     case "google":
       return google(spec.modelId);
     case "openai":
@@ -236,7 +388,8 @@ export function createVercelPort(options: VercelPortOptions = {}): LanguageModel
         const result = await generateObject({
           model: resolveModel(spec),
           mode: "tool",
-          schema: request.schema,
+          schema:
+            spec.provider === "google" ? googleCompatibleSchema(request.schema) : request.schema,
           schemaName: request.toolName,
           schemaDescription: request.toolDescription,
           messages: toCoreMessages(assemblePrompt(request.prompt, spec.provider)),
