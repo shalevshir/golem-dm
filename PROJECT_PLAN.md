@@ -252,8 +252,22 @@ stand-in for the server's turn pipeline (step 8)". Adds the wire protocol to
 `reduce`, `EventStore` port) behind a thin Fastify/WS transport. Verified by a
 scripted WS client playing a full combat with a mocked provider.
 
-**Spec #2 — the web client**, against the protocol spec #1 freezes. Not yet
-written.
+**Spec #2 — the web client**, against the protocol spec #1 freezes.
+[`docs/superpowers/specs/2026-08-19-web-client-design.md`](docs/superpowers/specs/2026-08-19-web-client-design.md)
+(written 2026-08-19, plan not yet started). Reading the frozen protocol
+against `apps/web/CLAUDE.md`'s zero-logic boundary turned up six gaps, and
+closing them needs *additive* protocol changes rather than a client-only
+build: there is no affordance frame, so a clickable grid cannot show legal
+moves; `Combatant` carries no display name; `reduce` cannot move to
+`@ai-dm/schemas` as spec #1's fallback assumed, because it imports
+`startTurn` from the engine; nothing acks a command; `ExecuteTurn` requires
+an English rationale a Hebrew-typing player cannot author; and no terminal
+frame marks the end of combat. The design adds a `turn_affordances` frame
+yielded by `handleCommand`, a `GET /encounters/:id` catalogue for static
+facts, and moves `reduce` into `@ai-dm/schemas` (swapping `startTurn` for the
+byte-equivalent `ActionEconomy.parse({})`) so client and server share one
+fold. Affordances are derived by running the real validator over enumerated
+candidates, never by reimplementing legality client-side.
 
 Deferred out of step 8 deliberately: Postgres persistence (the `EventStore`
 port ships with an in-memory implementation; `@ai-dm/memory` is still empty
