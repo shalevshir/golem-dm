@@ -326,9 +326,12 @@ export async function* handleCommand(
     const statBlock = session.built.statBlocks.get(actorId);
     const deadline = Date.now() + ports.turnTimeoutMs;
     const controller = new AbortController();
-    const timer = setTimeout(() => {
-      controller.abort();
-    }, Math.max(0, deadline - Date.now()));
+    const timer = setTimeout(
+      () => {
+        controller.abort();
+      },
+      Math.max(0, deadline - Date.now()),
+    );
 
     let proposal: TurnProposalResult;
     const proposalStartedAt = Date.now();
@@ -475,7 +478,22 @@ export async function* handleCommand(
           return;
         }
 
-        for (const event of await ports.store.readSince(sessionId, command.resumeFrom)) {
+        const tail = await ports.store.readSince(sessionId, command.resumeFrom);
+        if (tail.length === 0) {
+          // IMPORTANT-2: `resumeFrom` already at (or past) the newest
+          // sequence — a client that missed nothing. `join` must have
+          // exactly one guaranteed response so "you're caught up" is never
+          // indistinguishable from a dropped join; the natural choice is the
+          // same `session_state` frame a resumeFrom-less join gets, at the
+          // current projection.
+          yield {
+            type: "session_state",
+            sequence: session.nextSequence - 1,
+            snapshot: session.state,
+          };
+          return;
+        }
+        for (const event of tail) {
           yield { type: "event", event };
         }
         return;

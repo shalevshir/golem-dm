@@ -242,9 +242,7 @@ function slowTactical(delayMs: number): TacticalAgent {
     proposeTurn(input) {
       return new Promise((resolve, reject) => {
         setTimeout(() => {
-          const actor = input.world.combatants.find(
-            (each) => each.combatantId === input.actorId,
-          );
+          const actor = input.world.combatants.find((each) => each.combatantId === input.actorId);
           if (actor === undefined) {
             reject(new Error(`No combatant ${input.actorId} in this encounter`));
             return;
@@ -285,13 +283,44 @@ describe("handleCommand — join", () => {
     expect(frames[0]).toMatchObject({ type: "session_state" });
   });
 
-  it("replays only the events after resumeFrom", async () => {
+  // IMPORTANT-2: the previous version of this test ran `resumeFrom: 0`
+  // against a log that was exactly the sequence-0 genesis event, so
+  // `frames` was `[]` and the sole assertion — zero `session_state`
+  // frames — passed vacuously: it would keep passing even if the branch
+  // replayed nothing at all, or replayed from the wrong offset. Real
+  // events past `resumeFrom`, with the exact returned sequences pinned,
+  // is what actually exercises the replay.
+  it("replays only the events after resumeFrom, in ascending sequence order", async () => {
     const store = createInMemoryEventStore();
     const session = await freshSession(store);
+    await store.append("s1", [syntheticEvent(1), syntheticEvent(2), syntheticEvent(3)]);
+
+    const frames = await drain(
+      handleCommand(session, { type: "join", sessionId: "s1", resumeFrom: 1 }, portsWith(store)),
+    );
+
+    expect(frames.filter((each) => each.type === "session_state")).toHaveLength(0);
+    const eventFrames = frames.filter((each) => each.type === "event");
+    expect(eventFrames.map((each) => each.event.sequence)).toEqual([2, 3]);
+  });
+
+  // IMPORTANT-2: without this branch, a reconnecting client whose
+  // `resumeFrom` is already the newest sequence — it missed nothing — got
+  // zero frames back and could not tell "you're caught up" from "the
+  // server dropped your join". `join` must have exactly one guaranteed
+  // response; a `session_state` frame at the current projection is it,
+  // the same shape a resumeFrom-less join gets (see `protocol.ts`'s
+  // `JoinMessage` doc-comment, which spec #2 — the web client — builds
+  // against).
+  it("sends a session_state frame, not silence, when resumeFrom is already caught up", async () => {
+    const store = createInMemoryEventStore();
+    const session = await freshSession(store);
+
     const frames = await drain(
       handleCommand(session, { type: "join", sessionId: "s1", resumeFrom: 0 }, portsWith(store)),
     );
-    expect(frames.filter((each) => each.type === "session_state")).toHaveLength(0);
+
+    expect(frames).toEqual([{ type: "session_state", sequence: 0, snapshot: session.state }]);
   });
 
   // C-16: the spec's §Reconnect says "without resumeFrom, OR when it predates

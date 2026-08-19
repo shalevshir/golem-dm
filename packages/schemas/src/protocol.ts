@@ -44,7 +44,15 @@ export type SessionState = z.infer<typeof SessionState>;
 export const JoinMessage = z.object({
   type: z.literal("join"),
   sessionId: z.string(),
-  /** Replay everything after this sequence. Absent means "send me a snapshot". */
+  /**
+   * Replay everything after this sequence. Absent means "send me a
+   * snapshot". A `join` always gets exactly one guaranteed response, never
+   * silence: when there is nothing to replay (`resumeFrom` is already at or
+   * past the newest sequence — a client that missed nothing), the server
+   * still answers with a `session_state` frame at the current projection,
+   * the same shape used when `resumeFrom` is absent — so "you're caught up"
+   * is never indistinguishable from a dropped join.
+   */
   resumeFrom: z.number().int().min(0).optional(),
 });
 
