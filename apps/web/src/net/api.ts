@@ -8,15 +8,13 @@
 // this request read that one definition. `nameEnglish` is English because
 // there is no Hebrew name data anywhere in the repo and the SRD is English
 // (ADR 0001) — which is why every render of it is wrapped in `<bdi>`.
-import { z } from "zod";
-import { EncounterCatalogue } from "@ai-dm/schemas";
+import type { z } from "zod";
+import { EncounterCatalogue, SessionCreated } from "@ai-dm/schemas";
 import type { CatalogueAction, CatalogueCombatant } from "@ai-dm/schemas";
 
 // Re-exported so the components can import their prop types from one place
 // without each reaching into the schemas package for a type it only renders.
 export type { CatalogueAction, CatalogueCombatant };
-
-const CreateSessionResponse = z.object({ sessionId: z.string() });
 
 export async function createSession(encounterId: string): Promise<string> {
   const response = await fetch("/sessions", {
@@ -25,7 +23,10 @@ export async function createSession(encounterId: string): Promise<string> {
     body: JSON.stringify({ encounterId }),
   });
   if (!response.ok) throw new Error(`POST /sessions failed with ${String(response.status)}`);
-  return CreateSessionResponse.parse(await response.json()).sessionId;
+  // Parsed, never cast — the server hand-builds this response from typed
+  // data, but the client only has untrusted JSON off the wire until this
+  // line, exactly the same reasoning `fetchCatalogue` applies below.
+  return SessionCreated.parse(await response.json()).sessionId;
 }
 
 export async function fetchCatalogue(

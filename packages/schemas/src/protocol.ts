@@ -181,6 +181,16 @@ export const EncounterCatalogue = z.object({
 
 export type EncounterCatalogue = z.infer<typeof EncounterCatalogue>;
 
+/**
+ * The response body of `POST /sessions`. Like `EncounterCatalogue`, this is
+ * a contract both ends read from one definition: the server constructs the
+ * value from typed data, and the client parses the JSON it receives rather
+ * than casting it.
+ */
+export const SessionCreated = z.object({ sessionId: z.string() });
+
+export type SessionCreated = z.infer<typeof SessionCreated>;
+
 export const ServerFrame = z.discriminatedUnion("type", [
   z.object({
     type: z.literal("session_state"),

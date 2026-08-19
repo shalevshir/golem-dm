@@ -5,6 +5,7 @@ import {
   EncounterCatalogue,
   MAX_FREE_TEXT_LENGTH,
   ServerFrame,
+  SessionCreated,
   SessionState,
   TurnAffordances,
 } from "./protocol.js";
@@ -166,6 +167,17 @@ describe("EncounterCatalogue", () => {
     expect(() =>
       EncounterCatalogue.parse({ ...catalogue, combatants: [{ ...hero, faction: "wildling" }] }),
     ).toThrow();
+  });
+});
+
+describe("SessionCreated", () => {
+  it("parses a valid POST /sessions response", () => {
+    const parsed = SessionCreated.parse({ sessionId: "s1" });
+    expect(parsed.sessionId).toBe("s1");
+  });
+
+  it("rejects a response missing sessionId", () => {
+    expect(() => SessionCreated.parse({})).toThrow();
   });
 });
 

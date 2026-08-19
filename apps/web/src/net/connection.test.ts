@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ServerFrame } from "@ai-dm/schemas";
 import { connect } from "./connection.js";
 import { fakeSocket } from "./fake-socket.js";
@@ -19,6 +19,10 @@ const snapshotFrame: ServerFrame = {
   },
 };
 
+afterEach(() => {
+  vi.useRealTimers();
+});
+
 describe("connect", () => {
   it("sends a join as soon as the socket opens", () => {
     const socket = fakeSocket();
@@ -34,18 +38,35 @@ describe("connect", () => {
     expect(JSON.parse(socket.sent[0] ?? "{}")).toEqual({ type: "join", sessionId: "s1" });
   });
 
-  it("re-joins with resumeFrom after a drop", () => {
+  it("re-joins with resumeFrom read fresh at reconnect time, not captured once", () => {
+    vi.useFakeTimers();
     const socket = fakeSocket();
+    // A plain mutable value, not a constant thunk: it changes between the
+    // first join and the reconnect, the same way the store's folded
+    // sequence actually changes while a session is live. A `connect` that
+    // captured `resumeFrom()` once (at `connect()` time, or once per `open`
+    // call before the socket has actually reopened) would still send
+    // `undefined` on the second join here — this is what catches that bug.
+    let sequence: number | undefined = undefined;
     connect({
       sessionId: "s1",
       onFrame: () => undefined,
       onStatus: () => undefined,
-      resumeFrom: () => 7,
+      resumeFrom: () => sequence,
       socketFactory: () => socket,
     });
 
     socket.emitOpen();
-    expect(JSON.parse(socket.sent[0] ?? "{}")).toEqual({
+    expect(JSON.parse(socket.sent[0] ?? "{}")).toEqual({ type: "join", sessionId: "s1" });
+
+    // The store folds events after the first join lands; a later drop must
+    // resume from what has actually been folded by then.
+    sequence = 7;
+    socket.emitClose(); // the drop
+    vi.advanceTimersByTime(1000); // the retry delay
+    socket.emitOpen(); // the reconnected socket's open event
+
+    expect(JSON.parse(socket.sent[1] ?? "{}")).toEqual({
       type: "join",
       sessionId: "s1",
       resumeFrom: 7,
@@ -75,7 +96,7 @@ describe("connect", () => {
   it("reports status transitions so the UI can show reconnecting", () => {
     const onStatus = vi.fn();
     const socket = fakeSocket();
-    connect({
+    const connection = connect({
       sessionId: "s1",
       onFrame: () => undefined,
       onStatus,
@@ -88,6 +109,10 @@ describe("connect", () => {
     expect(onStatus).toHaveBeenCalledWith("open");
     socket.emitClose();
     expect(onStatus).toHaveBeenCalledWith("reconnecting");
+
+    // Close deliberately: emitClose() above scheduled a real 1s retry, and
+    // leaving it pending would let it fire into a later test's mocks.
+    connection.close();
   });
 
   it("stops reconnecting once closed deliberately", () => {
@@ -104,6 +129,29 @@ describe("connect", () => {
     socket.emitOpen();
     connection.close();
     socket.emitClose();
+    expect(onStatus).toHaveBeenLastCalledWith("closed");
+  });
+
+  it("cancels a scheduled reconnect when closed deliberately before it fires", () => {
+    vi.useFakeTimers();
+    const onStatus = vi.fn();
+    const socket = fakeSocket();
+    const connection = connect({
+      sessionId: "s1",
+      onFrame: () => undefined,
+      onStatus,
+      resumeFrom: () => undefined,
+      socketFactory: () => socket,
+    });
+
+    socket.emitOpen(); // the first join is sent
+    socket.emitClose(); // an unexpected drop — schedules a retry ~1000ms out
+    connection.close(); // must cancel that pending retry, not just ignore it
+
+    vi.advanceTimersByTime(5000); // well past the retry delay
+
+    // No second join was ever sent: the scheduled retry never fired.
+    expect(socket.sent).toHaveLength(1);
     expect(onStatus).toHaveBeenLastCalledWith("closed");
   });
 });
