@@ -40,9 +40,26 @@ const CATALOGUE = new Map<string, EncounterDefinition>([
   [GOBLIN_AMBUSH.encounterId, GOBLIN_AMBUSH],
 ]);
 
+/**
+ * Thrown by `encounterById`/`buildEncounterById` for an id the catalogue does
+ * not know. Named so a caller (Task 13's HTTP layer) can `instanceof` it to
+ * answer 404 rather than 500 — `buildEncounterById` can also throw a bare
+ * `Error` from a missing monster file, a `ZodError` from a malformed stat
+ * block, or any of `buildEncounter`'s own errors, none of which are a 404.
+ */
+export class UnknownEncounterError extends Error {
+  readonly encounterId: string;
+
+  constructor(encounterId: string) {
+    super(`Unknown encounter ${encounterId}`);
+    this.name = "UnknownEncounterError";
+    this.encounterId = encounterId;
+  }
+}
+
 export function encounterById(encounterId: string): EncounterDefinition {
   const definition = CATALOGUE.get(encounterId);
-  if (definition === undefined) throw new Error(`Unknown encounter ${encounterId}`);
+  if (definition === undefined) throw new UnknownEncounterError(encounterId);
   return definition;
 }
 

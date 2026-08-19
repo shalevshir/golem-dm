@@ -1,15 +1,16 @@
 import { describe, expect, it } from "vitest";
 import type { ExecuteTurn } from "@ai-dm/schemas";
 import { validateExecuteTurn } from "@ai-dm/rules-engine";
-import { buildEncounterById, encounterById } from "./index.js";
+import { buildEncounterById, encounterById, UnknownEncounterError } from "./index.js";
 
 describe("encounter catalogue", () => {
   it("knows the starter encounter", () => {
     expect(encounterById("goblin-ambush").encounterId).toBe("goblin-ambush");
   });
 
-  it("throws a named error for an unknown id", () => {
+  it("throws a named, instanceof-able error for an unknown id", () => {
     expect(() => encounterById("nope")).toThrow(/Unknown encounter nope/);
+    expect(() => encounterById("nope")).toThrow(UnknownEncounterError);
   });
 
   it("builds a world from real SRD stat blocks", () => {

@@ -1,7 +1,11 @@
 // A session is its projection plus the static encounter data that projection
-// is not allowed to contain. Stat blocks and the grid's line-of-sight
-// algorithm are re-derived from `encounterId` rather than snapshotted: they
-// never change, and one of them is a function.
+// is not allowed to contain. Stat blocks and the world's `lineOfSight`
+// algorithm are re-paired in from `encounterId` rather than snapshotted, by
+// `worldFor` below: they never change, and one of them is a function so it
+// could not be serialized even if it did. (`buildEncounter` never actually
+// populates `CombatWorld.lineOfSight` today, so the validator falls through
+// to its Bresenham default — but `worldFor` is where that field would come
+// from if it were populated, which is the mechanism this comment documents.)
 //
 // C-26: `reduce` never writes `sessionId`, `rootSeed`, `encounterId`, `grid`
 // or `turnOrder` — no event branch touches those five `SessionState` fields,
@@ -70,13 +74,20 @@ export async function createSession(input: CreateSessionInput): Promise<Session>
   // Sequence 0 is the session's own genesis event. Without it, a log with no
   // turns yet is indistinguishable from a session that does not exist, and
   // `loadSession` could not tell them apart.
+  //
+  // The payload deliberately carries only `encounterId`/`rootSeed`, not
+  // `state` itself: nothing reads a persisted `state` field (`loadSession`
+  // rebuilds it from `encounterId`/`rootSeed` via `initialState`, on purpose
+  // — see `GenesisPayload` below), and including it would alias the exact
+  // object returned as `session.state` into the store's own event, which the
+  // in-memory store then holds by reference.
   const genesis: GameEvent = {
     eventId: input.uuid(),
     sessionId: input.sessionId,
     sequence: 0,
     timestamp: input.clock(),
     type: "session_snapshot",
-    payload: { encounterId: input.encounterId, rootSeed: input.rootSeed, state },
+    payload: { encounterId: input.encounterId, rootSeed: input.rootSeed },
   };
   await input.store.append(input.sessionId, [genesis]);
 
@@ -90,6 +101,17 @@ export async function loadSession(input: {
   const events = await input.store.readSince(input.sessionId, -1);
   const genesis = events[0];
   if (genesis === undefined) return null;
+
+  // A log whose first event is not `session_snapshot` is corrupt — `reduce`
+  // will happily fold whatever is there, but `GenesisPayload.parse` below
+  // would fail with a raw, undiagnosable `ZodError` if the actual event 0
+  // shares no fields with what we expect here.
+  if (genesis.type !== "session_snapshot") {
+    throw new Error(
+      `Session ${input.sessionId}'s log does not start with session_snapshot ` +
+        `(sequence 0 is a ${genesis.type})`,
+    );
+  }
 
   const { encounterId, rootSeed } = GenesisPayload.parse(genesis.payload);
   const built = buildEncounterById(encounterId);
