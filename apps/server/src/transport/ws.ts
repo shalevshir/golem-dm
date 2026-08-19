@@ -18,9 +18,10 @@ export function registerWebSocketRoute(app: FastifyInstance, input: WebSocketRou
   app.get("/ws", { websocket: true }, (socket) => {
     // One socket, one session (ADR 0002 is solo play), bound by `join`.
     let session: Session | null = null;
-    // One command in flight. A queued stale click would land against a changed
-    // board and fail validation for reasons the player cannot see.
-    let busy = false;
+    // Per-SOCKET ordering guard only — see the two-guard comment in the
+    // message handler below for why a per-session lock (via `registry`) is
+    // also required and this alone is not the CRITICAL-1 fix.
+    let localBusy = false;
 
     function send(frame: ServerFrame): void {
       // C-36a: `handleCommand` is always drained to completion below, even
@@ -52,29 +53,61 @@ export function registerWebSocketRoute(app: FastifyInstance, input: WebSocketRou
         }
         const command = parsed.data;
 
-        // `busy` must be claimed before ANY `await` in this handler,
-        // including `join`'s registry lookup just below — not only before
-        // `handleCommand`. `ws` delivers two writes that arrive in one TCP
-        // read (e.g. a client that pipelines `join` immediately followed by
-        // its first action) as two synchronous `message` events. If the
-        // busy check ran only after `join`'s `await input.registry.get`,
-        // the second event's handler could reach `session === null` before
-        // the first event's await had resumed and `session` was ever
-        // assigned — misreporting a legitimate pipelined action as
-        // `unknown_session` (review finding, task 14 round 2). Claiming
-        // `busy` here, synchronously, closes that window: the second
-        // event now waits its turn instead.
-        if (busy) {
+        function turnInProgress(): void {
           send({
             type: "error",
             ...(command.type === "join" ? {} : { clientMessageId: command.clientMessageId }),
             code: "turn_in_progress",
             message: "A turn is already resolving.",
           });
+        }
+
+        // Two DISTINCT guards, both claimed here in the synchronous prefix,
+        // before any `await` — that is what makes each atomic under JS's
+        // single-threaded execution, the same guarantee the old lone
+        // per-socket flag had, just correctly split across the two hazards
+        // it was actually covering:
+        //
+        // 1. `localBusy` — per SOCKET. `ws` delivers two writes that arrive
+        //    in one TCP read (e.g. a client that pipelines `join`
+        //    immediately followed by its first action) as two synchronous
+        //    `message` events. Without this, the second event's handler
+        //    could reach `session === null` before the first event's own
+        //    `await input.registry.get` below had resumed and `session` was
+        //    ever assigned — misreporting a legitimate pipelined action as
+        //    `unknown_session` (review finding, task 14 round 2). Rejected
+        //    with `turn_in_progress`, not queued — see point 2.
+        //
+        // 2. The `SessionRegistry`'s per-SESSION lock (CRITICAL-1). Sessions
+        //    are deliberately shared across sockets — `http.ts`'s `live`
+        //    cache is what lets two WS connections onto the same session
+        //    (Task 14) alias one mutable `Session` object, with
+        //    `nextSequence` advanced on it in place — so `localBusy` alone
+        //    cannot prevent two different sockets bound to the same session
+        //    from each passing their own turn-order check while the other's
+        //    turn is still resolving. `sessionId` is known synchronously in
+        //    both branches: a `join` carries its own `command.sessionId`;
+        //    anything else can only reach this point with `session` already
+        //    bound, because guard 1 above forbids a second message on THIS
+        //    socket from starting before an earlier `join` finished binding
+        //    it.
+        //
+        // Neither guard is a queue: the spec is explicit that a queued stale
+        // click would land against a changed board and fail validation for
+        // reasons the player cannot see, so a command arriving under either
+        // guard is answered `turn_in_progress` and dropped, not deferred.
+        if (localBusy) {
+          turnInProgress();
+          return;
+        }
+        const sessionId = command.type === "join" ? command.sessionId : session?.state.sessionId;
+        const claimedSessionLock = sessionId !== undefined && input.registry.tryBegin(sessionId);
+        if (sessionId !== undefined && !claimedSessionLock) {
+          turnInProgress();
           return;
         }
 
-        busy = true;
+        localBusy = true;
         try {
           if (command.type === "join") {
             const found = await input.registry.get(command.sessionId);
@@ -114,7 +147,14 @@ export function registerWebSocketRoute(app: FastifyInstance, input: WebSocketRou
             message: error instanceof Error ? error.message : String(error),
           });
         } finally {
-          busy = false;
+          localBusy = false;
+          // Release the SESSION lock last — after the drain above has fully
+          // finished (or thrown) — never earlier: a `join` that resolved to
+          // `unknown_session` and returned early still reaches here via the
+          // early `return`s inside `try`, so the lock claimed for that
+          // nonexistent session id is released regardless of which path out
+          // of `try` was taken.
+          if (sessionId !== undefined && claimedSessionLock) input.registry.end(sessionId);
         }
       })();
     });

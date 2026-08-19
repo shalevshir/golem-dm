@@ -72,6 +72,10 @@ describe("POST /sessions", () => {
       const registry: SessionRegistry = {
         create: () => Promise.reject(new Error("Unknown encounter that is really a bug")),
         get: () => Promise.resolve(null),
+        tryBegin: () => true,
+        end: () => {
+          // No in-flight state to release in this stub.
+        },
       };
       registerHttpRoutes(app, registry);
       const response = await app.inject({
@@ -106,6 +110,26 @@ describe("SessionRegistry", () => {
     const readSince = vi.spyOn(store, "readSince");
     await registry.get(created.state.sessionId);
     expect(readSince).not.toHaveBeenCalled();
+  });
+
+  // CRITICAL-1 unit coverage: `tryBegin`/`end` are the actual mutual-exclusion
+  // primitive `ws.ts` builds its per-session guard on — see
+  // `ws.test.ts`'s "CRITICAL-1" test for the end-to-end proof over real
+  // sockets that this closes the corrupted-log hazard.
+  it("tryBegin claims a session's in-flight slot exactly once until end releases it", () => {
+    const { registry } = appWith();
+    expect(registry.tryBegin("s1")).toBe(true);
+    expect(registry.tryBegin("s1")).toBe(false);
+    registry.end("s1");
+    expect(registry.tryBegin("s1")).toBe(true);
+  });
+
+  it("tracks in-flight slots independently per session id", () => {
+    const { registry } = appWith();
+    expect(registry.tryBegin("s1")).toBe(true);
+    expect(registry.tryBegin("s2")).toBe(true);
+    registry.end("s1");
+    expect(registry.tryBegin("s2")).toBe(false);
   });
 });
 

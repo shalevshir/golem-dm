@@ -14,6 +14,30 @@ const CreateSessionBody = z.object({ encounterId: z.string().min(1) });
 export interface SessionRegistry {
   create(encounterId: string): Promise<Session>;
   get(sessionId: string): Promise<Session | null>;
+  /**
+   * Claims the one in-flight-command slot for `sessionId`. Returns `false`
+   * without side effects if it is already claimed — the caller must not
+   * proceed with `handleCommand` in that case.
+   *
+   * CRITICAL-1: sessions are shared across sockets — `live` below is the
+   * mechanism that makes two WS connections (Task 14) alias the same
+   * `Session` object, with `nextSequence` advanced on it in place — so the
+   * mutual-exclusion guard belongs on the object that creates that sharing,
+   * not on a per-socket flag in the transport (which cannot see a second
+   * socket's in-flight command at all) and not on `Session` itself (a
+   * `core/` type; in-flight-command policy is a transport concern per the
+   * spec's "core/ never touches a socket").
+   *
+   * Deliberately synchronous: the caller must call this in its handler's
+   * synchronous prefix, before its first `await`, the same way the old
+   * per-socket flag was claimed — that is what makes the check-and-set
+   * atomic under JS's single-threaded execution.
+   */
+  tryBegin(sessionId: string): boolean;
+  /** Releases the slot `tryBegin` claimed. Always call from a `finally`. A
+   * `join` for a session that turns out not to exist still claims and
+   * releases an id — harmless, since the slot is just a key in a set. */
+  end(sessionId: string): void;
 }
 
 export interface SessionRegistryInput {
@@ -35,6 +59,10 @@ export interface SessionRegistryInput {
  */
 export function createSessionRegistry(input: SessionRegistryInput): SessionRegistry {
   const live = new Map<string, Session>();
+  // The per-session in-flight-command lock (CRITICAL-1). A plain `Set`: a
+  // session id is a member exactly while some socket's `handleCommand` call
+  // for it is running, from `tryBegin` to the matching `end`.
+  const inFlight = new Set<string>();
 
   return {
     async create(encounterId) {
@@ -60,6 +88,16 @@ export function createSessionRegistry(input: SessionRegistryInput): SessionRegis
       const loaded = await loadSession({ sessionId, store: input.store });
       if (loaded !== null) live.set(sessionId, loaded);
       return loaded;
+    },
+
+    tryBegin(sessionId) {
+      if (inFlight.has(sessionId)) return false;
+      inFlight.add(sessionId);
+      return true;
+    },
+
+    end(sessionId) {
+      inFlight.delete(sessionId);
     },
   };
 }

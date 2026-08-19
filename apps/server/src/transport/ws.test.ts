@@ -7,10 +7,13 @@ import {
   createTacticalAgent,
   DEFAULT_MODEL_ROUTING,
 } from "@ai-dm/agents";
-import type { ServerFrame } from "@ai-dm/schemas";
+import type { NarrativePort } from "@ai-dm/agents";
+import { ServerFrame } from "@ai-dm/schemas";
 import { buildApp } from "../app.js";
 import { createInMemoryEventStore } from "../core/event-store.js";
+import type { EventStore } from "../core/event-store.js";
 import type { TurnPorts } from "../core/pipeline.js";
+import { loadSession } from "../core/session.js";
 import { createSessionRegistry } from "./http.js";
 import type { FastifyInstance } from "fastify";
 
@@ -21,7 +24,7 @@ afterEach(async () => {
   running = null;
 });
 
-async function startServer() {
+async function startServer(overrides?: { narrative?: NarrativePort }) {
   const store = createInMemoryEventStore();
   let n = 0;
   const uuid = (): string => {
@@ -53,7 +56,7 @@ async function startServer() {
     tactical: createTacticalAgent({
       runtime: createAgentRuntime({ routing: DEFAULT_MODEL_ROUTING, port }),
     }),
-    narrative: createDeterministicNarrative(),
+    narrative: overrides?.narrative ?? createDeterministicNarrative(),
     clock: () => "2026-08-19T10:00:00.000Z",
     uuid,
     seedFor: (rootSeed, sequence) => rootSeed * 1000 + sequence,
@@ -111,7 +114,11 @@ function framesUntil(
       reject(new Error(`timed out after ${String(frames.length)} frames`));
     }, FRAME_TIMEOUT_MS);
     function onMessage(data: Buffer | string): void {
-      const frame = JSON.parse(String(data)) as ServerFrame;
+      // Important 3: parsed against the real schema, not cast — the branch
+      // exists to freeze this wire contract, so a frame that violates
+      // `ServerFrame` must fail the test, not silently satisfy `.type`
+      // checks the way `JSON.parse(...) as ServerFrame` would let it.
+      const frame = ServerFrame.parse(JSON.parse(String(data)));
       frames.push(frame);
       if (stop(frame)) {
         cleanup();
@@ -163,6 +170,45 @@ function joinAndWaitForAck(socket: WebSocket, sessionId: string): Promise<void> 
     socket.on("error", onError);
     socket.send(JSON.stringify({ type: "join", sessionId }));
   });
+}
+
+/**
+ * Delays every stream by `delayMs` before handing off to the real
+ * deterministic narrative — long enough to hold `handleCommand` suspended
+ * inside `narrate()` (pipeline.ts) for the window a test needs to send a
+ * second command while the first is still "in flight" for its session.
+ */
+function delayedNarrative(delayMs: number): NarrativePort {
+  const real = createDeterministicNarrative();
+  return {
+    async *stream(input) {
+      await new Promise((resolve) => setTimeout(resolve, delayMs));
+      yield* real.stream(input);
+    },
+  };
+}
+
+/**
+ * Polls the server's own projection (mirrors `e2e.test.ts`'s
+ * `waitForProjection`, kept local per the fix-wave instruction not to build
+ * a shared test-support module) until a full round has resolved: either the
+ * turn order is back to the hero, or one faction has been wiped out.
+ */
+async function waitForRoundSettled(store: EventStore, sessionId: string): Promise<void> {
+  const deadline = Date.now() + FRAME_TIMEOUT_MS;
+  for (;;) {
+    const session = await loadSession({ sessionId, store });
+    if (session === null) throw new Error(`Session ${sessionId} disappeared while polling.`);
+    const alive = new Set(
+      session.state.combatants.filter((c) => c.status === "alive").map((c) => c.faction),
+    );
+    const backToHero = session.state.turnOrder[session.state.currentActorIndex] === "hero";
+    if (alive.size < 2 || backToHero) return;
+    if (Date.now() > deadline) {
+      throw new Error(`Round never settled within ${String(FRAME_TIMEOUT_MS)}ms.`);
+    }
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
 }
 
 async function createSessionOver(app: FastifyInstance): Promise<string> {
@@ -337,5 +383,155 @@ describe("websocket transport", () => {
       }
       await new Promise((resolve) => setTimeout(resolve, 10));
     }
+  });
+
+  // CRITICAL-1: the in-flight guard must be scoped to the SESSION, not the
+  // socket. Sessions are shared across sockets on purpose (`http.ts`'s
+  // `live` cache — two WS connections onto the same session, Task 14), and
+  // `nextSequence`/`session.state` live on that one shared `Session` object,
+  // advanced in place. A guard that lives per-socket (a `let busy = false`
+  // closed over inside `app.get("/ws", ...)`) cannot see a second socket's
+  // in-flight command at all, so two sockets bound to the same session can
+  // each pass their own turn-order check while the first turn is still
+  // resolving — playing the same actor's turn twice and running two enemy
+  // sweeps for one round, all at valid, distinct sequences, so nothing ever
+  // throws. It is a silently corrupt append-only log.
+  //
+  // `narrative: delayedNarrative(...)` holds socket A's own `structured_action`
+  // suspended inside `narrate()` (pipeline.ts) well after `player_input` and
+  // `action_validated`/`dice_rolled`/`state_delta_applied` have already been
+  // appended and `currentActorIndex` still points at the hero (turn_advanced
+  // is the LAST event of a turn) — exactly the window the finding describes.
+  // Socket B, joined to the SAME session, sends its own hero action inside
+  // that window.
+  //
+  // Break scenario: against the per-socket `busy` flag this branch replaces,
+  // socket B's `busy` is `false` (it is its own connection), so its action
+  // sails through the same `currentActorId !== command.actorId` check socket
+  // A already passed — it gets played as a real turn instead of
+  // `turn_in_progress`, and the log ends up with two `player_input` events
+  // for "hero" in the same round.
+  it("rejects a same-session command from a SECOND socket while the first is mid-turn, without duplicating the turn in the log (CRITICAL-1)", async () => {
+    const { app, url, store } = await startServer({ narrative: delayedNarrative(400) });
+    const sessionId = await createSessionOver(app);
+
+    const socketA = await connect(url);
+    await joinAndWaitForAck(socketA, sessionId);
+    const socketB = await connect(url);
+    await joinAndWaitForAck(socketB, sessionId);
+
+    // Socket A starts a hero turn. Wait for ITS OWN player_input event before
+    // sending B's command — proof that A is now committed mid-turn (past
+    // validation, on its way into the deliberately slow `narrate()`) rather
+    // than racing on an unstarted request.
+    const aPlayerInput = framesUntil(
+      socketA,
+      (frame) => frame.type === "event" && frame.event.type === "player_input",
+    );
+    socketA.send(
+      JSON.stringify({
+        type: "structured_action",
+        clientMessageId: "a1",
+        actorId: "hero",
+        turn: {
+          actorId: "hero",
+          mainAction: { actionType: "dodge" },
+          tacticalRationaleEnglish: "Test fixture: socket A's hero turn.",
+        },
+      }),
+    );
+    await aPlayerInput;
+
+    // Socket B, bound to the SAME session, tries to play a hero turn of its
+    // own while A's is still resolving (A is inside the 400ms narrate delay).
+    const bRejection = framesUntil(socketB, (frame) => frame.type === "error");
+    socketB.send(
+      JSON.stringify({
+        type: "structured_action",
+        clientMessageId: "b1",
+        actorId: "hero",
+        turn: {
+          actorId: "hero",
+          mainAction: { actionType: "dodge" },
+          tacticalRationaleEnglish: "Test fixture: socket B tries to play hero too.",
+        },
+      }),
+    );
+    const bFrames = await bRejection;
+    expect(bFrames.at(-1)).toMatchObject({ code: "turn_in_progress", clientMessageId: "b1" });
+
+    // Let A's turn (and the enemy sweep it triggers) finish appending before
+    // inspecting the log.
+    await waitForRoundSettled(store, sessionId);
+
+    const events = await store.readSince(sessionId, -1);
+    const heroPlayerInputs = events.filter(
+      (event) => event.type === "player_input" && event.payload["actorId"] === "hero",
+    );
+    // Exactly A's own turn — never duplicated, and never B's.
+    expect(heroPlayerInputs).toHaveLength(1);
+    expect(heroPlayerInputs[0]?.payload["clientMessageId"]).toBe("a1");
+    expect(events.some((event) => event.payload["clientMessageId"] === "b1")).toBe(false);
+
+    socketA.close();
+    socketB.close();
+  });
+
+  // General coverage for `turn_in_progress` (finding 8: it was the only
+  // `ServerErrorCode` with zero tests) on the simpler, same-socket path: a
+  // second message on the SAME connection while the first is still
+  // resolving is also rejected, not queued (spec §Concurrency — a queued
+  // stale click would land against a changed board).
+  it("rejects a second command on the SAME socket while the first is still resolving", async () => {
+    const { app, url } = await startServer({ narrative: delayedNarrative(400) });
+    const sessionId = await createSessionOver(app);
+    const socket = await connect(url);
+    await joinAndWaitForAck(socket, sessionId);
+
+    const playerInput = framesUntil(
+      socket,
+      (frame) => frame.type === "event" && frame.event.type === "player_input",
+    );
+    socket.send(
+      JSON.stringify({
+        type: "structured_action",
+        clientMessageId: "first",
+        actorId: "hero",
+        turn: {
+          actorId: "hero",
+          mainAction: { actionType: "dodge" },
+          tacticalRationaleEnglish: "Test fixture: first command.",
+        },
+      }),
+    );
+    await playerInput;
+
+    const rejection = framesUntil(socket, (frame) => frame.type === "error");
+    socket.send(
+      JSON.stringify({
+        type: "structured_action",
+        clientMessageId: "second",
+        actorId: "hero",
+        turn: {
+          actorId: "hero",
+          mainAction: { actionType: "dodge" },
+          tacticalRationaleEnglish: "Test fixture: second command, same socket.",
+        },
+      }),
+    );
+    // `.at(-1)`, not `[0]`: this socket already has frames from the FIRST
+    // command's own pipeline in flight (action_validated/dice_rolled/
+    // state_delta_applied all fire synchronously, before narrate()'s
+    // deliberate delay), so this listener — registered after `player_input`
+    // — can catch one of those as its first frame. `framesUntil` only
+    // resolves once `stop` matches, so the frame that satisfied it is
+    // always the last one pushed.
+    const frames = await rejection;
+    expect(frames.at(-1)).toMatchObject({
+      code: "turn_in_progress",
+      clientMessageId: "second",
+    });
+
+    socket.close();
   });
 });
