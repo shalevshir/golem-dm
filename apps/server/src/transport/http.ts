@@ -26,7 +26,12 @@ export interface SessionRegistryInput {
 /**
  * Live sessions, keyed by id. In-process only, matching the in-memory event
  * store: both go away on restart, and both are replaced together by the
- * persistence spec.
+ * persistence spec. There is no eviction: every session created in a run
+ * stays pinned here for the run's lifetime, each entry holding a full
+ * `BuiltEncounter` plus a `SessionState` whose `appliedClientMessageIds`
+ * itself grows without bound (C-30). Unbounded growth within a run, not just
+ * across a restart — deliberately left to the persistence spec, not fixed
+ * here.
  */
 export function createSessionRegistry(input: SessionRegistryInput): SessionRegistry {
   const live = new Map<string, Session>();
@@ -64,11 +69,17 @@ export function registerHttpRoutes(app: FastifyInstance, registry: SessionRegist
 
   app.post("/sessions", async (request, reply) => {
     const body = CreateSessionBody.safeParse(request.body);
-    if (!body.success) return reply.code(400).send({ error: "encounterId is required" });
+    if (!body.success) {
+      return reply.code(400).send({ error: "encounterId must be a non-empty string" });
+    }
 
+    // Scoped tightly around the one call that can throw `UnknownEncounterError`
+    // — not around the response send too, so a failure while writing the
+    // reply (e.g. the connection dropping mid-send) cannot be mistaken for an
+    // encounter-lookup failure and re-enter this `catch`.
+    let session: Session;
     try {
-      const session = await registry.create(body.data.encounterId);
-      return await reply.code(201).send({ sessionId: session.state.sessionId });
+      session = await registry.create(body.data.encounterId);
     } catch (error) {
       // `buildEncounterById` throws `UnknownEncounterError` for an id the
       // catalogue does not know — that is the only case that is a 404.
@@ -81,5 +92,6 @@ export function registerHttpRoutes(app: FastifyInstance, registry: SessionRegist
       }
       throw error;
     }
+    return reply.code(201).send({ sessionId: session.state.sessionId });
   });
 }

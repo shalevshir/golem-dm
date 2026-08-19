@@ -1,7 +1,8 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import Fastify from "fastify";
 import { createInMemoryEventStore } from "../core/event-store.js";
 import { createSessionRegistry, registerHttpRoutes } from "./http.js";
+import type { SessionRegistry } from "./http.js";
 
 function appWith() {
   const store = createInMemoryEventStore();
@@ -57,6 +58,51 @@ describe("POST /sessions", () => {
     });
     const { sessionId } = JSON.parse(response.body) as { sessionId: string };
     expect(await registry.get(sessionId)).not.toBeNull();
+  });
+
+  it("responds 500 for any error other than UnknownEncounterError, even one whose " +
+    "message starts with the same words", async () => {
+    // Guards the C-34 fix itself: a handler that detected the 404 case with
+    // `message.startsWith("Unknown encounter")` instead of `instanceof
+    // UnknownEncounterError` would misroute this to 404. The message is
+    // deliberately chosen to collide with that regex.
+    const app = Fastify();
+    const registry: SessionRegistry = {
+      create: () => Promise.reject(new Error("Unknown encounter that is really a bug")),
+      get: () => Promise.resolve(null),
+    };
+    registerHttpRoutes(app, registry);
+    const response = await app.inject({
+      method: "POST",
+      url: "/sessions",
+      payload: { encounterId: "goblin-ambush" },
+    });
+    expect(response.statusCode).toBe(500);
+  });
+});
+
+describe("SessionRegistry", () => {
+  // The `live` cache is what lets two WS connections onto the same session
+  // (Task 14) share one mutable `Session` object rather than each folding its
+  // own copy — `nextSequence` lives on that object and the pipeline advances
+  // it in place. `registry.get` returning a *non-null* session proves nothing
+  // about that: `loadSession` also returns a (different, freshly-folded)
+  // non-null `Session` by reading the log straight through. Only object
+  // identity distinguishes "served from cache" from "silently re-derived
+  // every time".
+  it("caches the created session, so a later get returns the identical object", async () => {
+    const { registry } = appWith();
+    const created = await registry.create("goblin-ambush");
+    const fetched = await registry.get(created.state.sessionId);
+    expect(fetched).toBe(created);
+  });
+
+  it("does not re-read the event log on a cache hit", async () => {
+    const { registry, store } = appWith();
+    const created = await registry.create("goblin-ambush");
+    const readSince = vi.spyOn(store, "readSince");
+    await registry.get(created.state.sessionId);
+    expect(readSince).not.toHaveBeenCalled();
   });
 });
 
