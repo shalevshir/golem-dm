@@ -62,6 +62,12 @@ Every task's requirements implicitly include this section.
 - **ESLint `strictTypeChecked` gotchas:** `[...str]` is banned
   (`no-misused-spread`) — use `Array.from(str, fn)`. No `argsIgnorePattern` is
   configured, so `_`-prefixed unused params still error.
+- **`JSX.Element` needs an explicit type import.** `jsx: "react-jsx"` means no
+  automatic `React` binding, and `verbatimModuleSyntax` forbids a value import
+  used only as a type. Every `.tsx` file that annotates a return type writes
+  `import type { JSX } from "react";` and then `JSX.Element`. React 19's types
+  export that namespace (`@types/react@19`). Never write `React.JSX.Element`
+  without importing `React` — it will not resolve.
 - **ESM only.** Relative imports carry a `.js` extension even from `.ts`
   sources. `apps/web` uses `"moduleResolution": "bundler"`, so `.js` extensions
   are still written for consistency with the rest of the repo and Vite resolves
@@ -316,8 +322,8 @@ import type { ClientMessage, GameEvent, ServerFrame } from "@ai-dm/schemas";
 pnpm typecheck && pnpm test
 ```
 
-Expected: typecheck clean. Counts shift **schemas 60 → 74** (it gains
-`reduce.test.ts`'s 14 cases) and **server 107 → 93** (it loses them);
+Expected: typecheck clean. Counts shift **schemas 60 → 75** (it gains
+`reduce.test.ts`'s 15 cases) and **server 107 → 92** (it loses them);
 rules-engine **319 → 320**; agents 176 and sim 129 unchanged. Total **792**.
 Report the real numbers you observe — if schemas' gain does not equal server's
 loss, something was dropped.
@@ -510,7 +516,7 @@ variant and before `rejected`, add:
 pnpm --filter @ai-dm/schemas test
 ```
 
-Expected: PASS. schemas goes **74 → 79**.
+Expected: PASS. schemas goes **75 → 80**.
 
 - [ ] **Step 6: Typecheck, lint, commit**
 
@@ -682,7 +688,15 @@ describe("affordancesFor", () => {
     const actor = combatant({ combatantId: "goblin-a", position: [1, 1] });
     const world = openWorld([actor], 5);
     // A full-height wall on column 2 seals the actor into columns 0-1.
-    for (let y = 0; y < 5; y += 1) world.grid.tiles[y]![2] = "wall";
+    // `TerrainType` is ["normal", "difficult", "blocking", "half_cover",
+    // "three_quarters_cover"] — "blocking" is the impassable one; there is no
+    // "wall" member.
+    for (let y = 0; y < 5; y += 1) {
+      const row = world.grid.tiles[y];
+      // `noUncheckedIndexedAccess` makes this `T | undefined`; a non-null
+      // assertion would fail `@typescript-eslint/no-non-null-assertion`.
+      if (row !== undefined) row[2] = "blocking";
+    }
 
     const result = affordancesFor(world, "goblin-a", goblinStatBlock);
     expect(result.reachableTiles.every(([x]) => x < 2)).toBe(true);
@@ -1193,7 +1207,7 @@ yielded when the fight ended during the sweep, because the hero is then not
 pnpm --filter @ai-dm/server test
 ```
 
-Expected: PASS, **93 → 98** (5 new cases). The existing 93 must all still pass —
+Expected: PASS, **92 → 97** (5 new cases). The existing 92 must all still pass —
 `turn_affordances` is appended after existing frames, so any test asserting an
 exact frame *sequence* for a join or a completed turn will need its expected
 list extended by one trailing frame. That is a legitimate update; a test whose
@@ -1391,7 +1405,7 @@ Add `encounterCatalogue` to the existing `../encounters/index.js` import at
 pnpm --filter @ai-dm/server test
 ```
 
-Expected: PASS, **98 → 101**.
+Expected: PASS, **97 → 100**.
 
 - [ ] **Step 6: Typecheck, lint, commit**
 
@@ -1620,7 +1634,7 @@ Create `apps/web/src/App.tsx` as a placeholder this plan fills in at Task 12:
 ```tsx
 import { he } from "./i18n.js";
 
-export function App(): React.JSX.Element {
+export function App(): JSX.Element {
   return <main>{he.app.title}</main>;
 }
 ```
@@ -2819,14 +2833,18 @@ export interface GridProps {
   onCombatantClick: (combatantId: string) => void;
 }
 
-const TERRAIN_FILL: Record<string, string> = {
+/** Keyed by `TerrainType`'s five members — there is no "wall" or "water". */
+const TERRAIN_FILL: Record<string, string | undefined> = {
   normal: "#f4efe6",
   difficult: "#d9cbb2",
-  wall: "#4a4038",
-  water: "#a8c8d8",
+  blocking: "#4a4038",
+  half_cover: "#c9b79a",
+  three_quarters_cover: "#a89474",
 };
 
-export function Grid(props: GridProps): React.JSX.Element {
+const DEFAULT_FILL = "#f4efe6";
+
+export function Grid(props: GridProps): JSX.Element {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const { snapshot, affordances, selectedTile } = props;
 
@@ -2842,7 +2860,7 @@ export function Grid(props: GridProps): React.JSX.Element {
     for (let y = 0; y < snapshot.grid.height; y += 1) {
       for (let x = 0; x < snapshot.grid.width; x += 1) {
         const terrain = snapshot.grid.tiles[y]?.[x] ?? "normal";
-        context.fillStyle = TERRAIN_FILL[terrain] ?? TERRAIN_FILL.normal!;
+        context.fillStyle = TERRAIN_FILL[terrain] ?? DEFAULT_FILL;
         context.fillRect(x * TILE_PX, y * TILE_PX, TILE_PX, TILE_PX);
         context.strokeStyle = "#cbbfae";
         context.strokeRect(x * TILE_PX, y * TILE_PX, TILE_PX, TILE_PX);
@@ -3206,7 +3224,7 @@ export interface NarrativePaneProps {
   text: string;
 }
 
-export function NarrativePane(props: NarrativePaneProps): React.JSX.Element {
+export function NarrativePane(props: NarrativePaneProps): JSX.Element {
   const parts = props.text.split(DICE);
 
   return (
@@ -3249,7 +3267,7 @@ export interface ErrorBannerProps {
   onDismiss: () => void;
 }
 
-export function ErrorBanner(props: ErrorBannerProps): React.JSX.Element | null {
+export function ErrorBanner(props: ErrorBannerProps): JSX.Element | null {
   const error = props.error !== null && !SILENT_CODES.has(props.error.code) ? props.error : null;
   const reasons = props.rejection?.reasons ?? [];
   if (error === null && reasons.length === 0) return null;
@@ -3293,10 +3311,10 @@ const UNIVERSAL_LABELS: Record<string, string | undefined> = {
   disengage: he.actions.disengage,
 };
 
-export function ActionBar(props: ActionBarProps): React.JSX.Element {
+export function ActionBar(props: ActionBarProps): JSX.Element {
   const [pending, setPending] = useState<ActionAffordance | null>(null);
 
-  function labelFor(action: ActionAffordance): React.JSX.Element {
+  function labelFor(action: ActionAffordance): JSX.Element {
     const universal = UNIVERSAL_LABELS[action.actionType];
     if (action.actionId === undefined && universal !== undefined) return <span>{universal}</span>;
 
@@ -3647,7 +3665,7 @@ export interface AppProps {
   wsUrl?: string;
 }
 
-export function App(props: AppProps): React.JSX.Element {
+export function App(props: AppProps): JSX.Element {
   const [state, setState] = useState<ClientState>(initialClientState);
   const [catalogue, setCatalogue] = useState<EncounterCatalogue | null>(null);
   const [status, setStatus] = useState<ConnectionStatus>("connecting");
@@ -3889,8 +3907,8 @@ pnpm typecheck && pnpm test
 npx eslint apps/server apps/web packages tools
 ```
 
-Expected: typecheck clean, lint exit 0, and the suite at **schemas 79,
-rules-engine 331, agents 176, server 101, sim 129, web 44 = 860**. Report the
+Expected: typecheck clean, lint exit 0, and the suite at **schemas 80,
+rules-engine 331, agents 176, server 100, sim 129, web 44 = 860**. Report the
 real numbers.
 
 - [ ] **Step 7: Commit**
@@ -3978,10 +3996,10 @@ Expected final counts, from a **791** baseline:
 
 | Package | Before | After |
 |---|---|---|
-| `@ai-dm/schemas` | 60 | 79 |
+| `@ai-dm/schemas` | 60 | 80 |
 | `@ai-dm/rules-engine` | 319 | 331 |
 | `@ai-dm/agents` | 176 | 176 |
-| `@ai-dm/server` | 107 | 101 |
+| `@ai-dm/server` | 107 | 100 |
 | `@ai-dm/sim` | 129 | 129 |
 | `@ai-dm/web` | 0 | 44 |
 | **Total** | **791** | **860** |
