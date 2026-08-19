@@ -44,7 +44,8 @@ import {
   createTacticalAgent,
   DEFAULT_MODEL_ROUTING,
 } from "@ai-dm/agents";
-import type { GameEvent, ServerFrame, SessionState } from "@ai-dm/schemas";
+import { ServerFrame } from "@ai-dm/schemas";
+import type { GameEvent, SessionState } from "@ai-dm/schemas";
 import { buildApp } from "./app.js";
 import { createInMemoryEventStore } from "./core/event-store.js";
 import type { EventStore } from "./core/event-store.js";
@@ -193,7 +194,9 @@ class FrameLog {
 
   constructor(socket: WebSocket) {
     socket.on("message", (data: Buffer | string) => {
-      const frame = JSON.parse(String(data)) as ServerFrame;
+      // Important 3: parsed against the real schema, not cast — see
+      // `ws.test.ts`'s identical fix for the full rationale.
+      const frame = ServerFrame.parse(JSON.parse(String(data)));
       this.frames.push(frame);
       for (const waiter of [...this.waiters]) {
         if (waiter.predicate(this.frames)) waiter.settle();
@@ -280,7 +283,8 @@ async function waitForProjection(
   const deadline = Date.now() + WAIT_TIMEOUT_MS;
   for (;;) {
     const session = await loadSession({ sessionId, store });
-    if (session === null) throw new Error(`Session ${sessionId} disappeared while waiting for ${label}.`);
+    if (session === null)
+      throw new Error(`Session ${sessionId} disappeared while waiting for ${label}.`);
     if (predicate(session)) return session;
     if (Date.now() > deadline) {
       const combatants = session.state.combatants
@@ -372,7 +376,8 @@ describe("end to end", () => {
         (candidate) => {
           if (candidate.nextSequence <= beforeSequence) return false;
           const alive = livingFactions(candidate.state);
-          const backToHero = candidate.state.turnOrder[candidate.state.currentActorIndex] === "hero";
+          const backToHero =
+            candidate.state.turnOrder[candidate.state.currentActorIndex] === "hero";
           return alive.size < 2 || backToHero;
         },
         `hero command ${String(turn)} to resolve`,
@@ -465,7 +470,8 @@ describe("end to end", () => {
     const clientState: SessionState = ack.snapshot;
 
     const beforeRound = await loadSession({ sessionId, store });
-    if (beforeRound === null) throw new Error(`Session ${sessionId} not found right after creation`);
+    if (beforeRound === null)
+      throw new Error(`Session ${sessionId} not found right after creation`);
     const beforeSequence = beforeRound.nextSequence;
     send(firstSocket, heroDodge("t1"));
 
@@ -527,10 +533,13 @@ describe("end to end", () => {
     // frame: its highest event sequence must reach the exact point the
     // round actually ended at, which is strictly past `cut` by construction
     // (the enemy sweep alone is several events).
-    await secondLog.waitFor((frames) => {
-      const sequences = eventFrames(frames).map((event) => event.sequence);
-      return sequences.length > 0 && Math.max(...sequences) >= roundEndSequence;
-    }, `the second socket to catch up to sequence ${String(roundEndSequence)}`);
+    await secondLog.waitFor(
+      (frames) => {
+        const sequences = eventFrames(frames).map((event) => event.sequence);
+        return sequences.length > 0 && Math.max(...sequences) >= roundEndSequence;
+      },
+      `the second socket to catch up to sequence ${String(roundEndSequence)}`,
+    );
 
     // No snapshot exists yet (SNAPSHOT_EVERY is 50; one round is nowhere
     // close), so `join`'s snapshot-fallback branch (C-16) does not fire —
