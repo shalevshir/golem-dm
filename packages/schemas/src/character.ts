@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { CreatureSize } from "./primitives.js";
 
 /** The 15 core 5e conditions. Extend only via ADR. */
 export const Condition = z.enum([
@@ -60,12 +61,18 @@ export const CharacterSheet = z.object({
   nameHebrew: z.string(),
   /** Required for grammatically correct Hebrew narration. */
   grammaticalGender: z.enum(["masculine", "feminine"]),
+  /**
+   * No species field exists and this schema does not add one, so a default
+   * beats inventing a species system for a single value. Read by
+   * `characterStatBlock` — the engine needs a size for every combatant.
+   */
+  size: CreatureSize.default("medium"),
   class: CharacterClass,
   level: z.number().int().min(1).max(20),
   proficiencyBonus: z.number().int().min(2).max(6),
   abilities: Abilities,
   savingThrowProficiencies: z.array(AbilityKey),
-  skillProficiencies: z.array(z.string()),
+  skillProficiencies: z.array(Skill),
   combat: z.object({
     maxHp: z.number().int().min(1),
     currentHp: z.number().int().min(0),
@@ -77,7 +84,18 @@ export const CharacterSheet = z.object({
     spellSlots: SpellSlots,
   }),
   conditions: z.array(ActiveCondition),
-  inventory: z.array(z.object({ itemId: z.string(), quantity: z.number().int().min(1) })),
+  inventory: z.array(
+    z.object({
+      itemId: z.string(),
+      quantity: z.number().int().min(1),
+      /**
+       * Worn or wielded, as opposed to carried. `deriveCharacter` reads this
+       * to decide which armor sets AC and which weapons become actions; a
+       * character page reads it to separate equipped from carried.
+       */
+      equipped: z.boolean().default(false),
+    }),
+  ),
 });
 
 export type CharacterSheet = z.infer<typeof CharacterSheet>;

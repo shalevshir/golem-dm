@@ -148,7 +148,7 @@ describe("SRD skills", () => {
     expect(ids).toEqual([...Skill.options].sort());
   });
 
-  it("rejects a skill proficiency that is not a real skill", () => {
+  it("rejects a value that is not a real skill", () => {
     expect(() => Skill.parse("banana")).toThrow();
   });
 });

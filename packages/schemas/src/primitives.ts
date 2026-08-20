@@ -5,7 +5,9 @@
 // ESM import cycle. zod dereferences these bindings eagerly at module init
 // (`z.object({ damageType: DamageType })` reads `DamageType` immediately,
 // not lazily), so such a cycle throws `ReferenceError` on import, not just
-// on parse.
+// on parse. `CreatureSize` lives here for the same reason: `character.ts`
+// and `world.ts` import each other, so a size type either one could own
+// must instead live in a file neither depends on.
 import { z } from "zod";
 
 export const DamageType = z.enum([
@@ -29,4 +31,11 @@ export const DiceNotation = z
   .string()
   .regex(/^\d+d\d+([+-]\d+)?$/, "expected dice notation such as 1d6+2");
 
+/**
+ * SRD 5.2.1 Creature Size and Space. Order matters — the rule for moving
+ * through another creature's space is stated in size categories apart.
+ */
+export const CreatureSize = z.enum(["tiny", "small", "medium", "large", "huge", "gargantuan"]);
+
 export type DamageType = z.infer<typeof DamageType>;
+export type CreatureSize = z.infer<typeof CreatureSize>;

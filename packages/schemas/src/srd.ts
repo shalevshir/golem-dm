@@ -3,8 +3,7 @@
 import { z } from "zod";
 import { Abilities, AbilityKey, CharacterClass, Condition, Skill } from "./character.js";
 import { ArmorCategory, WeaponProperty } from "./gear.js";
-import { DamageType, DiceNotation } from "./primitives.js";
-import { CreatureSize } from "./world.js";
+import { CreatureSize, DamageType, DiceNotation } from "./primitives.js";
 
 export const DamageRoll = z.object({
   /** Absent for flat damage, such as the cultist's "plus 1 Necrotic damage". */
