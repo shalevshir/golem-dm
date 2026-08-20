@@ -1,7 +1,7 @@
 // Shapes for the SRD 5.2.1 game data in `data/srd/`. Content licensed
 // CC-BY-4.0; see NOTICE.md for the required attribution.
 import { z } from "zod";
-import { Abilities, AbilityKey, CharacterClass, Condition } from "./character.js";
+import { Abilities, AbilityKey, CharacterClass, Condition, Skill } from "./character.js";
 import { CreatureSize } from "./world.js";
 
 export const DamageType = z.enum([
@@ -94,9 +94,17 @@ export const ClassDefinition = z.object({
   extraAttackLevel: z.number().int().min(1).max(20).optional(),
 });
 
+/** Which ability governs a skill check. Data, because the SRD says so. */
+export const SkillDefinition = z.object({
+  skill: Skill,
+  nameEnglish: z.string(),
+  ability: AbilityKey,
+});
+
 export type DamageType = z.infer<typeof DamageType>;
 export type DamageRoll = z.infer<typeof DamageRoll>;
 export type MonsterAttack = z.infer<typeof MonsterAttack>;
 export type MonsterStatBlock = z.infer<typeof MonsterStatBlock>;
 export type ConditionDefinition = z.infer<typeof ConditionDefinition>;
 export type ClassDefinition = z.infer<typeof ClassDefinition>;
+export type SkillDefinition = z.infer<typeof SkillDefinition>;

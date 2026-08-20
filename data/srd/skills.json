@@ -1,0 +1,20 @@
+[
+  { "skill": "acrobatics", "nameEnglish": "Acrobatics", "ability": "dex" },
+  { "skill": "animal_handling", "nameEnglish": "Animal Handling", "ability": "wis" },
+  { "skill": "arcana", "nameEnglish": "Arcana", "ability": "int" },
+  { "skill": "athletics", "nameEnglish": "Athletics", "ability": "str" },
+  { "skill": "deception", "nameEnglish": "Deception", "ability": "cha" },
+  { "skill": "history", "nameEnglish": "History", "ability": "int" },
+  { "skill": "insight", "nameEnglish": "Insight", "ability": "wis" },
+  { "skill": "intimidation", "nameEnglish": "Intimidation", "ability": "cha" },
+  { "skill": "investigation", "nameEnglish": "Investigation", "ability": "int" },
+  { "skill": "medicine", "nameEnglish": "Medicine", "ability": "wis" },
+  { "skill": "nature", "nameEnglish": "Nature", "ability": "int" },
+  { "skill": "perception", "nameEnglish": "Perception", "ability": "wis" },
+  { "skill": "performance", "nameEnglish": "Performance", "ability": "cha" },
+  { "skill": "persuasion", "nameEnglish": "Persuasion", "ability": "cha" },
+  { "skill": "religion", "nameEnglish": "Religion", "ability": "int" },
+  { "skill": "sleight_of_hand", "nameEnglish": "Sleight of Hand", "ability": "dex" },
+  { "skill": "stealth", "nameEnglish": "Stealth", "ability": "dex" },
+  { "skill": "survival", "nameEnglish": "Survival", "ability": "wis" }
+]

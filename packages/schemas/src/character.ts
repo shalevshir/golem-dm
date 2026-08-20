@@ -21,6 +21,28 @@ export const SpellSlots = z.record(
 
 export const AbilityKey = z.enum(["str", "dex", "con", "int", "wis", "cha"]);
 
+/** The 18 SRD skills. A bare string here would accept "banana". */
+export const Skill = z.enum([
+  "acrobatics",
+  "animal_handling",
+  "arcana",
+  "athletics",
+  "deception",
+  "history",
+  "insight",
+  "intimidation",
+  "investigation",
+  "medicine",
+  "nature",
+  "perception",
+  "performance",
+  "persuasion",
+  "religion",
+  "sleight_of_hand",
+  "stealth",
+  "survival",
+]);
+
 /** POC scope — widening this is a reviewed change (see the schemas CLAUDE.md). */
 export const CharacterClass = z.enum(["fighter", "wizard", "rogue", "cleric"]);
 
@@ -63,5 +85,6 @@ export type ActiveCondition = z.infer<typeof ActiveCondition>;
 export type SpellSlots = z.infer<typeof SpellSlots>;
 export type Condition = z.infer<typeof Condition>;
 export type AbilityKey = z.infer<typeof AbilityKey>;
+export type Skill = z.infer<typeof Skill>;
 export type CharacterClass = z.infer<typeof CharacterClass>;
 export type Abilities = z.infer<typeof Abilities>;

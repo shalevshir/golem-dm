@@ -4,7 +4,14 @@ import { readFileSync, readdirSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { ClassDefinition, ConditionDefinition, Condition, MonsterStatBlock } from "./index.js";
+import {
+  ClassDefinition,
+  ConditionDefinition,
+  Condition,
+  MonsterStatBlock,
+  Skill,
+  SkillDefinition,
+} from "./index.js";
 
 const SRD_DIR = join(dirname(fileURLToPath(import.meta.url)), "../../../data/srd");
 const MONSTER_DIR = join(SRD_DIR, "monsters");
@@ -93,5 +100,28 @@ describe("SRD classes", () => {
       rogue: undefined,
       cleric: "wis",
     });
+  });
+});
+
+describe("SRD skills", () => {
+  it("maps all 18 skills to a governing ability", () => {
+    const parsed = SkillDefinition.array().parse(readJson(join(SRD_DIR, "skills.json")));
+    expect(parsed).toHaveLength(18);
+    const byId = new Map(parsed.map((each) => [each.skill, each.ability]));
+    expect(byId.get("athletics")).toBe("str");
+    expect(byId.get("stealth")).toBe("dex");
+    expect(byId.get("arcana")).toBe("int");
+    expect(byId.get("perception")).toBe("wis");
+    expect(byId.get("persuasion")).toBe("cha");
+  });
+
+  it("lists every Skill enum member exactly once", () => {
+    const parsed = SkillDefinition.array().parse(readJson(join(SRD_DIR, "skills.json")));
+    const ids = parsed.map((each) => each.skill).sort();
+    expect(ids).toEqual([...Skill.options].sort());
+  });
+
+  it("rejects a skill proficiency that is not a real skill", () => {
+    expect(() => Skill.parse("banana")).toThrow();
   });
 });
