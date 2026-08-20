@@ -74,7 +74,7 @@ Status: POC phase · Supersedes `dm-plan.md` (see `dm-plan-review.md` for the fa
 | 5 | **SRD data:** ~10 monsters, conditions, 4 classes as validated JSON | Loads + validates | 2 | ✅ done |
 | 6 | **Provider adapter:** Vercel AI SDK wrapper, `ModelRouting` config | Mocked-provider tests pass | 3 | ✅ done |
 | 7 | **Tactical agent + sim:** validate→retry→fallback loop; benchmark Flash vs nano/mini | Legality ≥95% after retry on fixture scenarios; model chosen from data | 3–4 | ✅ done |
-| 8 | **Server + web:** Fastify+WS, event log, replay-on-reconnect, clickable canvas grid | Full combat playable E2E vs scripted enemy | 4–5 | 🟡 server done, web pending |
+| 8 | **Server + web:** Fastify+WS, event log, replay-on-reconnect, clickable canvas grid | Full combat playable E2E vs scripted enemy | 4–5 | ✅ done |
 | 9 | **Narrative agent:** Sonnet 5 streaming, Hebrew glossary, gendered narration, cache-stable prefix | First token <1.5s p50; Hebrew reviewed by native speaker | 5–6 | ⬜ not started |
 | 10 | **Memory:** pgvector episodic store, scene summarization, quest DAG | Replay test + top-k retrieval test pass | 6 | ⬜ not started |
 | 11 | **Closed beta:** 5–10 Hebrew-speaking playtesters; per-turn token/latency/cost dashboards | Measured cost table replaces §3 estimates; go/no-go review | 7–8 | ⬜ not started |
@@ -409,3 +409,76 @@ rediscovering:
 
 Deferred, as §4.2 already said: Postgres persistence, the intent agent, and
 the web client (spec #2).
+
+### 4.4 Step 8 web client — execution notes (2026-08-20)
+
+Spec #2 (§4.2) is built: 13 tasks, and the suite went **791 → 889** passing
+(`@ai-dm/schemas` 60→85, `@ai-dm/rules-engine` 319→332, `@ai-dm/agents` 176,
+`apps/server` 107→100, `apps/web` 0→67, `tools/sim` 129). `apps/server`
+*drops* by 7 on purpose, not by regression: `reduce`'s 15 test cases moved
+with it into `@ai-dm/schemas` (§4.2's package move), and 8 were added back
+for the server's own coverage of the import. `pnpm typecheck` is clean and
+`npx eslint apps/server apps/web packages tools` exits 0.
+
+The exit criterion was met and verified live in a browser, not only by the
+suite: the RTL Hebrew client creates a session, fetches the catalogue,
+joins over WS, renders server-computed affordances, commits a structured
+action, survives a hard refresh mid-fight with state intact, and plays
+`goblin-ambush` through to the C-31 defeat — detected from the projection,
+since no terminal frame is ever emitted (C-37), and rendered as a normal
+ending rather than an error.
+
+Design points worth keeping:
+
+- **`reduce` now lives in `@ai-dm/schemas`**, so client and server run
+  **one** fold rather than two that must agree. `startTurn()` is redefined
+  as `ActionEconomy.parse({})`, which removes the engine dependency that
+  previously blocked the move.
+- **Affordances are derived by enumerating candidates and running the
+  real `validateExecuteTurn`**, never a parallel legality implementation. A
+  reviewer confirmed this by replacing the server's tile list with a
+  locally computed radius and watching the guard test go red.
+- **`affordancesFor` must take a `MonsterStatBlock` as a parameter**:
+  `CombatWorld` carries `actionRangesFeet` keyed by `actionId` but no list
+  of the actions an actor has, and `AvailableAction` lives in
+  `@ai-dm/agents`, which the engine may not import.
+- **`conclusionOf`'s predicate is byte-for-byte the server's own stop
+  condition**, so client and server agree by construction about when the
+  fight is over.
+
+Costs and gotchas the next engineer should know:
+
+- Affordance computation runs ~143 A* probes per player turn on a 12×12
+  grid. Irrelevant beside a real model call — but **not** beside a mocked
+  one. It leaked into a wall-clock timing test's measured window and was
+  misdiagnosed as CPU-contention flakiness across three tasks before anyone
+  disabled the yield and measured. Lesson: "passes when run alone" is
+  evidence about contention, not causation.
+- `@testing-library/react` gates its auto-cleanup behind
+  `typeof afterEach === 'function'`, so under `globals: false` it never
+  registers and DOM leaks between tests. `apps/web/src/test-setup.ts`
+  registers `afterEach(cleanup)` explicitly.
+- `<StrictMode>` double-invokes effects on **initial mount only**. A shared
+  cancellation ref across effect runs is therefore unsafe — the second run
+  resets it before the first run's pending async work reads it, opening two
+  websockets. Use a monotonic run token.
+- The narrative pane currently renders **English**, because the narrative
+  agent is spec #1's deterministic stand-in; the Hebrew agent arrives in
+  step 9. Today the only Hebrew a player sees is UI chrome.
+- There is still no Hebrew name data anywhere in the repo (the SRD is
+  English per ADR 0001), so combatant and action names render as English
+  inside the RTL UI — which is why every such fragment is wrapped in
+  `<bdi>`.
+
+The process finding, stated plainly, is the most transferable thing the
+slice produced: **seven separate tasks shipped a test whose name promised a
+property its assertion could not detect.** Examples: `toBeUndefined()`
+cannot distinguish an omitted key from an explicitly-`undefined` one; a
+"reconnect" test that never reconnected; a fold-parity test over an empty
+combatant list; a `<bdi>` test covering one of three isolated fragments; a
+`<StrictMode>` test that exercised the post-click path where `<StrictMode>`
+does not double-invoke. Every one passed against the exact defect it was
+written to catch, and none was caught by the suite going red — all came out
+of review. The rule that follows: **when a test exists to protect a
+specific line, delete that line and watch the test fail.** The sabotage
+check, not the green run, is the evidence.

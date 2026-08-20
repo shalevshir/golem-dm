@@ -201,7 +201,7 @@ export function App(props: AppProps): JSX.Element {
     // `ErrorBanner` renders here too: an `error` frame that is not
     // `unknown_session` (`internal_error`, `malformed_message`) can arrive
     // on join, before any `session_state` — without this, the player would
-    // be stuck reading "מתחבר…" forever with no explanation.
+    // be stuck reading the "connecting…" status forever with no explanation.
     return (
       <main>
         <h1>{he.app.title}</h1>
