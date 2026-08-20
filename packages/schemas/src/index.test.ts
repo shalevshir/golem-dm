@@ -3,8 +3,14 @@ import { ZodError } from "zod";
 import { zodToJsonSchema } from "zod-to-json-schema";
 import {
   ActionRejectedPayload,
+  ActionValidatedPayload,
+  AttackOutcome,
+  AttackRollTrace,
+  AttackTrace,
   CharacterSheet,
   Combatant,
+  DamageRollTrace,
+  DiceRolledPayload,
   ExecuteTurn,
   GameEvent,
   GridMap,
@@ -270,5 +276,125 @@ describe("ActionRejectedPayload", () => {
 
     if (result.success) throw new Error("expected the parse to fail");
     expect(result.error.issues[0]?.path).toStrictEqual(["attempt"]);
+  });
+});
+
+describe("AttackTrace", () => {
+  it("parses a hit with a single damage roll", () => {
+    const trace = AttackTrace.parse({
+      attackerId: "goblin-a",
+      targetId: "hero",
+      actionId: "scimitar",
+      outcome: "hit",
+      damage: 6,
+      targetStatusAfter: "alive",
+      attackRoll: { naturalRoll: 18, rolls: [18], total: 22, targetArmorClass: 16 },
+      damageRolls: [{ kind: "dice", notation: "1d6+2", rolls: [4], modifier: 2, total: 6 }],
+    });
+
+    expect(trace.outcome).toBe("hit");
+    expect(trace.damageRolls).toHaveLength(1);
+  });
+
+  it("parses a miss with an empty damageRolls array", () => {
+    const trace = AttackTrace.parse({
+      attackerId: "goblin-a",
+      targetId: "hero",
+      actionId: "scimitar",
+      outcome: "miss",
+      damage: 0,
+      targetStatusAfter: "alive",
+      attackRoll: { naturalRoll: 3, rolls: [3], total: 7, targetArmorClass: 16 },
+      damageRolls: [],
+    });
+
+    expect(trace.damageRolls).toEqual([]);
+  });
+
+  it("parses flat (non-dice) damage", () => {
+    const trace = AttackTrace.parse({
+      attackerId: "cultist",
+      targetId: "hero",
+      actionId: "dagger",
+      outcome: "hit",
+      damage: 1,
+      targetStatusAfter: "alive",
+      attackRoll: { naturalRoll: 15, rolls: [15], total: 18, targetArmorClass: 12 },
+      damageRolls: [{ kind: "flat", total: 1 }],
+    });
+
+    expect(trace.damageRolls).toEqual([{ kind: "flat", total: 1 }]);
+  });
+
+  it("rejects an outcome outside the closed AttackOutcome enum", () => {
+    const result = AttackTrace.safeParse({
+      attackerId: "goblin-a",
+      targetId: "hero",
+      actionId: "scimitar",
+      outcome: "grazed", // not a real AttackOutcome
+      damage: 0,
+      targetStatusAfter: "alive",
+      attackRoll: { naturalRoll: 3, rolls: [3], total: 7, targetArmorClass: 16 },
+      damageRolls: [],
+    });
+
+    if (result.success) throw new Error("expected the parse to fail");
+    expect(result.error.issues[0]?.path).toStrictEqual(["outcome"]);
+  });
+});
+
+describe("DiceRolledPayload", () => {
+  it("parses a turn with one attack and movement", () => {
+    const payload = DiceRolledPayload.parse({
+      actorId: "goblin-a",
+      movedFeet: 10,
+      attacks: [
+        {
+          attackerId: "goblin-a",
+          targetId: "hero",
+          actionId: "scimitar",
+          outcome: "critical_hit",
+          damage: 10,
+          targetStatusAfter: "alive",
+          attackRoll: { naturalRoll: 20, rolls: [20], total: 24, targetArmorClass: 16 },
+          damageRolls: [{ kind: "dice", notation: "1d6+2", rolls: [4, 4], modifier: 2, total: 10 }],
+        },
+      ],
+    });
+
+    expect(payload.movedFeet).toBe(10);
+    expect(payload.attacks[0]?.outcome).toBe("critical_hit");
+  });
+
+  it("parses a turn with no attacks, movement only", () => {
+    const payload = DiceRolledPayload.parse({ actorId: "hero", movedFeet: 15, attacks: [] });
+    expect(payload.attacks).toEqual([]);
+  });
+
+  it("rejects a payload missing movedFeet, the pre-migration shape", () => {
+    // A `dice_rolled` event persisted before this feature shipped has no
+    // `movedFeet` field at all. The web client must treat this as a parse
+    // failure (see store.ts's defensive handling in Task 5), not a crash —
+    // this test only pins that the schema itself is strict about it.
+    const result = DiceRolledPayload.safeParse({ actorId: "hero", attacks: [] });
+    if (result.success) throw new Error("expected the parse to fail");
+    expect(result.error.issues[0]?.path).toStrictEqual(["movedFeet"]);
+  });
+});
+
+describe("ActionValidatedPayload", () => {
+  it("parses actorId, a full ExecuteTurn, and source", () => {
+    const payload = ActionValidatedPayload.parse({
+      actorId: "hero",
+      turn: {
+        actorId: "hero",
+        mainAction: { actionType: "dodge" },
+        tacticalRationaleEnglish: "Test fixture.",
+      },
+      source: "human",
+    });
+
+    expect(payload.turn.mainAction.actionType).toBe("dodge");
+    expect(payload.source).toBe("human");
   });
 });
