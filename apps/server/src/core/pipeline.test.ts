@@ -980,27 +980,42 @@ describe("handleCommand — turn timeout", () => {
   // apps/server/CLAUDE.md's "hard turn timeout 10s" and the spec's "A 10s
   // hard cap wraps the narrative stream and the tactical call" both read as
   // a single cap. Pinned here without mocking `Date.now()`: a tactical call
-  // that is slow but never aborted (60ms, under an 80ms budget) should
+  // that is slow but never aborted (150ms, under a 200ms budget) should
   // leave the narration that follows almost none of that budget, not a
-  // fresh 80ms window — so three actors' turns finish in about one
+  // fresh 200ms window — so three actors' turns finish in about one
   // budget's worth of wall-clock time, not the ~1.5-2x a pair of
   // independent budgets per enemy turn would take.
+  //
+  // Review round 3: `turnTimeoutMs` and `slowTactical`'s delay were scaled
+  // up 2.5x from the original 80ms/60ms (to 200ms/150ms), and the
+  // threshold with them — not because the pipeline needs a bigger budget,
+  // but because this is a wall-clock assertion and its discrimination is a
+  // RATIO (shared band vs. doubled band), not an absolute gap. At 80ms the
+  // shared band (~240ms) left only ~60ms — about 25% — of headroom below
+  // the 300ms threshold, which a loaded machine or a parallel `pnpm test`
+  // run eats easily: measured failing at 331ms under full-suite contention
+  // while passing 5/5 alone. Scaling the whole experiment up keeps the
+  // *same* ~25% ratio but against a much larger absolute number, so a
+  // fixed contention overhead (a scheduler hiccup of tens of ms) becomes
+  // proportionally small instead of consuming the whole margin. Do not
+  // "optimise" this back down to a smaller budget — that reintroduces the
+  // exact fragility this round exists to remove.
   it("shares one budget between the tactical call and the narration, not two", async () => {
     const store = createInMemoryEventStore();
     const session = await freshSession(store);
     const ports: TurnPorts = {
       ...portsWith(store),
-      tactical: slowTactical(60),
+      tactical: slowTactical(150),
       narrative: hangingNarrative(),
-      turnTimeoutMs: 80,
+      turnTimeoutMs: 200,
     };
 
     // Review round 2: this used to time the whole `drain(...)`, but since
     // Task 4 that drain ends with a `turn_affordances` frame — pure
     // computation (`affordancesFor` probing ~143 candidate tiles through
     // `validateExecuteTurn`) that no deadline governs. Folding that fixed
-    // ~100ms of real work into a 300ms budget-sharing assertion erased the
-    // margin the comment below describes. Consuming the generator by hand
+    // ~100ms of real work into the budget-sharing assertion erased the
+    // margin the comment above describes. Consuming the generator by hand
     // and stamping a timestamp only on frames the turn timeout actually
     // governs — i.e. everything except `turn_affordances` — excludes that
     // trailing computation by construction, so this keeps measuring the
@@ -1014,12 +1029,15 @@ describe("handleCommand — turn timeout", () => {
     }
     const elapsed = lastGovernedFrameAt - start;
 
-    // Shared deadline: hero (~80ms, narration-only) + goblin-a (~80ms: 60ms
-    // tactical + ~20ms remaining narration cap) + goblin-b (~80ms) is
-    // roughly 240ms. Two independent budgets per enemy turn would instead
-    // be hero (~80ms) + goblin-a (60 + 80 = 140ms) + goblin-b (140ms), or
-    // roughly 360ms. 300ms sits between the two with margin on both sides.
-    expect(elapsed).toBeLessThan(300);
+    // Shared deadline: hero (~200ms, narration-only) + goblin-a (~200ms:
+    // 150ms tactical + ~50ms remaining narration cap) + goblin-b (~200ms)
+    // is roughly 600ms. Two independent budgets per enemy turn would
+    // instead be hero (~200ms) + goblin-a (150 + 200 = 350ms) + goblin-b
+    // (350ms), or roughly 900ms. 750ms — roughly 3.75x the budget — sits
+    // midway between the two, the same proportional margin the original
+    // 240/360/300ms figures had, now against numbers large enough that
+    // ordinary scheduler noise cannot erase it.
+    expect(elapsed).toBeLessThan(750);
     expect(session.state.round).toBe(2);
   }, 10_000);
 });
