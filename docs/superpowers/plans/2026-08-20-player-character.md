@@ -21,6 +21,37 @@ zod for schemas and validation, Vitest (`globals: false` — import
 
 **Spec:** [`docs/superpowers/specs/2026-08-20-player-character-design.md`](../specs/2026-08-20-player-character-design.md)
 
+## Prerequisite: rebase after the combat roll log
+
+**Do not start this plan until
+[`2026-08-20-combat-roll-log.md`](2026-08-20-combat-roll-log.md) (spec #3 of
+step 8) has merged.** Both plans were written on `fbfb420` and both edit
+`packages/rules-engine/src/encounter/resolve.ts`. Sequencing was decided
+2026-08-20: the roll log first, because it closes step 8 before step 9 opens
+and is a third the size.
+
+Two edits are then required here before Task 5 runs, and neither is optional:
+
+1. **Task 5, Step 4 — `resolve.ts` imports.** The roll-log plan's Task 2
+   Step 4 rewrites that file's import block, adding `AttackRollTrace`,
+   `DamageRollTrace` and `AttackOutcome` and removing `CoverLevel`. Apply the
+   `MonsterAttack` → `CreatureAttack` and `MonsterStatBlock` →
+   `CreatureStatBlock` rename over **that** list, not the one this plan was
+   written against.
+2. **Task 5 — the roll log's new test fixtures.** Its `resolve.test.ts` adds
+   two hand-authored stat blocks (`flatDamageBlock`, `riderBlock`) whose
+   `actions` entries carry `actionId`, `nameEnglish`, `attackBonus`,
+   `reachFeet`, `damage` and `extraDamage` — but **no `nameHebrew`**, which
+   Task 5 makes required on `CreatureAttack`. Add it to both, or they stop
+   typechecking. This is a real break, not a warning: verify with
+   `pnpm --filter @ai-dm/rules-engine typecheck` immediately after Task 5.
+
+One opportunity, not a requirement: the roll log's `CombatLog` component
+renders creature and action names in English inside `<bdi>`, because no
+Hebrew name data existed when it was written. Task 15 here puts `nameHebrew`
+on every `CatalogueCombatant` and `CatalogueAction`, so a small follow-up can
+switch that component to Hebrew once this plan lands.
+
 ## Global Constraints
 
 - **`corepack enable` before any pnpm command** — pnpm is not on PATH.
