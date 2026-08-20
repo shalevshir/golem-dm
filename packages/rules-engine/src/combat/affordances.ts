@@ -125,12 +125,13 @@ export function affordancesFor(
     // one now (`combatantFromStatBlock`, ../encounter/build.ts's
     // `resolveSpawn`). The reason is correction C-31: `applyTurn`'s
     // `applyDamage` call in `../encounter/resolve.ts` pins `diesAtZeroHp:
-    // true` unconditionally (death saves are not implemented —
-    // RULES_REFERENCE.md §8's gap), so nobody, PC or monster, ever ends up
-    // "unconscious" — everyone who hits 0 HP goes straight to "dead". This
-    // filter becomes load-bearing for the unconscious case only once death
-    // saves land and the pin is lifted, and should be revisited then so the
-    // client still offers attacks against an unconscious PC.
+    // true` unconditionally (death saves are implemented but not driven by
+    // the encounter pipeline — RULES_REFERENCE.md §8's gap), so nobody, PC
+    // or monster, ever ends up "unconscious" — everyone who hits 0 HP goes
+    // straight to "dead". This filter becomes load-bearing for the
+    // unconscious case only once death saves land and the pin is lifted,
+    // and should be revisited then so the client still offers attacks
+    // against an unconscious PC.
     const targetableCombatantIds = world.combatants
       .filter((each) => each.combatantId !== actorId && each.status === "alive")
       .filter((candidate) =>

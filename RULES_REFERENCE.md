@@ -246,10 +246,11 @@ Not yet implemented, roughly in dependency order:
   entry, and no class feature is modelled.
 - **The Lance's conditional property.** RAW is "Two-Handed (unless mounted)";
   mounts are not modelled, so it is recorded as plain Two-Handed.
-- **The Two-Handed weapon property itself is unenforced.** Carried by 13
-  rows of `WeaponProperty` (`packages/schemas/src/gear.ts`) — the Lance
-  above included — but read nowhere: a character can equip a Greatsword and
-  a Shield at once and keep the Shield's +2 AC while swinging two-handed,
+- **The Two-Handed weapon property itself is unenforced.** `two_handed` is
+  carried by 13 rows of `data/srd/weapons.json` — the Lance above included —
+  but nothing reads it outside the `WeaponProperty` enum that defines it
+  (`packages/schemas/src/gear.ts`): a character can equip a Greatsword and a
+  Shield at once and keep the Shield's +2 AC while swinging two-handed,
   which RAW forbids.
 - **Monster traits, reactions and bonus actions.** Pack Tactics, Nimble Escape,
   Undead Fortitude and Parry are all absent — only the Actions block is

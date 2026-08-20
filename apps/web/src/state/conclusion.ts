@@ -6,8 +6,9 @@
 //
 // The party is expected to LOSE (correction C-31): `diesAtZeroHp` is pinned
 // true unconditionally, so a PC dies at 0 HP rather than falling Unconscious
-// — death saves are not implemented (RULES_REFERENCE.md §8's gap). Defeat is
-// a normal ending here, not an error state.
+// — death saves are implemented but not driven by the encounter pipeline
+// (RULES_REFERENCE.md §8's gap). Defeat is a normal ending here, not an
+// error state.
 import type { SessionState } from "@ai-dm/schemas";
 
 export type Conclusion = "ongoing" | "victory" | "defeat";
