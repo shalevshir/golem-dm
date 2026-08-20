@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { CharacterSheet } from "@ai-dm/schemas";
-import { DerivedCharacter } from "@ai-dm/schemas";
-import { deriveCharacter } from "./derive.js";
+import { CreatureStatBlock, DerivedCharacter } from "@ai-dm/schemas";
+import { characterStatBlock, deriveCharacter } from "./derive.js";
 import { GEAR, sheet } from "./test-fixtures.js";
 
 describe("deriveCharacter", () => {
@@ -97,5 +97,46 @@ describe("deriveCharacter", () => {
 
   it("produces a value that parses as a DerivedCharacter", () => {
     expect(() => DerivedCharacter.parse(deriveCharacter(sheet(), GEAR))).not.toThrow();
+  });
+});
+
+describe("characterStatBlock", () => {
+  it("selects exactly the fields the engine reads", () => {
+    const block = characterStatBlock(deriveCharacter(sheet(), GEAR));
+    expect(block.nameEnglish).toBe("hero");
+    expect(block.nameHebrew).toBe("אלדד");
+    expect(block.size).toBe("medium");
+    expect(block.armorClass).toBe(16);
+    expect(block.speedFeet).toBe(30);
+    expect(block.attacksPerAction).toBe(1);
+    expect(block.actions.map((each) => each.actionId)).toEqual(["longsword", "unarmed_strike"]);
+  });
+
+  // hitPoints.average is the sheet's stored maxHp, not a roll: the SRD lets
+  // you roll hit points, so it is a choice rather than a derivation. This is
+  // what lets `combatantFromStatBlock` stay unchanged.
+  it("carries hit points as the sheet's maximum", () => {
+    const block = characterStatBlock(deriveCharacter(sheet(), GEAR));
+    expect(block.hitPoints.average).toBe(28);
+    expect(block.hitPoints.diceNotation).toBe("3d10");
+  });
+
+  // hitPoints.average is the sheet's stored maxHp, never its current HP: a
+  // damaged character still projects a full-strength stat block, and the spawn
+  // applies the damage.
+  it("carries maximum hit points even when the character is damaged", () => {
+    const damaged = sheet({ combat: { ...sheet().combat, currentHp: 10 } });
+    const block = characterStatBlock(deriveCharacter(damaged, GEAR));
+    expect(block.hitPoints.average).toBe(28);
+  });
+
+  it("produces a value that parses as a CreatureStatBlock", () => {
+    const block = characterStatBlock(deriveCharacter(sheet(), GEAR));
+    expect(() => CreatureStatBlock.parse(block)).not.toThrow();
+  });
+
+  it("projects an unarmed wizard onto a valid, non-empty action list", () => {
+    const wizard = deriveCharacter(sheet({ class: "wizard", inventory: [] }), GEAR);
+    expect(() => CreatureStatBlock.parse(characterStatBlock(wizard))).not.toThrow();
   });
 });

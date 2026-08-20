@@ -8,6 +8,7 @@ import type {
   CharacterClass,
   CharacterSheet,
   ClassDefinition,
+  CreatureStatBlock,
   DerivedCharacter,
   Skill,
   SkillDefinition,
@@ -142,5 +143,28 @@ export function deriveCharacter(sheet: CharacterSheet, gear: SrdGear): DerivedCh
       : {
           spellSaveDc: SPELL_SAVE_BASE + proficiencyBonus + modifiers[spellcastingAbility],
         }),
+  };
+}
+
+/**
+ * The seven fields the combat engine actually reads, selected out of the full
+ * derivation. Everything else in `DerivedCharacter` — saves, skills, passive
+ * Perception, spell save DC — exists for the character sheet, not for combat,
+ * and deliberately does not cross this line.
+ *
+ * `nameEnglish` is the `characterId`: a character sheet is authored in Hebrew
+ * and has no English name, and the engine only ever uses this for logs and
+ * for the tactical agent's English prompt.
+ */
+export function characterStatBlock(derived: DerivedCharacter): CreatureStatBlock {
+  return {
+    nameEnglish: derived.characterId,
+    nameHebrew: derived.nameHebrew,
+    size: derived.size,
+    armorClass: derived.armorClass,
+    hitPoints: { average: derived.maxHp, diceNotation: derived.hitDice },
+    speedFeet: derived.speedFeet,
+    attacksPerAction: derived.attacksPerAction,
+    actions: derived.attacks,
   };
 }
