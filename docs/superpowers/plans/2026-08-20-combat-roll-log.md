@@ -1703,8 +1703,8 @@ export function CombatLog(props: CombatLogProps): JSX.Element {
                 {nameOf(turn.actorId)} {he.log.moved} <bdi>{turn.movedFeet}</bdi> {he.log.feet}
               </p>
             )}
-            {!turn.forfeited && turn.attacks.length === 0 && turn.movedFeet === 0 && turn.actionType !== undefined && (
-              <p>{actionLabel(turn.actionType) ?? turn.actionType}</p>
+            {!turn.forfeited && turn.attacks.length === 0 && turn.actionType !== undefined && (
+              <p>{actionLabel(turn.actionType) ?? <bdi>{turn.actionType}</bdi>}</p>
             )}
           </div>
         ))}
