@@ -220,6 +220,16 @@ describe("EncounterCatalogue", () => {
       }),
     ).toThrow();
   });
+
+  it("rejects an action missing nameHebrew entirely", () => {
+    // Mirrors "rejects a combatant missing nameHebrew entirely" above: a
+    // fresh literal, not a destructuring-omit, so no unused binding is left
+    // behind.
+    const actionWithoutNameHebrew = { actionId: "spear", nameEnglish: "Spear" };
+    expect(() =>
+      EncounterCatalogue.parse({ ...catalogue, actions: [actionWithoutNameHebrew] }),
+    ).toThrow();
+  });
 });
 
 describe("SessionCreated", () => {
