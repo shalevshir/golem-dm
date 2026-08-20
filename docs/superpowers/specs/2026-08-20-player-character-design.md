@@ -319,10 +319,11 @@ disagree.
 - `apps/server/src/encounters/` gains `loadCharacter` mirroring `loadMonster`,
   including the same parse-and-cache shape; `buildEncounterById` resolves both
   spawn kinds.
-- `combatantFromStatBlock` needs no change: `characterStatBlock` already sets
-  `hitPoints.average` to the sheet's `maxHp`, and `SpawnOptions.currentHp`
-  already exists for a character joining mid-campaign at less than full
-  health.
+- `combatantFromStatBlock` needs no change **for hit points**:
+  `characterStatBlock` sets `hitPoints.average` to the sheet's `maxHp`, and
+  `SpawnOptions.currentHp` already exists for a character joining below full
+  health. Its only change is one new optional `SpawnOptions.characterId`,
+  copied through to `Combatant.characterId`.
 
 ## HTTP additions
 
