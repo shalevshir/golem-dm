@@ -219,7 +219,19 @@ describe("SRD armor", () => {
         nameEnglish: "Bad",
         nameHebrew: "רע",
         category: "light",
+        baseAc: 11,
         acBonus: 2,
+      }),
+    ).toThrow();
+  });
+
+  it("rejects a shield that carries no acBonus", () => {
+    expect(() =>
+      ArmorDefinition.parse({
+        armorId: "bad_shield",
+        nameEnglish: "Bad Shield",
+        nameHebrew: "מגן רע",
+        category: "shield",
       }),
     ).toThrow();
   });
