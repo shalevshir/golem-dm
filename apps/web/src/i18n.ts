@@ -54,6 +54,19 @@ export const he = {
     target_out_of_reach: "המטרה רחוקה מדי.",
     target_behind_full_cover: "המטרה מוסתרת לחלוטין.",
   },
+  log: {
+    heading: "יומן קרב",
+    turnOf: "תור",
+    hit: "פגיעה",
+    criticalHit: "פגיעה קריטית",
+    miss: "החטאה",
+    criticalMiss: "החטאה קריטית",
+    vsArmor: "מול שריון",
+    damage: "נזק",
+    moved: "זז",
+    feet: "רגל",
+    forfeited: "התור פג — לא בוצעה פעולה",
+  },
 } as const;
 
 export function errorMessage(code: string): string {
@@ -64,4 +77,17 @@ export function errorMessage(code: string): string {
 export function rejectionMessage(reason: string): string {
   const table: Record<string, string | undefined> = he.rejections;
   return table[reason] ?? reason;
+}
+
+const UNIVERSAL_ACTION_LABELS: Record<string, string | undefined> = {
+  dodge: he.actions.dodge,
+  dash: he.actions.dash,
+  disengage: he.actions.disengage,
+};
+
+/** Hebrew label for an action type that has no `actionId` (dodge/dash/
+ *  disengage). `undefined` for anything else — `attack`/`cast_spell`/etc.
+ *  get their name from the catalogue instead, never from this table. */
+export function actionLabel(actionType: string): string | undefined {
+  return UNIVERSAL_ACTION_LABELS[actionType];
 }

@@ -332,6 +332,55 @@ describe("App", () => {
     expect(ExecuteTurn.safeParse(structured?.turn).success).toBe(true);
   });
 
+  it("shows the roll detail for a resolved attack in the combat log", async () => {
+    await start();
+    act(() => {
+      socket.emitMessage({
+        type: "session_state",
+        sequence: 0,
+        snapshot: snapshotWith([
+          combatant("hero", "party", "alive"),
+          combatant("goblin-a", "hostile", "alive"),
+        ]),
+      });
+      socket.emitMessage({
+        type: "event",
+        event: event(1, "action_validated", {
+          actorId: "hero",
+          turn: {
+            actorId: "hero",
+            mainAction: { actionType: "attack", actionId: "spear", targetIds: ["goblin-a"] },
+            tacticalRationaleEnglish: "Test fixture.",
+          },
+          source: "human",
+        }),
+      });
+      socket.emitMessage({
+        type: "event",
+        event: event(2, "dice_rolled", {
+          actorId: "hero",
+          movedFeet: 0,
+          seed: 42,
+          attacks: [
+            {
+              attackerId: "hero",
+              targetId: "goblin-a",
+              actionId: "spear",
+              outcome: "hit",
+              damage: 6,
+              targetStatusAfter: "alive",
+              attackRoll: { naturalRoll: 18, rolls: [18], total: 21, targetArmorClass: 15 },
+              damageRolls: [{ kind: "dice", notation: "1d6+1", rolls: [5], modifier: 1, total: 6 }],
+            },
+          ],
+        }),
+      });
+    });
+
+    expect(await screen.findByText(he.log.hit)).toBeInTheDocument();
+    expect(screen.getByText(/18/)).toBeInTheDocument();
+  });
+
   it("does not carry a dead session's resumeFrom into the next fight", async () => {
     // `sequenceRef` is a ref, not React state, so `resetToStart` clearing
     // every `useState` leaves it holding the sequence of the session that
@@ -409,7 +458,9 @@ describe("App", () => {
     await waitFor(() => {
       socket.emitOpen();
       const joins = socket.sent
-        .map((each) => JSON.parse(each) as { type: string; sessionId?: string; resumeFrom?: number })
+        .map(
+          (each) => JSON.parse(each) as { type: string; sessionId?: string; resumeFrom?: number },
+        )
         .filter((each) => each.type === "join");
       expect(joins).toHaveLength(joinsBefore + 1);
       expect(joins.at(-1)).toEqual({ type: "join", sessionId: "s1", resumeFrom: 4 });

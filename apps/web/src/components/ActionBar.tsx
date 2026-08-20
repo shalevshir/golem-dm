@@ -4,7 +4,7 @@
 import { useState } from "react";
 import type { JSX } from "react";
 import type { ActionAffordance } from "@ai-dm/schemas";
-import { he } from "../i18n.js";
+import { actionLabel, he } from "../i18n.js";
 import type { CatalogueAction, CatalogueCombatant } from "../net/api.js";
 
 export interface ActionBarProps {
@@ -14,12 +14,6 @@ export interface ActionBarProps {
   disabled: boolean;
   onCommit: (action: ActionAffordance, targetId?: string) => void;
 }
-
-const UNIVERSAL_LABELS: Record<string, string | undefined> = {
-  dodge: he.actions.dodge,
-  dash: he.actions.dash,
-  disengage: he.actions.disengage,
-};
 
 /** `dodge`/`dash`/`disengage` have no `actionId`, so `actionType` alone would
  *  collide across two such affordances in the same frame if that ever became
@@ -48,8 +42,7 @@ export function ActionBar(props: ActionBarProps): JSX.Element {
       : (props.actions.find((action) => affordanceKey(action) === pendingKey) ?? null);
 
   function labelFor(action: ActionAffordance): JSX.Element {
-    const universal =
-      action.actionId === undefined ? UNIVERSAL_LABELS[action.actionType] : undefined;
+    const universal = action.actionId === undefined ? actionLabel(action.actionType) : undefined;
     if (universal !== undefined) return <span>{universal}</span>;
 
     // English name inside an RTL document — no Hebrew name data exists (the

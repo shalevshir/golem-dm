@@ -3,6 +3,7 @@
 import { d20 } from "../dice/index.js";
 import type { Rng } from "../dice/index.js";
 import type { RollMode } from "../checks/index.js";
+import type { AttackOutcome } from "@ai-dm/schemas";
 
 export * from "./exhaustion.js";
 export * from "./action-economy.js";
@@ -19,7 +20,7 @@ export interface AttackInput {
   mode?: RollMode;
 }
 
-export type AttackOutcome = "hit" | "miss" | "critical_hit" | "critical_miss";
+export type { AttackOutcome };
 
 export interface AttackResult {
   naturalRoll: number;

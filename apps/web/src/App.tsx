@@ -18,6 +18,7 @@ import type { ClientState } from "./state/store.js";
 import { conclusionOf } from "./state/conclusion.js";
 import { buildTurn } from "./turn/build-turn.js";
 import { ActionBar } from "./components/ActionBar.js";
+import { CombatLog } from "./components/CombatLog.js";
 import { ErrorBanner } from "./components/ErrorBanner.js";
 import { Grid } from "./components/Grid.js";
 import { NarrativePane } from "./components/NarrativePane.js";
@@ -338,6 +339,8 @@ export function App(props: AppProps): JSX.Element {
       )}
 
       <NarrativePane text={state.narrative} />
+
+      <CombatLog turns={state.combatLog} catalogue={catalogue.combatants} />
     </main>
   );
 }

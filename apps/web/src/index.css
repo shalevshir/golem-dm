@@ -81,3 +81,29 @@ main {
   border-block-start: 1px solid #cbbfae;
   padding-block-start: 1rem;
 }
+
+.combat-log {
+  margin-block-start: 1rem;
+}
+
+.log-panel {
+  max-block-size: 16rem;
+  overflow-y: auto;
+  border: 1px solid #cbbfae;
+  border-radius: 0.25rem;
+  padding: 0.75rem 1rem;
+}
+
+.log-entry {
+  border-block-end: 1px dashed #cbbfae;
+  padding-block: 0.5rem;
+}
+
+.log-entry:last-child {
+  border-block-end: none;
+}
+
+.log-turn-header {
+  font-weight: 600;
+  margin-block-end: 0.25rem;
+}

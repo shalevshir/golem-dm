@@ -396,7 +396,12 @@ export async function* handleCommand(
       rng: seeded(seed),
     });
 
-    yield* emit("dice_rolled", { actorId, seed, attacks: effect.attacks });
+    yield* emit("dice_rolled", {
+      actorId,
+      seed,
+      attacks: effect.attacks,
+      movedFeet: effect.movedFeet,
+    });
     yield* emit("state_delta_applied", { combatants: after.combatants });
     yield* narrate(actorId, effect, deadline);
     yield* emit("scene_changed", { kind: "turn_advanced" });
@@ -663,7 +668,12 @@ export async function* handleCommand(
           rng: seeded(seed),
         });
 
-        yield* emit("dice_rolled", { actorId: command.actorId, seed, attacks: effect.attacks });
+        yield* emit("dice_rolled", {
+          actorId: command.actorId,
+          seed,
+          attacks: effect.attacks,
+          movedFeet: effect.movedFeet,
+        });
         yield* emit("state_delta_applied", { combatants: after.combatants });
         // A single shared cap for this turn's post-validation stretch — see
         // `enemyTurn`'s identical rationale. The player path has no

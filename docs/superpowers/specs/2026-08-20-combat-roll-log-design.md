@@ -245,8 +245,12 @@ the existing catalogue lookup, same as `Grid`/`ActionBar`), then per-attack
 lines from an `AttackLine` sub-component formatting `attackRoll`/
 `damageRolls` into `"18 + 5 = 23 מול שריון 15 ← פגיעה · 1d6+3 = 7 נזק"`, a
 movement line when `movedFeet > 0`, a forfeit line when `forfeited`, and the
-plain action label (dodge/dash/disengage) when the turn had no attack and no
-movement. The numeric/roll-trace fragment of each line is wrapped in
+plain action label (dodge/dash/disengage) whenever the turn had no attack —
+alongside the movement line, not gated behind its absence, so a
+Dash-and-reposition turn shows both (the final whole-branch review caught
+that the original `movedFeet === 0` gate contradicted this document's own
+"everything the turn did gets a line" decision, and it was removed).
+The numeric/roll-trace fragment of each line is wrapped in
 `<bdi>`, the same isolation `NarrativePane` already applies to dice
 notation — this is a denser LTR run than a narrative sentence, so the whole
 trace is isolated rather than just the dice substring.

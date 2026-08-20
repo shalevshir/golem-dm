@@ -8,6 +8,7 @@ import {
   createTacticalAgent,
   DEFAULT_MODEL_ROUTING,
 } from "@ai-dm/agents";
+import { DiceRolledPayload } from "@ai-dm/schemas";
 import type {
   ClientMessage,
   ExecuteTurn,
@@ -460,6 +461,40 @@ describe("handleCommand — structured action", () => {
     await drain(handleCommand(session, dodge("hero"), portsWith(store)));
     const rolled = (await store.readSince("s1", 0)).find((each) => each.type === "dice_rolled");
     expect(rolled?.payload).toMatchObject({ seed: expect.any(Number) as number });
+  });
+
+  it("records movedFeet on the dice_rolled event for a turn that moved", async () => {
+    const store = createInMemoryEventStore();
+    const session = await freshSession(store);
+    // Hero starts at [5, 4] in goblin-ambush. Move 2 tiles east (Chebyshev
+    // distance 2, normal terrain) then dodge -- legal, and a clean 2 * 5ft
+    // = 10ft to assert against.
+    const moveAndDodge: ClientMessage = {
+      type: "structured_action",
+      clientMessageId: "c1",
+      actorId: "hero",
+      turn: {
+        actorId: "hero",
+        movement: [{ destinationTile: [7, 4], pathType: "direct" }],
+        mainAction: { actionType: "dodge" },
+        tacticalRationaleEnglish: "Test fixture: move then dodge.",
+      },
+    };
+
+    await drain(handleCommand(session, moveAndDodge, portsWith(store)));
+    const rolled = (await store.readSince("s1", 0)).find((each) => each.type === "dice_rolled");
+    expect(rolled?.payload).toMatchObject({ movedFeet: 10 });
+    // The real wire payload, not a hand-built fixture: proves DiceRolledPayload
+    // actually describes what the server emits, not just what a test expects.
+    expect(DiceRolledPayload.safeParse(rolled?.payload).success).toBe(true);
+  });
+
+  it("records movedFeet: 0 on a dice_rolled event for a turn with no movement", async () => {
+    const store = createInMemoryEventStore();
+    const session = await freshSession(store);
+    await drain(handleCommand(session, dodge("hero"), portsWith(store)));
+    const rolled = (await store.readSince("s1", 0)).find((each) => each.type === "dice_rolled");
+    expect(rolled?.payload).toMatchObject({ movedFeet: 0 });
   });
 
   it("streams narrative tokens and closes with narrative_emitted", async () => {

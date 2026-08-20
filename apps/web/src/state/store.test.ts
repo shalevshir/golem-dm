@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { fold } from "@ai-dm/schemas";
 import type { GameEvent, ServerFrame, SessionState } from "@ai-dm/schemas";
 import { applyFrame, initialClientState } from "./store.js";
@@ -279,5 +279,196 @@ describe("applyFrame", () => {
       expect(result?.snapshot).toEqual(authoritative);
       expect(result?.sequence).toBe(7);
     });
+  });
+});
+
+describe("combatLog", () => {
+  it("opens a group on action_validated and fills it in on dice_rolled", () => {
+    let client = applyFrame(initialClientState, {
+      type: "session_state",
+      sequence: 0,
+      snapshot: genesis,
+    });
+    client = applyFrame(client, {
+      type: "event",
+      event: event(1, "action_validated", {
+        actorId: "hero",
+        turn: {
+          actorId: "hero",
+          mainAction: { actionType: "attack", actionId: "spear", targetIds: ["goblin-a"] },
+          tacticalRationaleEnglish: "Test fixture.",
+        },
+        source: "human",
+      }),
+    });
+
+    expect(client.combatLog).toHaveLength(1);
+    expect(client.combatLog[0]).toEqual({
+      actorId: "hero",
+      actionType: "attack",
+      movedFeet: 0,
+      attacks: [],
+      forfeited: false,
+    });
+
+    const attackTrace = {
+      attackerId: "hero",
+      targetId: "goblin-a",
+      actionId: "spear",
+      outcome: "hit" as const,
+      damage: 6,
+      targetStatusAfter: "alive" as const,
+      attackRoll: { naturalRoll: 18, rolls: [18], total: 21, targetArmorClass: 15 },
+      damageRolls: [
+        { kind: "dice" as const, notation: "1d6+1", rolls: [5], modifier: 1, total: 6 },
+      ],
+    };
+    client = applyFrame(client, {
+      type: "event",
+      event: event(2, "dice_rolled", {
+        actorId: "hero",
+        movedFeet: 10,
+        seed: 42,
+        attacks: [attackTrace],
+      }),
+    });
+
+    expect(client.combatLog).toHaveLength(1);
+    expect(client.combatLog[0]?.movedFeet).toBe(10);
+    expect(client.combatLog[0]?.attacks).toEqual([attackTrace]);
+  });
+
+  it("marks a forfeited turn when scene_changed arrives with no matching action_validated", () => {
+    let client = applyFrame(initialClientState, {
+      type: "session_state",
+      sequence: 0,
+      snapshot: genesis, // currentActorIndex: 0 -> "hero" is up
+    });
+
+    // No action_validated / dice_rolled for "hero" at all -- straight to
+    // turn_advanced, the shape of a 10s tactical-budget abort.
+    client = applyFrame(client, {
+      type: "event",
+      event: event(1, "scene_changed", { kind: "turn_advanced" }),
+    });
+
+    expect(client.combatLog).toEqual([
+      { actorId: "hero", actionType: undefined, movedFeet: 0, attacks: [], forfeited: true },
+    ]);
+  });
+
+  it("does not mark a dead combatant's skipped turn as forfeited", () => {
+    // `runEnemyTurns` skips a non-alive combatant with a bare
+    // scene_changed: turn_advanced -- no preceding action_validated -- the
+    // exact same shape as a tactical-budget forfeit (the test above). The
+    // client must tell the two apart using snapshotBefore's combatant
+    // status, not render a corpse's skipped turn as "the turn expired, no
+    // action taken".
+    const deadGoblinUp: SessionState = {
+      ...genesis,
+      combatants: [combatant("hero", "party", "alive"), combatant("goblin-a", "hostile", "dead")],
+      currentActorIndex: 1, // "goblin-a" is up, and dead
+    };
+    let client = applyFrame(initialClientState, {
+      type: "session_state",
+      sequence: 0,
+      snapshot: deadGoblinUp,
+    });
+
+    // No action_validated / dice_rolled for "goblin-a" -- straight to
+    // turn_advanced, same as the forfeit case above, but this time because
+    // the combatant is dead and was never asked for a turn.
+    client = applyFrame(client, {
+      type: "event",
+      event: event(1, "scene_changed", { kind: "turn_advanced" }),
+    });
+
+    expect(client.combatLog).toEqual([]);
+  });
+
+  it("does not duplicate a group when scene_changed follows a normal action_validated", () => {
+    let client = applyFrame(initialClientState, {
+      type: "session_state",
+      sequence: 0,
+      snapshot: genesis,
+    });
+    client = applyFrame(client, {
+      type: "event",
+      event: event(1, "action_validated", {
+        actorId: "hero",
+        turn: {
+          actorId: "hero",
+          mainAction: { actionType: "dodge" },
+          tacticalRationaleEnglish: "Test fixture.",
+        },
+        source: "human",
+      }),
+    });
+    client = applyFrame(client, {
+      type: "event",
+      event: event(2, "dice_rolled", { actorId: "hero", movedFeet: 0, seed: 42, attacks: [] }),
+    });
+    client = applyFrame(client, {
+      type: "event",
+      event: event(3, "scene_changed", { kind: "turn_advanced" }),
+    });
+
+    expect(client.combatLog).toHaveLength(1);
+  });
+
+  it("skips a malformed dice_rolled payload without throwing", () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    let client = applyFrame(initialClientState, {
+      type: "session_state",
+      sequence: 0,
+      snapshot: genesis,
+    });
+    client = applyFrame(client, {
+      type: "event",
+      event: event(1, "action_validated", {
+        actorId: "hero",
+        turn: {
+          actorId: "hero",
+          mainAction: { actionType: "dodge" },
+          tacticalRationaleEnglish: "Test fixture.",
+        },
+        source: "human",
+      }),
+    });
+
+    // Missing movedFeet -- the pre-migration shape from Task 1's schema test.
+    client = applyFrame(client, {
+      type: "event",
+      event: event(2, "dice_rolled", { actorId: "hero", attacks: [] }),
+    });
+
+    expect(client.combatLog).toHaveLength(1);
+    expect(client.combatLog[0]?.movedFeet).toBe(0); // untouched, group stays as action_validated left it
+    expect(warnSpy).toHaveBeenCalled();
+    warnSpy.mockRestore();
+  });
+
+  it("clears combatLog on a session_state resync", () => {
+    let client = applyFrame(initialClientState, {
+      type: "session_state",
+      sequence: 0,
+      snapshot: genesis,
+    });
+    client = applyFrame(client, {
+      type: "event",
+      event: event(1, "action_validated", {
+        actorId: "hero",
+        turn: {
+          actorId: "hero",
+          mainAction: { actionType: "dodge" },
+          tacticalRationaleEnglish: "Test fixture.",
+        },
+        source: "human",
+      }),
+    });
+    expect(client.combatLog).toHaveLength(1);
+
+    client = applyFrame(client, { type: "session_state", sequence: 12, snapshot: genesis });
+    expect(client.combatLog).toEqual([]);
   });
 });
