@@ -114,7 +114,13 @@ function attackFor(
 function damageFrom(damage: DamageRoll, critical: boolean, rng: Rng): DamageRollTrace {
   if (damage.diceNotation === undefined) return { kind: "flat", total: damage.averageDamage };
   const r = roll(damage.diceNotation, rng, { critical });
-  return { kind: "dice", notation: r.notation, rolls: r.rolls, modifier: r.modifier, total: r.total };
+  return {
+    kind: "dice",
+    notation: r.notation,
+    rolls: r.rolls,
+    modifier: r.modifier,
+    total: r.total,
+  };
 }
 
 /** The swings this turn proposes, in the order the engine budgeted them. */

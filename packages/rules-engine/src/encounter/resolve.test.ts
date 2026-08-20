@@ -248,7 +248,9 @@ describe("applyTurn", () => {
     const turn = attack("goblin_1", "guard_1", "dagger");
     const validation = validateExecuteTurn(turn, actor, built.world);
     if (!validation.valid) {
-      throw new Error(`fixture turn is illegal: ${validation.rejections.map((r) => r.reason).join()}`);
+      throw new Error(
+        `fixture turn is illegal: ${validation.rejections.map((r) => r.reason).join()}`,
+      );
     }
     const { effect } = applyTurn({
       world: built.world,
@@ -285,7 +287,9 @@ describe("applyTurn", () => {
     const turn = attack("goblin_1", "guard_1", "scimitar");
     const validation = validateExecuteTurn(turn, actor, built.world);
     if (!validation.valid) {
-      throw new Error(`fixture turn is illegal: ${validation.rejections.map((r) => r.reason).join()}`);
+      throw new Error(
+        `fixture turn is illegal: ${validation.rejections.map((r) => r.reason).join()}`,
+      );
     }
     // Attack roll: 18. Main damage 1d6+2 at 0.5 -> floor(0.5*6)+1=4, +2=6.
     // Extra 1d4 at 0.5 -> floor(0.5*4)+1=3 (a d4 and a d6 give DIFFERENT
