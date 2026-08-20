@@ -77,7 +77,7 @@ const BLOWGUN: WeaponDefinition = {
   longRangeFeet: 100,
 };
 
-// Real SRD row, for Finding 3 / R37's dedupe test: two equipped daggers
+// Real SRD row, for the dedupe test below: two equipped daggers
 // must collapse into one attack option.
 const DAGGER: WeaponDefinition = {
   weaponId: "dagger",
@@ -92,7 +92,7 @@ const DAGGER: WeaponDefinition = {
 };
 
 // Real SRD row, copied verbatim (`grep -n spear data/srd/weapons.json`), for
-// Finding 1 / R35's characterization test. Both Versatile and Thrown — one
+// the characterization test below. Both Versatile and Thrown — one
 // of only two such rows in the SRD (with the trident).
 const SPEAR: WeaponDefinition = {
   weaponId: "spear",
@@ -110,8 +110,8 @@ const SPEAR: WeaponDefinition = {
 // SYNTHETIC — deliberately not an SRD row, unlike every fixture above.
 // `DiceNotation` permits a baked-in "+N"/"-N" modifier
 // (packages/schemas/src/primitives.ts), even though no real row in
-// data/srd/weapons.json ever carries one. Exists only for Finding 2 / R36's
-// test of `averageOfDice`'s modifier parse.
+// data/srd/weapons.json ever carries one. Exists only to test
+// `averageOfDice`'s modifier parse.
 const SYNTHETIC_MODIFIER_DAGGER: WeaponDefinition = {
   weaponId: "synthetic_modifier_dagger",
   nameEnglish: "Synthetic Modifier Dagger (test-only)",
@@ -129,7 +129,7 @@ const base = {
   shieldEquipped: false,
 };
 
-// R31: the brief's `only()` returned `{ actionId: string } | undefined`, so
+// The brief's `only()` returned `{ actionId: string } | undefined`, so
 // every `.attackBonus` / `.damage` / range access below was a TS2339 compile
 // error. Made generic over the element type instead — every call site and
 // assertion below is byte-identical to the brief.
@@ -182,7 +182,7 @@ describe("attacksFor", () => {
     expect(attack?.damage.averageDamage).toBe(7); // floor(4.5) + 3
   });
 
-  // Characterization test (Finding 1 / R35): pins the house rule's known
+  // Characterization test: pins the house rule's known
   // deviation from RAW, not RAW itself. The spear is both Versatile and
   // Thrown; `damageDiceFor`'s docstring explains why this engine cannot tell
   // thrown mode from two-handed melee mode, so the two-handed die (1d8)
@@ -233,9 +233,9 @@ describe("attacksFor", () => {
     expect(attack?.damage.averageDamage).toBe(2); // 1 + 1 Dex
   });
 
-  // SYNTHETIC fixture (Finding 2 / R36): exercises `averageOfDice`'s
-  // modifier parse through the public surface. Before the fix this was NaN
-  // (a NaN comparison failing is R36's documented sabotage signature).
+  // SYNTHETIC fixture: exercises `averageOfDice`'s modifier parse through
+  // the public surface. Before the fix this returned NaN, so a regression
+  // here fails on a NaN comparison rather than a thrown error.
   it("parses a baked-in dice modifier instead of returning NaN", () => {
     const attack = only(
       "synthetic_modifier_dagger",
@@ -264,7 +264,7 @@ describe("attacksFor", () => {
     expect(ids).toEqual(["longsword", "unarmed_strike"]);
   });
 
-  // R37: two equipped daggers are one attack OPTION ("attack with a
+  // Two equipped daggers are one attack OPTION ("attack with a
   // dagger"), not two — two-weapon fighting is a separate bonus-action
   // mechanic and an explicit non-goal of this slice.
   it("dedupes two identical equipped weapons into a single attack", () => {

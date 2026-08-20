@@ -68,13 +68,13 @@ function attackAbilityFor(
  * attack." Nothing in this engine models hands, so a shield stands in for the
  * off hand. Recorded in RULES_REFERENCE.md section 7.
  *
- * Known gap (Finding 1 / R35): a weapon that is both Versatile and Thrown
+ * Known gap: a weapon that is both Versatile and Thrown
  * (spear, trident — the only two such rows in the SRD) uses its two-handed
  * die in BOTH modes, so a thrown spear deals 1d8 where RAW gives 1d6.
  * `CreatureAttack` carries exactly one `damage` value and thrown mode is not
  * separately modelled, so this is a deliberate, documented approximation.
  *
- * Known gap (Finding 4 / R38): the shield proxy also misses a dual-wielder —
+ * Known gap: the shield proxy also misses a dual-wielder —
  * a shieldless character holding e.g. a longsword AND a shortsword still
  * gets the longsword's two-handed die, though the off hand is occupied by
  * the second weapon, not free. Same root cause: only the shield slot is
