@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
+  ArmorDefinition,
   ClassDefinition,
   ConditionDefinition,
   Condition,
@@ -183,5 +184,49 @@ describe("SRD weapons", () => {
     expect(() =>
       WeaponDamage.parse({ diceNotation: "1d6", fixedDamage: 1, damageType: "piercing" }),
     ).toThrow();
+  });
+});
+
+describe("SRD armor", () => {
+  const armor = (): ArmorDefinition[] =>
+    ArmorDefinition.array().parse(readJson(join(SRD_DIR, "armor.json")));
+
+  it("ships the armor table including the shield", () => {
+    expect(armor()).toHaveLength(13);
+  });
+
+  it("carries base AC on body armor and a bonus on the shield", () => {
+    const byId = new Map(armor().map((each) => [each.armorId, each]));
+    expect(byId.get("leather")?.baseAc).toBe(11);
+    expect(byId.get("half_plate")?.baseAc).toBe(15);
+    expect(byId.get("plate")?.baseAc).toBe(18);
+    expect(byId.get("shield")?.acBonus).toBe(2);
+    expect(byId.get("shield")?.baseAc).toBeUndefined();
+  });
+
+  it("records the Strength requirements that cost speed", () => {
+    const byId = new Map(armor().map((each) => [each.armorId, each]));
+    expect(byId.get("chain_mail")?.strengthRequirement).toBe(13);
+    expect(byId.get("splint")?.strengthRequirement).toBe(15);
+    expect(byId.get("plate")?.strengthRequirement).toBe(15);
+    expect(byId.get("leather")?.strengthRequirement).toBeUndefined();
+  });
+
+  it("rejects body armor that carries a shield's acBonus", () => {
+    expect(() =>
+      ArmorDefinition.parse({
+        armorId: "bad",
+        nameEnglish: "Bad",
+        nameHebrew: "רע",
+        category: "light",
+        acBonus: 2,
+      }),
+    ).toThrow();
+  });
+
+  it("names every armor in Hebrew", () => {
+    for (const each of armor()) {
+      expect(each.nameHebrew.trim(), each.armorId).not.toBe("");
+    }
   });
 });

@@ -54,3 +54,37 @@ export const WeaponDefinition = z.object({
 export type WeaponProperty = z.infer<typeof WeaponProperty>;
 export type WeaponDamage = z.infer<typeof WeaponDamage>;
 export type WeaponDefinition = z.infer<typeof WeaponDefinition>;
+
+export const ArmorCategory = z.enum(["light", "medium", "heavy", "shield"]);
+
+/**
+ * One row of the SRD armor table. The Dexterity rule is NOT stored per row:
+ * every Light row is `base + Dex`, every Medium row is `base + Dex (max 2)`,
+ * and every Heavy row is a bare number, with no row deviating from its
+ * category. Storing the cap twelve times would only let the copies disagree.
+ * `armorClassFor` reads the category instead.
+ */
+export const ArmorDefinition = z
+  .object({
+    armorId: z.string().regex(/^[a-z0-9_]+$/),
+    nameEnglish: z.string(),
+    nameHebrew: z.string().min(1),
+    category: ArmorCategory,
+    /** Body armor only. */
+    baseAc: z.number().int().min(1).optional(),
+    /** The Shield row only: a flat bonus, not a base. */
+    acBonus: z.number().int().min(0).optional(),
+    /** Below this Strength score the armor costs 10 feet of speed. */
+    strengthRequirement: z.number().int().min(1).optional(),
+    stealthDisadvantage: z.boolean().default(false),
+  })
+  .refine(
+    (armor) =>
+      armor.category === "shield"
+        ? armor.acBonus !== undefined && armor.baseAc === undefined
+        : armor.baseAc !== undefined && armor.acBonus === undefined,
+    "body armor carries baseAc; a shield carries acBonus",
+  );
+
+export type ArmorCategory = z.infer<typeof ArmorCategory>;
+export type ArmorDefinition = z.infer<typeof ArmorDefinition>;
