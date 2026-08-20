@@ -182,7 +182,7 @@ describe("character spawns", () => {
   });
 
   it("carries a below-full-health character's currentHp, not the sheet's maxHp", () => {
-    // R46: DERIVED_HERO has currentHp === maxHp (28 === 28), so the
+    // DERIVED_HERO has currentHp === maxHp (28 === 28), so the
     // pass-through would look correct even if it were wrong or deleted.
     // Damage the sheet first so the two numbers diverge. The `...sheet().combat`
     // spread is required -- `sheet()`'s override merge is shallow, so a bare
@@ -228,8 +228,8 @@ describe("character spawns", () => {
   });
 
   it("leaves characterId unset on a monster combatant", () => {
-    // R8-refined: reuse the module-scope goblin/definition/statBlocks fixtures
-    // instead of adding a separate monster-only fixture pair.
+    // Reuse the module-scope goblin/definition/statBlocks fixtures instead of
+    // adding a separate monster-only fixture pair.
     const built = buildEncounter({ definition, statBlocks });
     expect(built.world.combatants[0]?.characterId).toBeUndefined();
   });

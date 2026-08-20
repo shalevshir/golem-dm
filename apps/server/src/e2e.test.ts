@@ -6,17 +6,19 @@
 // test hang or pass for the wrong reason (task-corrections.md, "Task 15 —
 // end-to-end" plus addendum C-31/C-37/C-38):
 //
-//   1. C-31 — `resolve.ts:208` pins `diesAtZeroHp: true` unconditionally for
-//      every combatant (death saves are not implemented —
-//      RULES_REFERENCE.md §8's gap), so the hero DIES at 0 HP rather than
-//      falling unconscious, and that is exactly what makes the fight
-//      terminate at all. This no longer depends on an absent `characterId`:
-//      `combatantFromStatBlock` (packages/rules-engine/src/combat/statblock.ts)
-//      can set a real one for a character spawn since Task 13, but
-//      `goblin-ambush`'s hero here is still the earlier stand-in built from a
-//      MONSTER stat block, so its `characterId` is undefined too — the pin,
-//      not that, is what does the work. This file asserts "one faction left
-//      standing", never a party win.
+//   1. C-31 — `applyTurn`'s `applyDamage` call in
+//      packages/rules-engine/src/encounter/resolve.ts pins `diesAtZeroHp:
+//      true` unconditionally for every combatant (death saves are not
+//      implemented — RULES_REFERENCE.md §8's gap), so the hero DIES at 0 HP
+//      rather than falling unconscious, and that is exactly what makes the
+//      fight terminate at all. This no longer depends on an absent
+//      `characterId`: `combatantFromStatBlock`
+//      (packages/rules-engine/src/combat/statblock.ts) can set a real one
+//      for a character spawn since Task 13, but `goblin-ambush`'s hero here
+//      is still the earlier stand-in built from a MONSTER stat block, so its
+//      `characterId` is undefined too — the pin, not that, is what does the
+//      work. This file asserts "one faction left standing", never a party
+//      win.
 //   2. C-37 — once the hero dies, `runEnemyTurns` (pipeline.ts) returns at
 //      its `livingFactions.size < 2` check with `currentActorIndex` still
 //      pointing at a hostile. No terminal event is emitted, and the next
@@ -409,13 +411,14 @@ describe("end to end", () => {
     const hero = concluded.state.combatants.find((c) => c.combatantId === "hero");
     if (hero === undefined) throw new Error("hero missing from the final projection");
     expect(hero.currentHp).toBe(0);
-    // C-31: resolve.ts:208 pins diesAtZeroHp true unconditionally (death
-    // saves are not implemented — RULES_REFERENCE.md §8's gap), so the hero
-    // dies here rather than falling unconscious, regardless of whether it
-    // carries a characterId. That is a real, load-bearing property of this
-    // encounter (an unconscious hero with no death saves implemented would
-    // leave the pipeline with nothing to conclude on), not an incidental
-    // detail.
+    // C-31: applyTurn's applyDamage call in
+    // packages/rules-engine/src/encounter/resolve.ts pins diesAtZeroHp true
+    // unconditionally (death saves are not implemented —
+    // RULES_REFERENCE.md §8's gap), so the hero dies here rather than
+    // falling unconscious, regardless of whether it carries a characterId.
+    // That is a real, load-bearing property of this encounter (an
+    // unconscious hero with no death saves implemented would leave the
+    // pipeline with nothing to conclude on), not an incidental detail.
     expect(hero.status).toBe("dead");
 
     // Real combat happened — not merely 20+ frames of any kind (C-24's

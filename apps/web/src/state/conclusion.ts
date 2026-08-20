@@ -4,10 +4,10 @@
 // emitted, and every later command is answered `not_your_turn` (correction
 // C-37). A UI that waited for a victory frame would hang forever.
 //
-// The party is expected to LOSE (correction C-31): no player-character data
-// exists, so the hero borrows the `guard` stat block, `characterId` is
-// undefined, and `diesAtZeroHp` is therefore true for it. Defeat is a normal
-// ending here, not an error state.
+// The party is expected to LOSE (correction C-31): `diesAtZeroHp` is pinned
+// true unconditionally, so a PC dies at 0 HP rather than falling Unconscious
+// — death saves are not implemented (RULES_REFERENCE.md §8's gap). Defeat is
+// a normal ending here, not an error state.
 import type { SessionState } from "@ai-dm/schemas";
 
 export type Conclusion = "ongoing" | "victory" | "defeat";

@@ -118,16 +118,19 @@ export function affordancesFor(
     // (e.g. a coup de grace). This filter simply keeps the client from
     // suggesting attacks on corpses.
     //
-    // It is still unreachable today, but no longer because combatants lack a
-    // `characterId` — a character spawn populates a real one now
-    // (`combatantFromStatBlock`, ../encounter/build.ts's `resolveSpawn`). The
-    // reason is correction C-31: `resolve.ts:208` pins `diesAtZeroHp: true`
-    // unconditionally (death saves are not implemented —
+    // Only the unconscious case is unreachable today -- the dead case is not:
+    // the `status === "alive"` check just below excludes a corpse every turn
+    // once a kill happens. Unconscious is unreachable no longer because
+    // combatants lack a `characterId` — a character spawn populates a real
+    // one now (`combatantFromStatBlock`, ../encounter/build.ts's
+    // `resolveSpawn`). The reason is correction C-31: `applyTurn`'s
+    // `applyDamage` call in `../encounter/resolve.ts` pins `diesAtZeroHp:
+    // true` unconditionally (death saves are not implemented —
     // RULES_REFERENCE.md §8's gap), so nobody, PC or monster, ever ends up
-    // "unconscious" — everyone goes straight to "dead". This filter becomes
-    // load-bearing only once death saves land and the pin is lifted, and
-    // should be revisited then so the client still offers attacks against an
-    // unconscious PC.
+    // "unconscious" — everyone who hits 0 HP goes straight to "dead". This
+    // filter becomes load-bearing for the unconscious case only once death
+    // saves land and the pin is lifted, and should be revisited then so the
+    // client still offers attacks against an unconscious PC.
     const targetableCombatantIds = world.combatants
       .filter((each) => each.combatantId !== actorId && each.status === "alive")
       .filter((candidate) =>

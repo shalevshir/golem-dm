@@ -229,7 +229,7 @@ describe("applyTurn", () => {
     expect(world.combatants.find((each) => each.combatantId === "guard_1")?.status).toBe("dead");
   });
 
-  it("kills a PC outright at 0 HP too -- death saves are not implemented (R45/C-31)", () => {
+  it("kills a PC outright at 0 HP too -- death saves are not implemented (C-31)", () => {
     // Same fixture as "kills a monster outright at 0 HP", but the target now
     // carries a populated characterId. Before the pin, resolve.ts read
     // `diesAtZeroHp: target.characterId === undefined`, which is false here --
