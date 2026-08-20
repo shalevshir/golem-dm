@@ -53,7 +53,15 @@ success. Death saves are the one exception (§4). `abilityCheck` and
 | Natural 20 | Hits regardless of modifiers or AC; is a Critical Hit. | `combat/` `resolveAttack` |
 | Natural 1 | Misses regardless of modifiers or AC. | `combat/` `resolveAttack` |
 | Critical hit damage | Roll the attack's damage **dice** twice; add modifiers **once**, as normal. | `dice/` `roll(..., {critical:true})` |
-| Base AC | `10 + Dexterity modifier`, then modified by armor etc. | not yet — comes with SRD data (step 5) |
+| Base AC | Unarmored `10 + Dex`. Armor sets a base per its table row. | `character/` `armorClassFor` |
+| Light armor AC | `base + Dex`, uncapped — including a negative modifier. | `character/` `armorClassFor` |
+| Medium armor AC | `base + Dex`, capped at `+2`. | `character/` `armorClassFor` |
+| Heavy armor AC | `base`, ignoring Dex entirely; a negative modifier does not reduce it. | `character/` `armorClassFor` |
+| Shield | `+2`, and only with shield training: "You gain the Armor Class benefit of a Shield only if you have training with it." | `character/` `armorClassFor` |
+| Armor Strength requirement | Armor listing a Strength score reduces speed by 10 ft unless the wearer meets it. | `character/` `speedFeetFor` |
+| Weapon proficiency | Proficiency Bonus is added to an attack roll only with a weapon the character is proficient with. Monsters are proficient with everything in their stat block. | `character/` `isProficientWith` |
+| Finesse | Choose Strength or Dexterity; the same modifier applies to attack and damage. Taken as the higher. | `character/` `attacksFor` |
+| Unarmed Strike | Always available. Attack `Str + PB`; damage `1 + Str` Bludgeoning; reach 5 ft. Only the Damage option is modelled. | `character/` `attacksFor` |
 | Attack action | Grants **one attack roll** with a weapon or an Unarmed Strike. Each target named is a separate roll, so two targets cost two attacks. | `combat/` `validateExecuteTurn` |
 | Extra Attack | "Attack twice instead of once whenever you take the Attack action." | `Combatant.attacksPerAction` |
 | Reach | 5 ft unless a rule says otherwise. | `Combatant.reachFeet` |
@@ -129,9 +137,7 @@ house rule. Chebyshev distance is therefore correct.
 | Corners | Diagonal movement **cannot cross the corner** of a wall or anything filling its space. | `spatial/` `cutsWallCorner` |
 | Range | Count squares from a square adjacent to one thing, stopping in the other's space; shortest route. Measured between the **nearest squares** of the two spaces, so a Huge creature is reachable all along its edge. Reduces to Chebyshev for two single-square creatures. | `spatial/` `footprintDistanceFeet`, `tileDistanceFeet` |
 
-**House rule (the only one):** line of sight uses Bresenham centre-to-centre.
-RAW is corner-to-corner. Kept behind the `LineOfSightAlgorithm` interface so it
-can be swapped (ADR-0003).
+**House rules** are catalogued in §9, not listed inline here.
 
 ---
 
@@ -195,16 +201,42 @@ These are where memory of 2014 will silently produce wrong code.
 Not yet implemented, roughly in dependency order:
 
 - Damage taken at 0 HP → death-save failures (§4)
+- **Every combatant dies at 0 HP, PCs included.** `resolve.ts` pins
+  `diesAtZeroHp: true` unconditionally rather than reading it off
+  `characterId` (correction C-31): death saving throws are not implemented,
+  so an Unconscious player character would strand the pipeline with nothing
+  that ever resolves that state. Closes once death saves exist.
 - Stabilising, and the 1d4-hour natural recovery (§4)
 - HP maximum reduced to 0 (§4)
 - Condition mechanical effects beyond those listed in §6
-- Weapon mastery and base AC from armor still need SRD data. Monster attack
-  ranges now come from `data/srd/` via `actionRangesFeetFrom`; player weapon and
-  spell ranges do not exist yet, so `CombatWorld.actionRangesFeet` stays
-  caller-supplied and defaults to the actor's melee reach.
-- **Conditional damage riders.** `MonsterAttack.extraDamage` holds unconditional
-  extras such as the cultist's Necrotic rider, but the goblin's "plus 2 (1d4) if
-  the attack roll had Advantage" has nowhere to go.
+- Weapon mastery still needs SRD data. Player weapon ranges are no longer a
+  gap: `actionRangesFeetFrom` now builds `CombatWorld.actionRangesFeet` from
+  every spawned creature's stat block, monster and character alike. Spell
+  ranges remain one — no spell action is ever derived, so a `cast_spell`
+  proposal still falls back to the actor's melee reach.
+- **Conditional damage riders.** `CreatureAttack.extraDamage` holds
+  unconditional extras such as the cultist's Necrotic rider, but the goblin's
+  "plus 2 (1d4) if the attack roll had Advantage" has nowhere to go.
+- **The Heavy weapon property.** RAW gives Disadvantage on attacks with a
+  Heavy weapon when a melee wielder's Strength or a ranged wielder's Dexterity
+  is below 13. `CreatureAttack` has no field for conditional Disadvantage, and
+  advantage is resolution-time rather than a stat-block fact.
+- **The Light weapon property.** RAW grants a bonus-action attack with a
+  second Light weapon, without the ability modifier on its damage.
+  `ExecuteTurn`'s `bonusAction` field tracks only the action-economy slot
+  (`abilityId`/`targetId`); `resolve.ts` never turns it into a resolved
+  attack, so a two-weapon-fighting bonus attack has no damage or to-hit path.
+- **Ammunition and Loading.** No ammunition is tracked and no once-per-turn
+  limit is enforced, so a Loading weapon can be fired as often as the action
+  economy allows.
+- **Armor training penalties.** Only the Shield half is implemented. RAW also
+  gives Disadvantage on Strength and Dexterity D20 tests and blocks
+  spellcasting for a character wearing armor they lack training with.
+- **Class features.** The Cleric's Divine Order (Protector) grants Martial
+  weapons and Heavy armor at level 1; `classes.json` carries only the base
+  entry, and no class feature is modelled.
+- **The Lance's conditional property.** RAW is "Two-Handed (unless mounted)";
+  mounts are not modelled, so it is recorded as plain Two-Handed.
 - **Monster traits, reactions and bonus actions.** Pack Tactics, Nimble Escape,
   Undead Fortitude and Parry are all absent — only the Actions block is
   captured, and only its attacks.
@@ -231,3 +263,34 @@ Not yet implemented, roughly in dependency order:
   condition unless the creature is Tiny or larger than the occupant. Forced
   movement is not modelled, so no code path can produce this yet — record it
   when one can.
+
+---
+
+## 9. House rules
+
+Deliberate, permanent departures from RAW, collected in one place.
+
+1. **Line of sight uses Bresenham centre-to-centre.** RAW is corner-to-corner.
+   Kept behind the `LineOfSightAlgorithm` interface so it can be swapped
+   (ADR-0003).
+2. **Versatile damage is resolved by shield, not by hands.** RAW: "A
+   Versatile weapon can be used with one or two hands ... The weapon deals
+   that damage when used with two hands to make a melee attack." Nothing
+   models hands, so `attacksFor` takes the two-handed die whenever no shield
+   is equipped. A character wielding a longsword and nothing else therefore
+   always swings it two-handed, which is the common case but not the only
+   legal one.
+
+   Two further cases follow from the same root cause — hands are not
+   modelled — and both are worth stating plainly rather than leaving them
+   implicit in the code:
+   - A weapon that is **both** Versatile and Thrown — spear and trident, the
+     only two such rows in the SRD — uses its two-handed die in **both**
+     modes, so a thrown spear deals 1d8 where RAW gives 1d6: `CreatureAttack`
+     carries exactly one `damage` value and thrown mode is not separately
+     modelled.
+   - The shield proxy also misses a dual-wielder: a shieldless character
+     holding a longsword **and** a shortsword still gets the longsword's
+     two-handed die (1d10), even though the off hand is occupied by the
+     second weapon, not free. Only the shield slot is checked, never whether
+     the off hand is actually free.

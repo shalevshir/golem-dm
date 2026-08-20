@@ -276,10 +276,11 @@ rule).
 - [ ] **7b:** before publishing the benchmark, adjudicate any disputed
       `action_rejected` codes against the notebook — a validator bug pooled
       into a model's rejection rate corrupts the comparison.
-- [ ] **Step 8 pre-work:** transcribe player weapon data (damage, properties,
+- [x] **Step 8 pre-work:** transcribe player weapon data (damage, properties,
       ranges) and armor/base AC into `data/srd/`, notebook-checked — closes
       the caller-supplied default on `CombatWorld.actionRangesFeet` for
-      players and the base-AC row in `RULES_REFERENCE.md` §2.
+      players and the base-AC row in `RULES_REFERENCE.md` §2. Shipped inside
+      step 9 spec #1 (§4.5), not step 8.
 - [ ] **Step 9:** build the rules digest for the narrative/tactical static
       prompt tier; verify each line against the notebook, then pin it under
       the same hash-guard as `TACTICAL_PROMPT_VERSION`.
@@ -482,3 +483,31 @@ written to catch, and none was caught by the suite going red — all came out
 of review. The rule that follows: **when a test exists to protect a
 specific line, delete that line and watch the test fail.** The sabotage
 check, not the green run, is the evidence.
+
+### 4.5 Step 9 decomposition (designed 2026-08-20)
+
+Step 9's narrative agent needs Hebrew names for every creature and action,
+and a real player character to narrate about — neither existed: monster and
+weapon data was English-only, and `goblin-ambush`'s hero was the `guard`
+monster stat block borrowed as a stand-in (§4.3). Building the narrative
+agent straight onto that foundation would mean building it twice, so step 9
+splits into two specs, each with its own plan → implementation cycle.
+
+**Spec #1 — player characters and SRD gear data.**
+[`docs/superpowers/specs/2026-08-20-player-character-design.md`](docs/superpowers/specs/2026-08-20-player-character-design.md),
+plan at
+[`docs/superpowers/plans/2026-08-20-player-character.md`](docs/superpowers/plans/2026-08-20-player-character.md)
+(16 tasks). Transcribes the SRD weapon, armor and skill tables into
+`data/srd/`; builds `deriveCharacter` / `characterStatBlock` in
+`@ai-dm/rules-engine` so a character's AC, speed, attacks and damage are
+computed from equipped gear instead of hand-entered; gives `goblin-ambush`'s
+hero a real `CharacterSheet` served over HTTP; and adds `nameHebrew` to every
+creature, action, weapon and armor row plus a required `grammaticalGender` on
+every character sheet.
+
+**Spec #2 — the narrative agent**, not yet designed. It can now assume
+Hebrew names on every creature and action, and a real `grammaticalGender` to
+narrate by, rather than having to invent either at prompt time.
+
+The roadmap's step 9 row (§4 above) stays **⬜ not started**: spec #1 is
+prerequisite infrastructure, not the narrative agent itself.

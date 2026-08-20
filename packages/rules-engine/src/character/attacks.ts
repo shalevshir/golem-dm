@@ -66,7 +66,7 @@ function attackAbilityFor(
  * HOUSE RULE. RAW: "A Versatile weapon can be used with one or two hands ...
  * The weapon deals that damage when used with two hands to make a melee
  * attack." Nothing in this engine models hands, so a shield stands in for the
- * off hand. Recorded in RULES_REFERENCE.md section 7.
+ * off hand. Recorded in RULES_REFERENCE.md section 9.
  *
  * Known gap: a weapon that is both Versatile and Thrown
  * (spear, trident — the only two such rows in the SRD) uses its two-handed

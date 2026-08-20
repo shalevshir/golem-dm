@@ -18,3 +18,8 @@ A markdown copy here would be a twin that drifts, and loading markdown at
 runtime would put file I/O into `@ai-dm/agents`, which must stay pure and
 bundleable. `hebrew-glossary.md` stays a data file: it is a table for
 non-programmers to edit, not prompt text.
+
+Creature, action, weapon and armor Hebrew names now live in `data/srd/` and
+`data/characters/` as `nameHebrew` fields, not in the glossary. The glossary
+covers game *terms* only — rules vocabulary like "saving throw" and
+"advantage" — never a proper name.

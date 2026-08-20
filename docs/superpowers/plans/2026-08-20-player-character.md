@@ -107,17 +107,19 @@ it only if you believe a row is wrong.
 
 | Path | Responsibility |
 |---|---|
-| `data/srd/weapons.json` | SRD weapon table, 37 rows |
+| `data/srd/weapons.json` | SRD weapon table, 38 rows |
 | `data/srd/armor.json` | SRD armor table, 13 rows including Shield |
 | `data/srd/skills.json` | 18 skill → governing ability rows |
 | `data/characters/README.md` | States this directory is **not** SRD content |
 | `data/characters/hero.json` | The `goblin-ambush` player character |
+| `packages/schemas/src/primitives.ts` | Shared leaf enums `DamageType`, `DiceNotation`, `CreatureSize` — created to break two real ESM cycles |
 | `packages/schemas/src/gear.ts` | `WeaponDefinition`, `ArmorDefinition`, `SkillDefinition` |
 | `packages/schemas/src/derived.ts` | `DerivedCharacter` |
 | `packages/rules-engine/src/character/armor.ts` | AC and speed derivation |
 | `packages/rules-engine/src/character/attacks.ts` | Weapon and unarmed attack derivation |
 | `packages/rules-engine/src/character/derive.ts` | `deriveCharacter`, `characterStatBlock` |
 | `packages/rules-engine/src/character/consistency.ts` | `assertSheetConsistent` |
+| `packages/rules-engine/src/character/test-fixtures.ts` | Shared `sheet()` / `GEAR` fixtures (Task 10) |
 | `packages/rules-engine/src/character/index.ts` | Barrel |
 | `apps/server/src/encounters/gear.ts` | Loads the four SRD data files |
 | `apps/server/src/encounters/characters.ts` | `loadCharacter` |
@@ -322,7 +324,7 @@ describe("SRD weapons", () => {
     WeaponDefinition.array().parse(readJson(join(SRD_DIR, "weapons.json")));
 
   it("ships the whole weapon table", () => {
-    expect(weapons()).toHaveLength(37);
+    expect(weapons()).toHaveLength(38);
   });
 
   it("uses unique weapon ids", () => {
@@ -506,7 +508,7 @@ translations of the English names.
 pnpm --filter @ai-dm/schemas test
 ```
 
-Expected: PASS, 37 weapons.
+Expected: PASS, 38 weapons.
 
 - [ ] **Step 6: Sabotage check**
 
