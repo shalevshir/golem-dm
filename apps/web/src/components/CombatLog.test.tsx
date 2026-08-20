@@ -96,16 +96,17 @@ describe("CombatLog", () => {
     ];
     const { container } = render(<CombatLog turns={turns} catalogue={catalogue} />);
     expect(screen.getByText(he.log.miss)).toBeInTheDocument();
-    // queryByText(he.log.damage) would be a vacuous check here: "נזק" sits as
-    // a bare text-node sibling to <bdi> elements and other text fragments
-    // inside AttackLine's <p> (same structural situation the outcome label
-    // was in before it got wrapped in <span> -- see the comment at
-    // CombatLog.tsx's AttackLine), so getNodeText's direct-text-node-only
-    // reconstruction never isolates "נזק" as its own queryable node even
-    // when it DOES render. An exact-string queryByText for it is therefore
-    // always null, regardless of whether the guard at CombatLog.tsx:65
-    // actually suppressed the fragment -- it can't fail. A container-text
-    // substring check has no such blind spot.
+    // queryByText(he.log.damage) would be a vacuous check here: the
+    // he.log.damage string sits as a bare text-node sibling to <bdi>
+    // elements and other text fragments inside AttackLine's <p> (same
+    // structural situation the outcome label was in before it got wrapped
+    // in <span> -- see the comment at CombatLog.tsx's AttackLine), so
+    // getNodeText's direct-text-node-only reconstruction never isolates the
+    // he.log.damage string as its own queryable node even when it DOES
+    // render. An exact-string queryByText for it is therefore always null,
+    // regardless of whether the guard at CombatLog.tsx:65 actually
+    // suppressed the fragment -- it can't fail. A container-text substring
+    // check has no such blind spot.
     expect(container.textContent).not.toContain(he.log.damage);
   });
 
@@ -148,5 +149,39 @@ describe("CombatLog", () => {
     ];
     render(<CombatLog turns={turns} catalogue={catalogue} />);
     expect(screen.getByText(/unknown-id/)).toBeInTheDocument();
+  });
+
+  it("wraps every English name in <bdi> inside the RTL document", () => {
+    // Pins the mixed-direction convention (apps/web/CLAUDE.md) the same way
+    // Grid.test.tsx and ActionBar.test.tsx pin it for their own English
+    // fragments: not merely that an English name appears somewhere in the
+    // rendered text, but that it appears as its own <bdi> node. A turn with
+    // an attack exercises both the turn header's actor name and the attack
+    // line's attacker/target names.
+    const turns: CombatLogTurn[] = [
+      {
+        actorId: "goblin-a",
+        actionType: "attack",
+        movedFeet: 0,
+        forfeited: false,
+        attacks: [
+          {
+            attackerId: "goblin-a",
+            targetId: "hero",
+            actionId: "scimitar",
+            outcome: "hit",
+            damage: 6,
+            targetStatusAfter: "alive",
+            attackRoll: { naturalRoll: 15, rolls: [15], total: 18, targetArmorClass: 12 },
+            damageRolls: [{ kind: "dice", notation: "1d6+2", rolls: [4], modifier: 2, total: 6 }],
+          },
+        ],
+      },
+    ];
+    const { container } = render(<CombatLog turns={turns} catalogue={catalogue} />);
+
+    const isolated = Array.from(container.querySelectorAll("bdi"), (each) => each.textContent);
+    expect(isolated).toContain("Goblin Warrior");
+    expect(isolated).toContain("Guard");
   });
 });
