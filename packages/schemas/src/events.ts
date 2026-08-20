@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { ExecuteTurn } from "./actions.js";
 import { EntityStatus } from "./world.js";
-import { DiceNotation } from "./srd.js";
+import { DiceNotation } from "./primitives.js";
 
 /**
  * Append-only game event log entry. The event stream is the source of truth;

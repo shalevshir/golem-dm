@@ -11,6 +11,8 @@ import {
   MonsterStatBlock,
   Skill,
   SkillDefinition,
+  WeaponDamage,
+  WeaponDefinition,
 } from "./index.js";
 
 const SRD_DIR = join(dirname(fileURLToPath(import.meta.url)), "../../../data/srd");
@@ -123,5 +125,63 @@ describe("SRD skills", () => {
 
   it("rejects a skill proficiency that is not a real skill", () => {
     expect(() => Skill.parse("banana")).toThrow();
+  });
+});
+
+describe("SRD weapons", () => {
+  const weapons = (): WeaponDefinition[] =>
+    WeaponDefinition.array().parse(readJson(join(SRD_DIR, "weapons.json")));
+
+  it("ships the whole weapon table", () => {
+    expect(weapons()).toHaveLength(38);
+  });
+
+  it("uses unique weapon ids", () => {
+    const ids = weapons().map((each) => each.weaponId);
+    expect(new Set(ids).size).toBe(ids.length);
+  });
+
+  it("gives the longsword its versatile die", () => {
+    const longsword = weapons().find((each) => each.weaponId === "longsword");
+    expect(longsword?.damage.diceNotation).toBe("1d8");
+    expect(longsword?.versatileDamage?.diceNotation).toBe("1d10");
+    expect(longsword?.properties).toEqual(["versatile"]);
+  });
+
+  // The blowgun is the table's only flat-damage weapon ("1 Piercing"), so it
+  // is the row that proves `diceNotation` is genuinely optional.
+  it("carries the blowgun as flat damage, not dice", () => {
+    const blowgun = weapons().find((each) => each.weaponId === "blowgun");
+    expect(blowgun?.damage.diceNotation).toBeUndefined();
+    expect(blowgun?.damage.fixedDamage).toBe(1);
+  });
+
+  it("marks reach weapons so melee reach can be derived", () => {
+    const reachIds = weapons()
+      .filter((each) => each.properties.includes("reach"))
+      .map((each) => each.weaponId)
+      .sort();
+    expect(reachIds).toEqual(["glaive", "halberd", "lance", "pike", "whip"]);
+  });
+
+  it("gives every ranged and thrown weapon both range bands", () => {
+    for (const weapon of weapons()) {
+      const ranged = weapon.kind === "ranged" || weapon.properties.includes("thrown");
+      if (!ranged) continue;
+      expect(weapon.rangeFeet, weapon.weaponId).toBeGreaterThan(0);
+      expect(weapon.longRangeFeet, weapon.weaponId).toBeGreaterThan(0);
+    }
+  });
+
+  it("names every weapon in Hebrew", () => {
+    for (const weapon of weapons()) {
+      expect(weapon.nameHebrew.trim(), weapon.weaponId).not.toBe("");
+    }
+  });
+
+  it("rejects a weapon carrying both dice and flat damage", () => {
+    expect(() =>
+      WeaponDamage.parse({ diceNotation: "1d6", fixedDamage: 1, damageType: "piercing" }),
+    ).toThrow();
   });
 });

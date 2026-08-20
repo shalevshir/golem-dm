@@ -2,28 +2,8 @@
 // CC-BY-4.0; see NOTICE.md for the required attribution.
 import { z } from "zod";
 import { Abilities, AbilityKey, CharacterClass, Condition, Skill } from "./character.js";
+import { DamageType, DiceNotation } from "./primitives.js";
 import { CreatureSize } from "./world.js";
-
-export const DamageType = z.enum([
-  "acid",
-  "bludgeoning",
-  "cold",
-  "fire",
-  "force",
-  "lightning",
-  "necrotic",
-  "piercing",
-  "poison",
-  "psychic",
-  "radiant",
-  "slashing",
-  "thunder",
-]);
-
-/** Dice the rules engine can parse, e.g. "1d6+2", "2d8", "8d10+24". */
-export const DiceNotation = z
-  .string()
-  .regex(/^\d+d\d+([+-]\d+)?$/, "expected dice notation such as 1d6+2");
 
 export const DamageRoll = z.object({
   /** Absent for flat damage, such as the cultist's "plus 1 Necrotic damage". */
@@ -101,7 +81,6 @@ export const SkillDefinition = z.object({
   ability: AbilityKey,
 });
 
-export type DamageType = z.infer<typeof DamageType>;
 export type DamageRoll = z.infer<typeof DamageRoll>;
 export type MonsterAttack = z.infer<typeof MonsterAttack>;
 export type MonsterStatBlock = z.infer<typeof MonsterStatBlock>;
