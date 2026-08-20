@@ -4,9 +4,19 @@ export const Tile = z.tuple([z.number().int(), z.number().int()]);
 export type Tile = z.infer<typeof Tile>;
 
 export const ActionType = z.enum([
-  "attack", "cast_spell", "dash", "disengage", "dodge",
-  "help", "hide", "ready", "shove", "grapple", "use_object",
+  "attack",
+  "cast_spell",
+  "dash",
+  "disengage",
+  "dodge",
+  "help",
+  "hide",
+  "ready",
+  "shove",
+  "grapple",
+  "use_object",
 ]);
+export type ActionType = z.infer<typeof ActionType>;
 
 export const PathType = z.enum(["direct", "flank", "retreat_to_cover"]);
 export type PathType = z.infer<typeof PathType>;
