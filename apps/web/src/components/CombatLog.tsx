@@ -76,11 +76,17 @@ export function CombatLog(props: CombatLogProps): JSX.Element {
   const nameOf = (id: string): string =>
     props.catalogue.find((each) => each.combatantId === id)?.nameEnglish ?? id;
 
+  // `props.turns` stays oldest-first — that's what the store's `foldCombatLog`
+  // depends on (`log.at(-1)` is "the group currently being filled") and what
+  // every store-level test asserts against. The newest-first reading order is
+  // a display-only concern, so it's applied here at render time instead.
+  const displayTurns = [...props.turns].reverse();
+
   return (
     <section className="combat-log">
       <p className="label">{he.log.heading}</p>
       <div className="log-panel">
-        {props.turns.map((turn, index) => (
+        {displayTurns.map((turn, index) => (
           // Composite key, matching NarrativePane/ErrorBanner's convention
           // in this codebase (never a bare index): turns can repeat the same
           // actorId across a fight, so actorId alone would collide.

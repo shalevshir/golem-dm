@@ -25,6 +25,24 @@ describe("CombatLog", () => {
     expect(screen.getByText(new RegExp(he.log.turnOf))).toBeInTheDocument();
   });
 
+  it("renders the newest turn first, even though the underlying array is oldest-first", () => {
+    // `turns` arrives oldest-first (that's what the store's fold depends on —
+    // see the component's own comment on `displayTurns`) — this pins that the
+    // component itself reverses for display, rather than requiring every
+    // caller to reverse before passing turns in.
+    const turns: CombatLogTurn[] = [
+      { actorId: "hero", actionType: "dodge", movedFeet: 0, attacks: [], forfeited: false },
+      { actorId: "goblin-a", actionType: "dash", movedFeet: 15, attacks: [], forfeited: false },
+    ];
+    const { container } = render(<CombatLog turns={turns} catalogue={catalogue} />);
+    const headers = [...container.querySelectorAll(".log-turn-header")].map(
+      (each) => each.textContent,
+    );
+    expect(headers).toHaveLength(2);
+    expect(headers[0]).toContain("Goblin Warrior");
+    expect(headers[1]).toContain("Guard");
+  });
+
   it("renders a non-attack action's label", () => {
     const turns: CombatLogTurn[] = [
       { actorId: "hero", actionType: "dodge", movedFeet: 0, attacks: [], forfeited: false },
