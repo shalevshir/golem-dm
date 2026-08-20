@@ -160,9 +160,10 @@ describe("GET /encounters/:encounterId", () => {
     ]);
 
     const hero = body.combatants.find((each) => each.combatantId === "hero");
-    // No player-character data exists, so the hero borrows the `guard` stat
-    // block (C-13) and its English name is all a label can show.
-    expect(hero?.nameEnglish).toBe("Guard");
+    // The hero is a real CharacterSheet (C-13 is closed); a character sheet
+    // is authored in Hebrew and has no English name, so `characterStatBlock`
+    // uses the characterId as `nameEnglish`.
+    expect(hero?.nameEnglish).toBe("hero");
     expect(hero?.faction).toBe("party");
     expect(hero?.maxHp).toBeGreaterThan(0);
   });
@@ -175,7 +176,7 @@ describe("GET /encounters/:encounterId", () => {
 
     const ids = body.actions.map((each) => each.actionId);
     expect(new Set(ids).size).toBe(ids.length);
-    expect(ids).toContain("spear");
+    expect(ids).toContain("longsword");
     expect(ids).toContain("scimitar");
   });
 

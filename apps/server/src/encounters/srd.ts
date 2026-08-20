@@ -11,17 +11,23 @@ import { MonsterStatBlock } from "@ai-dm/schemas";
 
 const MONSTER_DIR_RELATIVE = join("data", "srd", "monsters");
 
-/** Walk up until `data/srd/monsters` appears — a fixed relative path would be
- * wrong for `dist/` after `pnpm build`. */
-function monsterDir(): string {
+/** Walk up until `relativePath` appears — a fixed relative path would be
+ * wrong for `dist/` after `pnpm build`. Shared by every loader under
+ * `apps/server/src/encounters/` (`gear.ts`, `characters.ts`) so the walk-up
+ * itself is written once. */
+export function dataDir(relativePath: string): string {
   let dir = dirname(fileURLToPath(import.meta.url));
   for (;;) {
-    const candidate = join(dir, MONSTER_DIR_RELATIVE);
+    const candidate = join(dir, relativePath);
     if (existsSync(candidate)) return candidate;
     const parent = dirname(dir);
-    if (parent === dir) throw new Error(`Could not find ${MONSTER_DIR_RELATIVE} above this file`);
+    if (parent === dir) throw new Error(`Could not find ${relativePath} above this file`);
     dir = parent;
   }
+}
+
+function monsterDir(): string {
+  return dataDir(MONSTER_DIR_RELATIVE);
 }
 
 const cache = new Map<string, MonsterStatBlock>();

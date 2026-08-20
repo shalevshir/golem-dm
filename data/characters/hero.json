@@ -1,0 +1,27 @@
+{
+  "characterId": "hero",
+  "nameHebrew": "אלדד",
+  "grammaticalGender": "masculine",
+  "size": "medium",
+  "class": "fighter",
+  "level": 3,
+  "proficiencyBonus": 2,
+  "abilities": { "str": 16, "dex": 12, "con": 14, "int": 10, "wis": 12, "cha": 10 },
+  "savingThrowProficiencies": ["str", "con"],
+  "skillProficiencies": ["athletics", "perception"],
+  "combat": {
+    "maxHp": 28,
+    "currentHp": 28,
+    "tempHp": 0,
+    "armorClass": 16,
+    "speedFeet": 30,
+    "initiativeModifier": 1,
+    "deathSaves": { "successes": 0, "failures": 0 },
+    "spellSlots": {}
+  },
+  "conditions": [],
+  "inventory": [
+    { "itemId": "chain_mail", "quantity": 1, "equipped": true },
+    { "itemId": "longsword", "quantity": 1, "equipped": true }
+  ]
+}
