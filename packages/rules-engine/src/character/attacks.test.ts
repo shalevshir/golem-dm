@@ -166,7 +166,7 @@ describe("attacksFor", () => {
   });
 
   // Versatile: no hands are modelled, so the two-handed die is taken whenever
-  // no shield is equipped. HOUSE RULE — see RULES_REFERENCE.md section 7.
+  // no shield is equipped. HOUSE RULE — see RULES_REFERENCE.md section 9.
   it("takes the versatile die when no shield is equipped", () => {
     const attack = only("longsword", attacksFor({ ...base, weapons: [LONGSWORD] }));
     expect(attack?.damage.diceNotation).toBe("1d10+3");

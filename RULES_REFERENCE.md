@@ -59,11 +59,12 @@ success. Death saves are the one exception (§4). `abilityCheck` and
 | Heavy armor AC | `base`, ignoring Dex entirely; a negative modifier does not reduce it. | `character/` `armorClassFor` |
 | Shield | `+2`, and only with shield training: "You gain the Armor Class benefit of a Shield only if you have training with it." | `character/` `armorClassFor` |
 | Armor Strength requirement | Armor listing a Strength score reduces speed by 10 ft unless the wearer meets it. | `character/` `speedFeetFor` |
-| Weapon proficiency | Proficiency Bonus is added to an attack roll only with a weapon the character is proficient with. Monsters are proficient with everything in their stat block. | `character/` `isProficientWith` |
+| Weapon proficiency (character) | Proficiency Bonus is added to an attack roll only with a weapon the character is proficient with. | `character/` `isProficientWith` |
+| Weapon proficiency (monster) | "A monster is proficient with any weapon in its stat block" — never computed; it is simply the printed `attackBonus`. | `schemas` `CreatureAttack` |
 | Finesse | Choose Strength or Dexterity; the same modifier applies to attack and damage. Taken as the higher. | `character/` `attacksFor` |
-| Unarmed Strike | Always available. Attack `Str + PB`; damage `1 + Str` Bludgeoning; reach 5 ft. Only the Damage option is modelled. | `character/` `attacksFor` |
+| Unarmed Strike | Always available. Attack `Str + PB`; damage `1 + Str` Bludgeoning, floored at 0; reach 5 ft. Only the Damage option is modelled. | `character/` `attacksFor` |
 | Attack action | Grants **one attack roll** with a weapon or an Unarmed Strike. Each target named is a separate roll, so two targets cost two attacks. | `combat/` `validateExecuteTurn` |
-| Extra Attack | "Attack twice instead of once whenever you take the Attack action." | `Combatant.attacksPerAction` |
+| Extra Attack | "Attack twice instead of once whenever you take the Attack action." | `Combatant.attacksPerAction`; derived for a character from `ClassDefinition.extraAttackLevel` in `character/` `deriveCharacter` |
 | Reach | 5 ft unless a rule says otherwise. | `Combatant.reachFeet` |
 
 ---
@@ -104,7 +105,7 @@ Creatures do **not** block line of sight; they grant cover instead, so
 | Temporary HP | Absorbed before real HP. Healing **cannot** restore them. They never stack — RAW lets the recipient **choose** which pool to keep ("you decide whether to keep the ones you have or to gain the new ones"); auto-keeping the higher will be our simplification when granting is implemented (today the engine only spends temp HP, never grants it). | `combat/` `applyDamage`, `applyHealing` |
 | Massive damage | When damage drops you to 0 **and damage remains**, you die if the remainder ≥ your HP maximum. | `combat/` `applyDamage` → `instantDeath` |
 | Monster death | A monster **dies instantly** at 0 HP — it does not fall unconscious or roll death saves. | `applyDamage(..., {diesAtZeroHp:true})` |
-| Character at 0 HP | Falls Unconscious and rolls death saves. | `applyDamage` default |
+| Character at 0 HP | Falls Unconscious and rolls death saves (see §8). | `applyDamage` default |
 | HP maximum of 0 | A creature whose HP *maximum* drops to 0 dies. | not implemented |
 | Death saves | Roll d20: **10 or higher succeeds**. Three successes → Stable. Three failures → dead. Need not be consecutive. | `combat/` `rollDeathSave` |
 | Death save nat 20 | Regain **1 HP** immediately. | `combat/` `rollDeathSave` |
@@ -137,7 +138,8 @@ house rule. Chebyshev distance is therefore correct.
 | Corners | Diagonal movement **cannot cross the corner** of a wall or anything filling its space. | `spatial/` `cutsWallCorner` |
 | Range | Count squares from a square adjacent to one thing, stopping in the other's space; shortest route. Measured between the **nearest squares** of the two spaces, so a Huge creature is reachable all along its edge. Reduces to Chebyshev for two single-square creatures. | `spatial/` `footprintDistanceFeet`, `tileDistanceFeet` |
 
-**House rules** are catalogued in §9, not listed inline here.
+The two broadest house rules are catalogued in §9. A third, narrower one
+stays inline below, in the "Moving a large creature" row.
 
 ---
 
@@ -203,9 +205,12 @@ Not yet implemented, roughly in dependency order:
 - Damage taken at 0 HP → death-save failures (§4)
 - **Every combatant dies at 0 HP, PCs included.** `resolve.ts` pins
   `diesAtZeroHp: true` unconditionally rather than reading it off
-  `characterId` (correction C-31): death saving throws are not implemented,
-  so an Unconscious player character would strand the pipeline with nothing
-  that ever resolves that state. Closes once death saves exist.
+  `characterId` (correction C-31). Death saves themselves are implemented
+  and tested (`combat/` `rollDeathSave`, §4); what is missing is a driver —
+  `resolve.ts`'s own comment says it plainly, "this file does not drive it."
+  An Unconscious player character would strand the pipeline with nothing
+  that ever calls `rollDeathSave`. Closes once something in the encounter
+  pipeline drives it.
 - Stabilising, and the 1d4-hour natural recovery (§4)
 - HP maximum reduced to 0 (§4)
 - Condition mechanical effects beyond those listed in §6
@@ -232,11 +237,20 @@ Not yet implemented, roughly in dependency order:
 - **Armor training penalties.** Only the Shield half is implemented. RAW also
   gives Disadvantage on Strength and Dexterity D20 tests and blocks
   spellcasting for a character wearing armor they lack training with.
+- **Armor's Stealth Disadvantage.** `stealthDisadvantage` is `true` on 7 rows
+  of `data/srd/armor.json`, but nothing reads the field outside the schema
+  that defines it; RAW's Disadvantage on Dexterity (Stealth) checks while
+  wearing that armor is never applied.
 - **Class features.** The Cleric's Divine Order (Protector) grants Martial
   weapons and Heavy armor at level 1; `classes.json` carries only the base
   entry, and no class feature is modelled.
 - **The Lance's conditional property.** RAW is "Two-Handed (unless mounted)";
   mounts are not modelled, so it is recorded as plain Two-Handed.
+- **The Two-Handed weapon property itself is unenforced.** Carried by 13
+  rows of `WeaponProperty` (`packages/schemas/src/gear.ts`) — the Lance
+  above included — but read nowhere: a character can equip a Greatsword and
+  a Shield at once and keep the Shield's +2 AC while swinging two-handed,
+  which RAW forbids.
 - **Monster traits, reactions and bonus actions.** Pack Tactics, Nimble Escape,
   Undead Fortitude and Parry are all absent — only the Actions block is
   captured, and only its attacks.
@@ -268,7 +282,8 @@ Not yet implemented, roughly in dependency order:
 
 ## 9. House rules
 
-Deliberate, permanent departures from RAW, collected in one place.
+Deliberate, permanent departures from RAW. The two broadest are collected
+here; a third, narrower one is pointed to below rather than duplicated.
 
 1. **Line of sight uses Bresenham centre-to-centre.** RAW is corner-to-corner.
    Kept behind the `LineOfSightAlgorithm` interface so it can be swapped
@@ -294,3 +309,9 @@ Deliberate, permanent departures from RAW, collected in one place.
      two-handed die (1d10), even though the off hand is occupied by the
      second weapon, not free. Only the shield slot is checked, never whether
      the off hand is actually free.
+
+A third, narrower house rule — hard-blocking a Large creature from
+squeezing through a one-square narrow opening, rather than RAW's option of
+paying double movement for it — stays documented where it already lives,
+in §5's "Moving a large creature" row and the matching gap entry in §8,
+rather than duplicated as a third entry here.

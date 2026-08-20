@@ -1690,7 +1690,7 @@ describe("attacksFor", () => {
   });
 
   // Versatile: no hands are modelled, so the two-handed die is taken whenever
-  // no shield is equipped. HOUSE RULE — see RULES_REFERENCE.md section 7.
+  // no shield is equipped. HOUSE RULE — see RULES_REFERENCE.md section 9.
   it("takes the versatile die when no shield is equipped", () => {
     const attack = only("longsword", attacksFor({ ...base, weapons: [LONGSWORD] }));
     expect(attack?.damage.diceNotation).toBe("1d10+3");
@@ -1857,7 +1857,7 @@ function attackAbilityFor(
  * HOUSE RULE. RAW: "A Versatile weapon can be used with one or two hands ...
  * The weapon deals that damage when used with two hands to make a melee
  * attack." Nothing in this engine models hands, so a shield stands in for the
- * off hand. Recorded in RULES_REFERENCE.md section 7.
+ * off hand. Recorded in RULES_REFERENCE.md section 9.
  */
 function damageDiceFor(weapon: WeaponDefinition, shieldEquipped: boolean) {
   if (weapon.versatileDamage !== undefined && !shieldEquipped) return weapon.versatileDamage;
@@ -3500,7 +3500,7 @@ pnpm test && pnpm typecheck && npx eslint packages apps tools
 ```
 
 Expected: all green. Record the new suite total in the commit message; it was
-889 before this plan.
+931 before this plan.
 
 - [ ] **Step 7: Play it**
 

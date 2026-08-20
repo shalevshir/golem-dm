@@ -381,7 +381,15 @@ rediscovering:
   living-faction check fire and the fight actually stop. This guarantee
   disappears the moment real `CharacterSheet`-backed heroes arrive, and
   whatever step adds them also has to decide what ends a fight the party can
-  survive.
+  survive. **Superseded by step 9 spec #1 (§4.5):** `combatantFromStatBlock`
+  now sets `characterId` for a character spawn, the hero is a real
+  `CharacterSheet`-derived character rather than a borrowed `guard` stat
+  block, and the question above is answered — `resolve.ts` still pins
+  `diesAtZeroHp: true` unconditionally rather than reading it off
+  `characterId`, so a real hero still dies at 0 HP rather than falling
+  Unconscious, now recorded as a known gap rather than an artifact of the
+  stand-in (`RULES_REFERENCE.md` §8, "Every combatant dies at 0 HP, PCs
+  included").
 - **`EncounterDefinition.maxRounds` is inert.** It is set (20, for
   `goblin-ambush`) and threaded through `buildEncounter`, but nothing under
   `apps/server/src` or `packages/rules-engine/src` reads it — there is no
@@ -466,10 +474,11 @@ Costs and gotchas the next engineer should know:
 - The narrative pane currently renders **English**, because the narrative
   agent is spec #1's deterministic stand-in; the Hebrew agent arrives in
   step 9. Today the only Hebrew a player sees is UI chrome.
-- There is still no Hebrew name data anywhere in the repo (the SRD is
-  English per ADR 0001), so combatant and action names render as English
-  inside the RTL UI — which is why every such fragment is wrapped in
-  `<bdi>`.
+- Hebrew name data now exists throughout `data/srd/` and `data/characters/`
+  (`nameHebrew`, added by step 9 spec #1 — see §4.5), but the web client
+  does not consume it yet: combatant and action names still render as
+  English (`nameEnglish`) inside the RTL UI — which is why every such
+  fragment is wrapped in `<bdi>`.
 
 The process finding, stated plainly, is the most transferable thing the
 slice produced: **seven separate tasks shipped a test whose name promised a
@@ -501,7 +510,9 @@ plan at
 `data/srd/`; builds `deriveCharacter` / `characterStatBlock` in
 `@ai-dm/rules-engine` so a character's AC, speed, attacks and damage are
 computed from equipped gear instead of hand-entered; gives `goblin-ambush`'s
-hero a real `CharacterSheet` served over HTTP; and adds `nameHebrew` to every
+hero a real `CharacterSheet` (server-side only — `loadCharacter` never
+leaves `apps/server`) whose `DerivedCharacter` projection crosses HTTP
+inside `EncounterCatalogue.characters`; and adds `nameHebrew` to every
 creature, action, weapon and armor row plus a required `grammaticalGender` on
 every character sheet.
 
