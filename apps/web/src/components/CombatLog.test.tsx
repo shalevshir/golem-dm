@@ -88,7 +88,12 @@ describe("CombatLog", () => {
     expect(screen.getByText(/20/)).toBeInTheDocument(); // natural roll
     expect(screen.getByText(/24/)).toBeInTheDocument(); // total
     expect(screen.getByText(/16/)).toBeInTheDocument(); // target AC
-    expect(screen.getByText(/10/)).toBeInTheDocument(); // damage total
+    // The fixture is a critical hit, which doubles the damage dice (5e:
+    // dice only, never the modifier) -- rolls: [4, 4], modifier: 2,
+    // total: 10. Pins that BOTH rolled dice are shown, not just the
+    // weapon's base notation ("1d6+2 = 10" would read as impossible next
+    // to a total a single d6+2 can never reach).
+    expect(screen.getByText(/4 \+ 4 \+ 2 = 10/)).toBeInTheDocument();
   });
 
   it("renders a miss with no damage line", () => {

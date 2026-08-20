@@ -28,12 +28,30 @@ const OUTCOME_LABEL: Record<AttackTrace["outcome"], string> = {
   critical_miss: he.log.criticalMiss,
 };
 
+/** `"+ 3"` / `"- 2"` — always signed, matching the original attack-roll
+ *  convention (`modifier >= 0` reads as `"+ 0"`, never omitted), the one
+ *  formatting rule shared by both the attack roll and every damage roll
+ *  below. */
+function signedModifier(modifier: number): string {
+  return modifier >= 0 ? `+ ${String(modifier)}` : `- ${String(-modifier)}`;
+}
+
+/** Shows the dice actually rolled, not just the weapon's base notation —
+ *  a critical hit doubles the dice (5e: dice only, never the modifier), so
+ *  `notation` alone ("1d6+2") would read as impossible next to a total that
+ *  reflects two dice ("1d6+2 = 13" looks like a bug, not a crit). Each
+ *  `DamageRollTrace` entry (more than one only for an extra-damage rider,
+ *  which no encounter shipped with this slice actually uses) gets its own
+ *  "rolls + modifier = total" segment, joined with " · " to stay visually
+ *  distinct from the "+" already inside each segment's own arithmetic. */
 function formatDamageRolls(rolls: AttackTrace["damageRolls"]): string {
   return rolls
     .map((each) =>
-      each.kind === "dice" ? `${each.notation} = ${String(each.total)}` : String(each.total),
+      each.kind === "dice"
+        ? `${each.rolls.join(" + ")} ${signedModifier(each.modifier)} = ${String(each.total)}`
+        : String(each.total),
     )
-    .join(" + ");
+    .join(" · ");
 }
 
 function AttackLine(props: { attack: AttackTrace; nameOf: (id: string) => string }): JSX.Element {
@@ -41,8 +59,7 @@ function AttackLine(props: { attack: AttackTrace; nameOf: (id: string) => string
   const { naturalRoll, rolls, total, targetArmorClass } = attack.attackRoll;
   const rollsText =
     rolls.length > 1 ? `${rolls.join(", ")} (${String(naturalRoll)})` : String(naturalRoll);
-  const modifier = total - naturalRoll;
-  const modifierText = modifier >= 0 ? `+ ${String(modifier)}` : `- ${String(-modifier)}`;
+  const modifierText = signedModifier(total - naturalRoll);
 
   return (
     <p>
