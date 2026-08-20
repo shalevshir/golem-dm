@@ -21,8 +21,31 @@ const UNIVERSAL_LABELS: Record<string, string | undefined> = {
   disengage: he.actions.disengage,
 };
 
+/** `dodge`/`dash`/`disengage` have no `actionId`, so `actionType` alone would
+ *  collide across two such affordances in the same frame if that ever became
+ *  possible; pairing it with `actionId` (empty string when absent) keeps the
+ *  key unique the same way the existing `key={...}` on the button below
+ *  already relied on. */
+function affordanceKey(action: ActionAffordance): string {
+  return `${action.actionType}:${action.actionId ?? ""}`;
+}
+
 export function ActionBar(props: ActionBarProps): JSX.Element {
-  const [pending, setPending] = useState<ActionAffordance | null>(null);
+  // Only the identifying key is state; the affordance itself is re-resolved
+  // against `props.actions` on every render instead of being snapshotted at
+  // the moment the picker opened. A `turn_affordances` frame can arrive
+  // while a target pick is in progress — the action it named may have
+  // gained a fresh `targetableCombatantIds`, lost every target, or vanished
+  // outright — and re-deriving means the picker always reflects what the
+  // server currently allows. If the key no longer matches anything in
+  // `props.actions`, `pending` resolves to `null` on its own and the picker
+  // closes, so a stale `ActionAffordance` never reaches `onCommit`. No
+  // effect needed: this is plain derivation during render.
+  const [pendingKey, setPendingKey] = useState<string | null>(null);
+  const pending =
+    pendingKey === null
+      ? null
+      : (props.actions.find((action) => affordanceKey(action) === pendingKey) ?? null);
 
   function labelFor(action: ActionAffordance): JSX.Element {
     const universal =
@@ -46,7 +69,7 @@ export function ActionBar(props: ActionBarProps): JSX.Element {
               type="button"
               disabled={props.disabled}
               onClick={() => {
-                setPending(null);
+                setPendingKey(null);
                 props.onCommit(pending, targetId);
               }}
             >
@@ -57,7 +80,7 @@ export function ActionBar(props: ActionBarProps): JSX.Element {
         <button
           type="button"
           onClick={() => {
-            setPending(null);
+            setPendingKey(null);
           }}
         >
           {he.actions.cancel}
@@ -70,7 +93,7 @@ export function ActionBar(props: ActionBarProps): JSX.Element {
     <div className="action-bar">
       {props.actions.map((action) => (
         <button
-          key={`${action.actionType}:${action.actionId ?? ""}`}
+          key={affordanceKey(action)}
           type="button"
           // An action needing a target with none in range renders DISABLED
           // rather than absent: `requiresTarget` exists precisely so the
@@ -80,7 +103,7 @@ export function ActionBar(props: ActionBarProps): JSX.Element {
           }
           onClick={() => {
             if (action.requiresTarget) {
-              setPending(action);
+              setPendingKey(affordanceKey(action));
               return;
             }
             props.onCommit(action, undefined);

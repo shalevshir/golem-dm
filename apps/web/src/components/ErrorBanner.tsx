@@ -23,8 +23,12 @@ export function ErrorBanner(props: ErrorBannerProps): JSX.Element | null {
   return (
     <div className="error-banner" role="alert">
       {error !== null && <p>{errorMessage(error.code)}</p>}
-      {reasons.map((reason) => (
-        <p key={reason}>{rejectionMessage(reason)}</p>
+      {reasons.map((reason, index) => (
+        // Index included: `reasons` is a plain `z.array(z.string())` on the
+        // wire (`protocol.ts`), built from `validation.rejections.map(each
+        // => each.reason)` in `pipeline.ts` — two sub-actions failing the
+        // same way is reachable, so `reason` alone can collide.
+        <p key={`${String(index)}-${reason}`}>{rejectionMessage(reason)}</p>
       ))}
       <button type="button" onClick={props.onDismiss}>
         ✕

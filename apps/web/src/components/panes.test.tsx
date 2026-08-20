@@ -71,6 +71,39 @@ describe("ErrorBanner", () => {
     expect(screen.getByText(he.rejections.target_out_of_reach)).toBeInTheDocument();
   });
 
+  it("renders both instances when the same rejection reason repeats", () => {
+    // Reachable on the wire: `reasons` is a plain string array built from
+    // `validation.rejections.map(each => each.reason)`, so two sub-actions
+    // failing for the same reason produce a duplicate entry. A key collision
+    // wouldn't drop a line here, but this pins that both still render.
+    render(
+      <ErrorBanner
+        error={null}
+        rejection={{
+          reasons: ["target_out_of_reach", "target_out_of_reach"],
+          messages: ["too far", "also too far"],
+        }}
+        onDismiss={() => undefined}
+      />,
+    );
+    expect(screen.getAllByText(he.rejections.target_out_of_reach)).toHaveLength(2);
+  });
+
+  it("renders nothing for a not_your_turn error", () => {
+    // Per the spec's error table, `not_your_turn` means a stale click — the
+    // affordance frame already governs what is clickable, so surfacing this
+    // to the player would be a UX regression, not useful information.
+    const { container } = render(
+      <ErrorBanner
+        error={{ code: "not_your_turn", message: "stale click" }}
+        rejection={null}
+        onDismiss={() => undefined}
+      />,
+    );
+    expect(container).toBeEmptyDOMElement();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
   it("dismisses", async () => {
     const onDismiss = vi.fn();
     render(
