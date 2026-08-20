@@ -104,6 +104,29 @@ describe("SRD classes", () => {
       cleric: "wis",
     });
   });
+
+  it("gives each class its SRD weapon proficiencies and armor training", () => {
+    const parsed = ClassDefinition.array().parse(readJson(join(SRD_DIR, "classes.json")));
+    const byClass = new Map(parsed.map((each) => [each.class, each]));
+
+    expect(byClass.get("fighter")?.weaponProficiencies.categories).toEqual(["simple", "martial"]);
+    expect(byClass.get("fighter")?.armorTraining).toEqual(["light", "medium", "heavy", "shield"]);
+
+    expect(byClass.get("wizard")?.weaponProficiencies.categories).toEqual(["simple"]);
+    expect(byClass.get("wizard")?.armorTraining).toEqual([]);
+
+    // "Simple weapons and Martial weapons that have the Finesse or Light
+    // property" — the reason this is not a plain category list.
+    expect(byClass.get("rogue")?.weaponProficiencies.categories).toEqual(["simple"]);
+    expect(byClass.get("rogue")?.weaponProficiencies.martialWithProperties).toEqual([
+      "finesse",
+      "light",
+    ]);
+    expect(byClass.get("rogue")?.armorTraining).toEqual(["light"]);
+
+    expect(byClass.get("cleric")?.weaponProficiencies.categories).toEqual(["simple"]);
+    expect(byClass.get("cleric")?.armorTraining).toEqual(["light", "medium", "shield"]);
+  });
 });
 
 describe("SRD skills", () => {

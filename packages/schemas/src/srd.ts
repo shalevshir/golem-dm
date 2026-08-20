@@ -2,6 +2,7 @@
 // CC-BY-4.0; see NOTICE.md for the required attribution.
 import { z } from "zod";
 import { Abilities, AbilityKey, CharacterClass, Condition, Skill } from "./character.js";
+import { ArmorCategory, WeaponProperty } from "./gear.js";
 import { DamageType, DiceNotation } from "./primitives.js";
 import { CreatureSize } from "./world.js";
 
@@ -62,6 +63,17 @@ export const ConditionDefinition = z.object({
   effects: z.array(z.object({ nameEnglish: z.string(), ruleEnglish: z.string() })).min(1),
 });
 
+/**
+ * Which weapons a class may add its Proficiency Bonus to. `categories` covers
+ * the common "Simple" / "Simple and Martial" case; `martialWithProperties`
+ * exists for the Rogue, whose grant is "Martial weapons that have the Finesse
+ * or Light property" and cannot be expressed as a category.
+ */
+export const WeaponProficiencies = z.object({
+  categories: z.array(z.enum(["simple", "martial"])).default([]),
+  martialWithProperties: z.array(WeaponProperty).optional(),
+});
+
 export const ClassDefinition = z.object({
   class: CharacterClass,
   nameEnglish: z.string(),
@@ -72,6 +84,8 @@ export const ClassDefinition = z.object({
   spellcastingAbility: AbilityKey.optional(),
   /** Level at which the class gains Extra Attack, if it ever does. */
   extraAttackLevel: z.number().int().min(1).max(20).optional(),
+  weaponProficiencies: WeaponProficiencies.default({}),
+  armorTraining: z.array(ArmorCategory).default([]),
 });
 
 /** Which ability governs a skill check. Data, because the SRD says so. */
@@ -85,5 +99,6 @@ export type DamageRoll = z.infer<typeof DamageRoll>;
 export type MonsterAttack = z.infer<typeof MonsterAttack>;
 export type MonsterStatBlock = z.infer<typeof MonsterStatBlock>;
 export type ConditionDefinition = z.infer<typeof ConditionDefinition>;
+export type WeaponProficiencies = z.infer<typeof WeaponProficiencies>;
 export type ClassDefinition = z.infer<typeof ClassDefinition>;
 export type SkillDefinition = z.infer<typeof SkillDefinition>;
