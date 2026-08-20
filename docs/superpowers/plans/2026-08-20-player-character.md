@@ -21,36 +21,45 @@ zod for schemas and validation, Vitest (`globals: false` — import
 
 **Spec:** [`docs/superpowers/specs/2026-08-20-player-character-design.md`](../specs/2026-08-20-player-character-design.md)
 
-## Prerequisite: rebase after the combat roll log
+## Prerequisite: rebase onto the combat roll log — MERGED, verified
 
-**Do not start this plan until
-[`2026-08-20-combat-roll-log.md`](2026-08-20-combat-roll-log.md) (spec #3 of
-step 8) has merged.** Both plans were written on `fbfb420` and both edit
-`packages/rules-engine/src/encounter/resolve.ts`. Sequencing was decided
-2026-08-20: the roll log first, because it closes step 8 before step 9 opens
-and is a third the size.
+The combat roll log (spec #3 of step 8) **merged on 2026-08-20** at
+`b5b0421` plus follow-ups, HEAD `4273563`. This plan was written against
+`fbfb420`, so the two edits below are required before Task 5 runs. Both were
+re-verified against the merged code on 2026-08-20 — they are confirmed, not
+predicted.
 
-Two edits are then required here before Task 5 runs, and neither is optional:
-
-1. **Task 5, Step 4 — `resolve.ts` imports.** The roll-log plan's Task 2
-   Step 4 rewrites that file's import block, adding `AttackRollTrace`,
-   `DamageRollTrace` and `AttackOutcome` and removing `CoverLevel`. Apply the
-   `MonsterAttack` → `CreatureAttack` and `MonsterStatBlock` →
-   `CreatureStatBlock` rename over **that** list, not the one this plan was
-   written against.
-2. **Task 5 — the roll log's new test fixtures.** Its `resolve.test.ts` adds
-   two hand-authored stat blocks (`flatDamageBlock`, `riderBlock`) whose
-   `actions` entries carry `actionId`, `nameEnglish`, `attackBonus`,
-   `reachFeet`, `damage` and `extraDamage` — but **no `nameHebrew`**, which
-   Task 5 makes required on `CreatureAttack`. Add it to both, or they stop
-   typechecking. This is a real break, not a warning: verify with
+1. **Task 5, Step 4 — `resolve.ts` imports.** The merged import block at
+   `packages/rules-engine/src/encounter/resolve.ts:21-30` now reads
+   `AttackRollTrace, Combatant, DamageRoll, DamageRollTrace, EntityStatus,
+   ExecuteTurn, MonsterAttack, MonsterStatBlock` and no longer imports
+   `CoverLevel`. Apply the `MonsterAttack` → `CreatureAttack` and
+   `MonsterStatBlock` → `CreatureStatBlock` rename over **that** list. The
+   rename scope is otherwise unchanged: `MonsterAttack` is still exactly 5
+   references across 2 files (`resolve.ts:28`, `resolve.ts:106`,
+   `srd.ts:40`, `srd.ts:75`, `srd.ts:99`).
+2. **Task 5 — two new fixtures need `nameHebrew`.**
+   `packages/rules-engine/src/encounter/resolve.test.ts` gained
+   `flatDamageBlock` (line 228) and `riderBlock` (line 270). Each declares an
+   `actions` entry with `nameEnglish` and **no `nameHebrew`**, which Task 5
+   makes required on `CreatureAttack`. Add it to both or they stop
+   typechecking. Verify with
    `pnpm --filter @ai-dm/rules-engine typecheck` immediately after Task 5.
 
-One opportunity, not a requirement: the roll log's `CombatLog` component
+`AttackRecord` also gained `attackRoll: AttackRollTrace` and
+`damageRolls: DamageRollTrace[]` and lost `cover`. This plan does not touch
+`AttackRecord`, and derived-character attacks produce ordinary `DamageRoll`
+values, so the roll log renders the hero's derived dice with no extra work.
+
+One opportunity, not a requirement: `apps/web/src/components/CombatLog.tsx`
 renders creature and action names in English inside `<bdi>`, because no
 Hebrew name data existed when it was written. Task 15 here puts `nameHebrew`
 on every `CatalogueCombatant` and `CatalogueAction`, so a small follow-up can
 switch that component to Hebrew once this plan lands.
+
+**Baseline before starting:** `pnpm test` is green at **931 tests** across 71
+files (schemas 97, rules-engine 334, web 93, agents 176, sim 129, server
+102), verified 2026-08-20 on `4273563`.
 
 ## Global Constraints
 
