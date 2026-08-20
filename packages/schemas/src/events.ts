@@ -124,7 +124,22 @@ export type AttackTrace = z.infer<typeof AttackTrace>;
 export const DiceRolledPayload = z.object({
   actorId: z.string(),
   attacks: z.array(AttackTrace),
+  /**
+   * `movedFeet` departs from the append-only convention of adding new
+   * fields `.optional()` (see `packages/schemas/CLAUDE.md`) — deliberately.
+   * A legacy `dice_rolled` event persisted before this field existed should
+   * fail this parse and be skipped by the client's defensive handling
+   * (`foldCombatLog`), not render with a fabricated `movedFeet: 0` that
+   * looks like real data. A half-rendered legacy event with a false zero is
+   * worse than one uniformly skipped.
+   */
   movedFeet: z.number().int().min(0),
+  /**
+   * The RNG seed the engine used to resolve this turn's rolls. Present for
+   * replay/audit even though the client's combat log does not currently
+   * read it.
+   */
+  seed: z.number().int(),
 });
 export type DiceRolledPayload = z.infer<typeof DiceRolledPayload>;
 

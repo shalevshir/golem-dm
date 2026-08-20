@@ -360,6 +360,7 @@ describe("App", () => {
         event: event(2, "dice_rolled", {
           actorId: "hero",
           movedFeet: 0,
+          seed: 42,
           attacks: [
             {
               attackerId: "hero",

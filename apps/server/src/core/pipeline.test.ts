@@ -8,6 +8,7 @@ import {
   createTacticalAgent,
   DEFAULT_MODEL_ROUTING,
 } from "@ai-dm/agents";
+import { DiceRolledPayload } from "@ai-dm/schemas";
 import type {
   ClientMessage,
   ExecuteTurn,
@@ -483,6 +484,9 @@ describe("handleCommand — structured action", () => {
     await drain(handleCommand(session, moveAndDodge, portsWith(store)));
     const rolled = (await store.readSince("s1", 0)).find((each) => each.type === "dice_rolled");
     expect(rolled?.payload).toMatchObject({ movedFeet: 10 });
+    // The real wire payload, not a hand-built fixture: proves DiceRolledPayload
+    // actually describes what the server emits, not just what a test expects.
+    expect(DiceRolledPayload.safeParse(rolled?.payload).success).toBe(true);
   });
 
   it("records movedFeet: 0 on a dice_rolled event for a turn with no movement", async () => {

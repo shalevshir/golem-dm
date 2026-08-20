@@ -377,6 +377,7 @@ describe("DiceRolledPayload", () => {
     const payload = DiceRolledPayload.parse({
       actorId: "goblin-a",
       movedFeet: 10,
+      seed: 42,
       attacks: [
         {
           attackerId: "goblin-a",
@@ -396,7 +397,12 @@ describe("DiceRolledPayload", () => {
   });
 
   it("parses a turn with no attacks, movement only", () => {
-    const payload = DiceRolledPayload.parse({ actorId: "hero", movedFeet: 15, attacks: [] });
+    const payload = DiceRolledPayload.parse({
+      actorId: "hero",
+      movedFeet: 15,
+      seed: 7,
+      attacks: [],
+    });
     expect(payload.attacks).toEqual([]);
   });
 
