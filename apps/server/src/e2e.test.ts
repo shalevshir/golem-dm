@@ -11,14 +11,13 @@
 //      true` unconditionally for every combatant (death saves are not
 //      implemented — RULES_REFERENCE.md §8's gap), so the hero DIES at 0 HP
 //      rather than falling unconscious, and that is exactly what makes the
-//      fight terminate at all. This no longer depends on an absent
-//      `characterId`: `combatantFromStatBlock`
-//      (packages/rules-engine/src/combat/statblock.ts) can set a real one
-//      for a character spawn since Task 13, but `goblin-ambush`'s hero here
-//      is still the earlier stand-in built from a MONSTER stat block, so its
-//      `characterId` is undefined too — the pin, not that, is what does the
-//      work. This file asserts "one faction left standing", never a party
-//      win.
+//      fight terminate at all. `goblin-ambush`'s hero is a real character
+//      spawn (Task 14) and so carries a real `characterId` — which is
+//      exactly why the pin is load-bearing rather than incidental: without
+//      it, a combatant with a `characterId` would fall Unconscious at 0 HP
+//      instead, and with no death saves implemented the fight would have
+//      nothing left to conclude on. This file asserts "one faction left
+//      standing", never a party win.
 //   2. C-37 — once the hero dies, `runEnemyTurns` (pipeline.ts) returns at
 //      its `livingFactions.size < 2` check with `currentActorIndex` still
 //      pointing at a hostile. No terminal event is emitted, and the next
@@ -351,9 +350,10 @@ describe("end to end", () => {
     // C-38: nothing under apps/server/src or packages/rules-engine/src
     // enforces EncounterDefinition.maxRounds — this constant is the ONLY
     // bound on how many hero commands this test will send. 20 is generous:
-    // two scimitars at +4 vs the guard's AC 16 hit ~45% of the time for an
-    // average of 5, so ~4.5 expected damage per round against 11 HP
-    // concludes in 3-5 rounds; 20 gives wide headroom without letting a
+    // two scimitars at +4 vs the hero's AC 16 (Chain Mail — same AC the
+    // guard it replaced had) hit ~45% of the time for an average of 5, so
+    // ~4.5 expected damage per round against the hero's 28 HP concludes in
+    // roughly 6-7 rounds; 20 still gives about 3x headroom without letting a
     // genuinely wedged pipeline spin unbounded.
     const MAX_HERO_COMMANDS = 20;
     let concluded: Session | undefined;
