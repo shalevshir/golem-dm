@@ -1,0 +1,83 @@
+/* Logical properties throughout (`margin-inline`, `inset-inline`) rather than
+   left/right: the document is `dir="rtl"`, so physical directions would be
+   backwards and would silently flip if the direction ever changed. */
+:root {
+  --ink: #2b2620;
+  --paper: #faf7f2;
+  --accent: #2f6b45;
+  --alert: #a83232;
+  font-family: "Segoe UI", "Noto Sans Hebrew", "Arial Hebrew", system-ui, sans-serif;
+}
+
+body {
+  margin: 0;
+  background: var(--paper);
+  color: var(--ink);
+}
+
+main {
+  max-width: 60rem;
+  margin-inline: auto;
+  padding: 1.5rem;
+}
+
+.status {
+  font-size: 1.25rem;
+  font-weight: 600;
+}
+
+.grid canvas {
+  border: 1px solid #cbbfae;
+  cursor: pointer;
+}
+
+/* Clipped, not `display: none` — these buttons are the keyboard and
+   screen-reader path to the board, so they must stay in the accessibility
+   tree. `display: none` would remove them from it entirely. */
+.visually-hidden-list {
+  position: absolute;
+  inline-size: 1px;
+  block-size: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  margin: 0;
+  padding: 0;
+}
+
+.action-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-block: 1rem;
+}
+
+.action-bar button {
+  padding: 0.5rem 1rem;
+  border: 1px solid var(--accent);
+  border-radius: 0.25rem;
+  background: #fff;
+  color: var(--ink);
+  font: inherit;
+  cursor: pointer;
+}
+
+.action-bar button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.error-banner {
+  border: 1px solid var(--alert);
+  border-radius: 0.25rem;
+  padding: 0.75rem 1rem;
+  margin-block: 1rem;
+  background: #fdf0f0;
+}
+
+.narrative {
+  min-block-size: 6rem;
+  line-height: 1.7;
+  border-block-start: 1px solid #cbbfae;
+  padding-block-start: 1rem;
+}
