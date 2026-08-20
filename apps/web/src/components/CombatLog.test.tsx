@@ -6,8 +6,14 @@ import { CombatLog } from "./CombatLog.js";
 import { he } from "../i18n.js";
 
 const catalogue: CatalogueCombatant[] = [
-  { combatantId: "hero", nameEnglish: "Guard", maxHp: 11, faction: "party" },
-  { combatantId: "goblin-a", nameEnglish: "Goblin Warrior", maxHp: 10, faction: "hostile" },
+  { combatantId: "hero", nameEnglish: "Guard", nameHebrew: "שומר", maxHp: 11, faction: "party" },
+  {
+    combatantId: "goblin-a",
+    nameEnglish: "Goblin Warrior",
+    nameHebrew: "גובלין לוחם",
+    maxHp: 10,
+    faction: "hostile",
+  },
 ];
 
 describe("CombatLog", () => {

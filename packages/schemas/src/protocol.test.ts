@@ -146,10 +146,17 @@ describe("turn_affordances frame", () => {
 });
 
 describe("EncounterCatalogue", () => {
-  const hero = { combatantId: "hero", nameEnglish: "Guard", maxHp: 11, faction: "party" };
+  const hero = {
+    combatantId: "hero",
+    nameEnglish: "Guard",
+    nameHebrew: "שומר",
+    maxHp: 11,
+    faction: "party",
+  };
   const goblin = {
     combatantId: "goblin-a",
     nameEnglish: "Goblin Warrior",
+    nameHebrew: "גובלין לוחם",
     maxHp: 9,
     faction: "hostile",
   };
@@ -157,8 +164,8 @@ describe("EncounterCatalogue", () => {
     encounterId: "goblin-ambush",
     combatants: [hero, goblin],
     actions: [
-      { actionId: "spear", nameEnglish: "Spear" },
-      { actionId: "scimitar", nameEnglish: "Scimitar" },
+      { actionId: "spear", nameEnglish: "Spear", nameHebrew: "חנית" },
+      { actionId: "scimitar", nameEnglish: "Scimitar", nameHebrew: "חרב מגל" },
     ],
   };
 

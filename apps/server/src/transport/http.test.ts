@@ -1,6 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
 import Fastify from "fastify";
+import { EncounterCatalogue } from "@ai-dm/schemas";
 import { createInMemoryEventStore } from "../core/event-store.js";
+import { encounterCatalogue } from "../encounters/index.js";
 import { createSessionRegistry, registerHttpRoutes } from "./http.js";
 import type { SessionRegistry } from "./http.js";
 
@@ -184,5 +186,46 @@ describe("GET /encounters/:encounterId", () => {
     const { app } = appWith();
     const response = await app.inject({ method: "GET", url: "/encounters/nope" });
     expect(response.statusCode).toBe(404);
+  });
+});
+
+describe("GET /encounters/:encounterId — derived characters and Hebrew labels", () => {
+  it("serves the hero's full derivation in the catalogue", async () => {
+    const { app } = appWith();
+    const response = await app.inject({ method: "GET", url: "/encounters/goblin-ambush" });
+    expect(response.statusCode).toBe(200);
+
+    const catalogue = EncounterCatalogue.parse(response.json());
+    const hero = catalogue.characters.find((each) => each.characterId === "hero");
+
+    expect(hero?.armorClass).toBe(16);
+    expect(hero?.passivePerception).toBe(13);
+    expect(hero?.savingThrows.str).toBe(5);
+    expect(Object.keys(hero?.skills ?? {})).toHaveLength(18);
+    // The client must never need to compute any of this itself.
+    expect(hero?.grammaticalGender).toBe("masculine");
+  });
+
+  it("labels every combatant and action in Hebrew", async () => {
+    const { app } = appWith();
+    const response = await app.inject({ method: "GET", url: "/encounters/goblin-ambush" });
+    const catalogue = EncounterCatalogue.parse(response.json());
+
+    for (const combatant of catalogue.combatants) {
+      expect(combatant.nameHebrew.trim(), combatant.combatantId).not.toBe("");
+    }
+    for (const action of catalogue.actions) {
+      expect(action.nameHebrew.trim(), action.actionId).not.toBe("");
+    }
+  });
+
+  it("populates characters from the encounter's character spawn, not every combatant", () => {
+    // goblin-ambush has three combatants but only one character spawn, so a
+    // length of 1 discriminates a spawn-driven list from a combatant-driven
+    // one — this guards against `characters` being populated from something
+    // other than the spawns.
+    const built = encounterCatalogue("goblin-ambush");
+    expect(built.characters).toHaveLength(1);
+    expect(built.characters[0]?.characterId).toBe("hero");
   });
 });

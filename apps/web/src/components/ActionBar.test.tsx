@@ -20,11 +20,12 @@ const dodge: ActionAffordance = {
   targetableCombatantIds: [],
 };
 
-const catalogue = [{ actionId: "spear", nameEnglish: "Spear" }];
+const catalogue = [{ actionId: "spear", nameEnglish: "Spear", nameHebrew: "חנית" }];
 const combatants = [
   {
     combatantId: "goblin-a",
     nameEnglish: "Goblin Warrior",
+    nameHebrew: "גובלין לוחם",
     maxHp: 10,
     faction: "hostile" as const,
   },

@@ -31,9 +31,21 @@ afterEach(() => {
 const validCatalogue = {
   encounterId: "goblin-ambush",
   combatants: [
-    { combatantId: "goblin-a", nameEnglish: "Goblin Warrior", maxHp: 9, faction: "hostile" },
+    {
+      combatantId: "goblin-a",
+      nameEnglish: "Goblin Warrior",
+      nameHebrew: "גובלין לוחם",
+      maxHp: 9,
+      faction: "hostile",
+    },
   ],
-  actions: [{ actionId: "scimitar", nameEnglish: "Scimitar" }],
+  actions: [{ actionId: "scimitar", nameEnglish: "Scimitar", nameHebrew: "חרב מגל" }],
+  // Explicit, not omitted: `EncounterCatalogue.parse` fills a missing
+  // `characters` key with this same default, and "parses a valid catalogue"
+  // below asserts the parsed result equals this fixture exactly — an
+  // omitted key here would not `toEqual` the defaulted-in `[]` the parse
+  // actually produces.
+  characters: [],
 };
 
 describe("fetchCatalogue", () => {

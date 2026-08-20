@@ -16,12 +16,13 @@ export { loadCharacter, loadMonster };
 // Instead, mirror `tools/sim/src/scenarios/melee-brawl.ts`: everyone starts
 // within reach of each other on a 12x12 field. The hero sits between the two
 // goblins, each diagonally adjacent (Chebyshev distance 1 tile = 5 ft,
-// ADR-0003), so a scimitar or spear attack is legal for either side from
+// ADR-0003), so a scimitar or longsword attack is legal for either side from
 // round 1 — proven by the "melee attack is legal on turn 1" test below.
 const GOBLIN_AMBUSH: EncounterDefinition = {
   encounterId: "goblin-ambush",
   descriptionEnglish:
-    "A lone guard is ambushed by two goblin warriors in melee range on an " + "open 12x12 field.",
+    "A lone adventurer is ambushed by two goblin warriors in melee range on an " +
+    "open 12x12 field.",
   width: 12,
   height: 12,
   spawns: [
@@ -102,6 +103,7 @@ export function encounterCatalogue(encounterId: string): EncounterCatalogue {
       // to produce one — but the map lookup is still `T | undefined` under
       // `noUncheckedIndexedAccess`, and the id is a better label than a crash.
       nameEnglish: statBlock?.nameEnglish ?? combatant.combatantId,
+      nameHebrew: statBlock?.nameHebrew ?? combatant.combatantId,
       maxHp: combatant.maxHp,
       faction: combatant.faction,
     };
@@ -116,16 +118,30 @@ export function encounterCatalogue(encounterId: string): EncounterCatalogue {
   // scimitar, shortbow, scimitar, shortbow]`. These are display labels only,
   // so first-wins is harmless even when the underlying attack bonuses differ
   // — legality still comes from affordances, never from this list.
-  const actions = new Map<string, string>();
+  const actions = new Map<string, { nameEnglish: string; nameHebrew: string }>();
   for (const statBlock of built.statBlocks.values()) {
     for (const action of statBlock.actions) {
-      if (!actions.has(action.actionId)) actions.set(action.actionId, action.nameEnglish);
+      if (!actions.has(action.actionId)) {
+        actions.set(action.actionId, {
+          nameEnglish: action.nameEnglish,
+          nameHebrew: action.nameHebrew,
+        });
+      }
     }
   }
+
+  // By characterId, not combatantId: a monster combatant leaves
+  // `characterId` undefined (Task 14), so this is exactly the party's
+  // character spawns, never the full combatant list.
+  const characters = built.world.combatants
+    .map((combatant) => combatant.characterId)
+    .filter((characterId): characterId is string => characterId !== undefined)
+    .map((characterId) => loadCharacter(characterId));
 
   return {
     encounterId,
     combatants,
-    actions: [...actions].map(([actionId, nameEnglish]) => ({ actionId, nameEnglish })),
+    actions: [...actions].map(([actionId, names]) => ({ actionId, ...names })),
+    characters,
   };
 }

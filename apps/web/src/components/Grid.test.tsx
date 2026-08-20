@@ -29,10 +29,17 @@ const snapshot: SessionState = {
 };
 
 const catalogue = [
-  { combatantId: "hero", nameEnglish: "Guard", maxHp: 11, faction: "party" as const },
+  {
+    combatantId: "hero",
+    nameEnglish: "Guard",
+    nameHebrew: "שומר",
+    maxHp: 11,
+    faction: "party" as const,
+  },
   {
     combatantId: "goblin-a",
     nameEnglish: "Goblin Warrior",
+    nameHebrew: "גובלין לוחם",
     maxHp: 10,
     faction: "hostile" as const,
   },
