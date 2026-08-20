@@ -126,6 +126,14 @@ function foldCombatLog(
       if (currentActorId === undefined) return [...log];
       const last = log.at(-1);
       if (last !== undefined && last.actorId === currentActorId) return [...log];
+      // A dead (or otherwise non-alive) combatant's turn is skipped by
+      // `runEnemyTurns` with no preceding `action_validated` -- structurally
+      // identical to a forfeit, but it is not one: the creature was never
+      // asked for a turn at all. Without this guard, every fight where a
+      // hostile dies mid-encounter renders a spurious "forfeited" entry for
+      // the corpse the next time its turn comes up.
+      const actor = snapshotBefore.combatants.find((each) => each.combatantId === currentActorId);
+      if (actor?.status !== "alive") return [...log];
       // No group was ever opened for the actor whose turn just ended -- a
       // forfeit (e.g. the tactical-budget timeout).
       return [

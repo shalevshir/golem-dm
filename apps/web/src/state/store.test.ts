@@ -325,7 +325,12 @@ describe("combatLog", () => {
     };
     client = applyFrame(client, {
       type: "event",
-      event: event(2, "dice_rolled", { actorId: "hero", movedFeet: 10, attacks: [attackTrace] }),
+      event: event(2, "dice_rolled", {
+        actorId: "hero",
+        movedFeet: 10,
+        seed: 42,
+        attacks: [attackTrace],
+      }),
     });
 
     expect(client.combatLog).toHaveLength(1);
@@ -352,6 +357,35 @@ describe("combatLog", () => {
     ]);
   });
 
+  it("does not mark a dead combatant's skipped turn as forfeited", () => {
+    // `runEnemyTurns` skips a non-alive combatant with a bare
+    // scene_changed: turn_advanced -- no preceding action_validated -- the
+    // exact same shape as a tactical-budget forfeit (the test above). The
+    // client must tell the two apart using snapshotBefore's combatant
+    // status, not render a corpse's skipped turn as "the turn expired, no
+    // action taken".
+    const deadGoblinUp: SessionState = {
+      ...genesis,
+      combatants: [combatant("hero", "party", "alive"), combatant("goblin-a", "hostile", "dead")],
+      currentActorIndex: 1, // "goblin-a" is up, and dead
+    };
+    let client = applyFrame(initialClientState, {
+      type: "session_state",
+      sequence: 0,
+      snapshot: deadGoblinUp,
+    });
+
+    // No action_validated / dice_rolled for "goblin-a" -- straight to
+    // turn_advanced, same as the forfeit case above, but this time because
+    // the combatant is dead and was never asked for a turn.
+    client = applyFrame(client, {
+      type: "event",
+      event: event(1, "scene_changed", { kind: "turn_advanced" }),
+    });
+
+    expect(client.combatLog).toEqual([]);
+  });
+
   it("does not duplicate a group when scene_changed follows a normal action_validated", () => {
     let client = applyFrame(initialClientState, {
       type: "session_state",
@@ -372,7 +406,7 @@ describe("combatLog", () => {
     });
     client = applyFrame(client, {
       type: "event",
-      event: event(2, "dice_rolled", { actorId: "hero", movedFeet: 0, attacks: [] }),
+      event: event(2, "dice_rolled", { actorId: "hero", movedFeet: 0, seed: 42, attacks: [] }),
     });
     client = applyFrame(client, {
       type: "event",
