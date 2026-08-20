@@ -148,11 +148,7 @@ describe("GET /encounters/:encounterId", () => {
     const response = await app.inject({ method: "GET", url: "/encounters/goblin-ambush" });
     expect(response.statusCode).toBe(200);
 
-    const body = response.json<{
-      encounterId: string;
-      combatants: { combatantId: string; nameEnglish: string; maxHp: number; faction: string }[];
-      actions: { actionId: string; nameEnglish: string }[];
-    }>();
+    const body = EncounterCatalogue.parse(response.json());
 
     expect(body.encounterId).toBe("goblin-ambush");
     expect(body.combatants.map((each) => each.combatantId).sort()).toEqual([
@@ -174,7 +170,7 @@ describe("GET /encounters/:encounterId", () => {
     const { app } = appWith();
     const response = await app.inject({ method: "GET", url: "/encounters/goblin-ambush" });
     expect(response.statusCode).toBe(200);
-    const body = response.json<{ actions: { actionId: string; nameEnglish: string }[] }>();
+    const body = EncounterCatalogue.parse(response.json());
 
     const ids = body.actions.map((each) => each.actionId);
     expect(new Set(ids).size).toBe(ids.length);

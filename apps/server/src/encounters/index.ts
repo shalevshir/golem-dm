@@ -132,7 +132,11 @@ export function encounterCatalogue(encounterId: string): EncounterCatalogue {
 
   // By characterId, not combatantId: a monster combatant leaves
   // `characterId` undefined (Task 14), so this is exactly the party's
-  // character spawns, never the full combatant list.
+  // character spawns, never the full combatant list. Unlike the action map
+  // above, this list is not deduped: ADR-0002 scopes the POC to exactly one
+  // human-controlled character, so two spawns naming the same characterId
+  // cannot occur, and a dedupe branch nothing can reach would be untested
+  // defensive code rather than a real guard.
   const characters = built.world.combatants
     .map((combatant) => combatant.characterId)
     .filter((characterId): characterId is string => characterId !== undefined)

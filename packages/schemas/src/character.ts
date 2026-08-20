@@ -61,7 +61,7 @@ export const Abilities = z.object({
 
 export const CharacterSheet = z.object({
   characterId: z.string(),
-  nameHebrew: z.string(),
+  nameHebrew: z.string().min(1),
   grammaticalGender: GrammaticalGender,
   /**
    * No species field exists and this schema does not add one, so a default

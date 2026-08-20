@@ -65,6 +65,10 @@ describe("CharacterSheet", () => {
     expect(() => CharacterSheet.parse({ ...validSheet, grammaticalGender: "neuter" })).toThrow();
   });
 
+  it("rejects an empty nameHebrew", () => {
+    expect(() => CharacterSheet.parse({ ...validSheet, nameHebrew: "" })).toThrow();
+  });
+
   it("defaults size to medium", () => {
     const parsed = CharacterSheet.parse(validSheet);
     expect(parsed.size).toBe("medium");
