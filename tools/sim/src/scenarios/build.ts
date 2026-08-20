@@ -14,7 +14,9 @@ export function buildScenario(definition: ScenarioDefinition): BuiltScenario {
   for (const spawn of definition.spawns) {
     // The sim has no character-spawn fixtures yet (@ai-dm/rules-engine's
     // SpawnSpec became MonsterSpawn | CharacterSpawn in Task 13); skip a
-    // CharacterSpawn rather than load a monster for it.
+    // CharacterSpawn rather than load a monster for it. Not graceful handling:
+    // `buildEncounter` below still resolves every spawn and throws "No
+    // character supplied" for it, since no `characters` map is ever passed.
     if (!("monsterId" in spawn)) continue;
     if (!byMonsterId.has(spawn.monsterId))
       byMonsterId.set(spawn.monsterId, loadMonster(spawn.monsterId));

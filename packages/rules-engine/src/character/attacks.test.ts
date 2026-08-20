@@ -233,17 +233,22 @@ describe("attacksFor", () => {
     expect(attack?.damage.averageDamage).toBe(2); // 1 + 1 Dex
   });
 
-  // SYNTHETIC fixture: exercises `averageOfDice`'s modifier parse through
-  // the public surface. Before the fix this returned NaN, so a regression
-  // here fails on a NaN comparison rather than a thrown error.
-  it("parses a baked-in dice modifier instead of returning NaN", () => {
+  // SYNTHETIC fixture: exercises `parseNotation`'s parse of a baked-in dice
+  // modifier through the public surface (a hand-rolled regex here used to
+  // return NaN on this input), AND that the weapon's own modifier COMPOSES
+  // with the ability modifier into one suffix rather than being appended as
+  // a second one.
+  it("composes a baked-in dice modifier with the ability modifier, instead of appending a second suffix", () => {
     const attack = only(
       "synthetic_modifier_dagger",
       attacksFor({ ...base, weapons: [SYNTHETIC_MODIFIER_DAGGER] }),
     );
-    // averageOfDice("1d6+2") = floor(7/2) + 2 = 5, plus attacksFor's own +3
-    // Str modifier = 8.
+    // parseNotation("1d6+2") -> count 1, sides 6, modifier 2; composed with
+    // attacksFor's own +3 Str modifier: averageDamage = floor(7/2) + 2 + 3 = 8,
+    // diceNotation = "1d6+5" — ONE suffix, not "1d6+2+3" (which `DiceNotation`
+    // rejects and `parseNotation` throws on).
     expect(attack?.damage.averageDamage).toBe(8);
+    expect(attack?.damage.diceNotation).toBe("1d6+5");
   });
 
   // Without this, a Wizard with no equipped weapon derives an empty action

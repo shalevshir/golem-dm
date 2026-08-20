@@ -39,7 +39,7 @@ const validCatalogue = {
       faction: "hostile",
     },
   ],
-  actions: [{ actionId: "scimitar", nameEnglish: "Scimitar", nameHebrew: "חרב מגל" }],
+  actions: [{ actionId: "scimitar", nameEnglish: "Scimitar", nameHebrew: "חרב מעוקלת" }],
   // Explicit, not omitted: `EncounterCatalogue.parse` fills a missing
   // `characters` key with this same default, and "parses a valid catalogue"
   // below asserts the parsed result equals this fixture exactly — an

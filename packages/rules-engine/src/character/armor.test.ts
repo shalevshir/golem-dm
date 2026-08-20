@@ -58,7 +58,7 @@ describe("armorClassFor", () => {
   });
 
   it("adds the shield bonus with shield training", () => {
-    expect(armorClassFor({ body: LEATHER, shield: SHIELD }, 2, ALL)).toBe(15);
+    expect(armorClassFor({ body: LEATHER, shield: SHIELD }, 2, ["shield"])).toBe(15);
   });
 
   // "You gain the Armor Class benefit of a Shield only if you have training

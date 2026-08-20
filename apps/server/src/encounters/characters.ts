@@ -4,8 +4,7 @@
 // `@ai-dm/schemas` deliberately loads none of them.
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { CharacterSheet } from "@ai-dm/schemas";
-import type { DerivedCharacter } from "@ai-dm/schemas";
+import { CharacterSheet, DerivedCharacter } from "@ai-dm/schemas";
 import { assertSheetConsistent, deriveCharacter } from "@ai-dm/rules-engine";
 import { dataDir } from "./srd.js";
 import { loadGear } from "./gear.js";
@@ -20,6 +19,15 @@ export function loadCharacter(characterId: string): DerivedCharacter {
 
   const path = join(dataDir(CHARACTER_DIR_RELATIVE), `${characterId}.json`);
   const sheet = CharacterSheet.parse(JSON.parse(readFileSync(path, "utf8")));
+  // A file filed under the wrong name would otherwise be cached under
+  // `characterId` while the derived character (and its `nameEnglish`) still
+  // carries the sheet's own id — a mismatch the client's lookup-by-id would
+  // silently fail on, rather than a load-time error naming the file.
+  if (sheet.characterId !== characterId) {
+    throw new Error(
+      `${path} is filed as ${characterId} but its characterId is ${sheet.characterId}`,
+    );
+  }
 
   const gear = loadGear();
   const derived = deriveCharacter(sheet, gear);
@@ -28,6 +36,11 @@ export function loadCharacter(characterId: string): DerivedCharacter {
   if (classDefinition === undefined) throw new Error(`No class definition for ${sheet.class}`);
   assertSheetConsistent(sheet, derived, classDefinition);
 
-  cache.set(characterId, derived);
-  return derived;
+  // Parsed at this server boundary rather than left to the first validator
+  // downstream (`apps/web`'s `net/api.ts`): a schema-invalid derivation
+  // should fail loudly here, at session creation, not as an opaque
+  // client-side catalogue rejection.
+  const parsed = DerivedCharacter.parse(derived);
+  cache.set(characterId, parsed);
+  return parsed;
 }

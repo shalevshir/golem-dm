@@ -34,7 +34,11 @@ were corrected (Temporary HP choice, narrow openings) — see §4, §5, §8.
 | Success test | Total **equals or exceeds** the DC. | `checks/` `resolveD20Test` |
 | Advantage / disadvantage | Roll 2d20, take higher / lower. Never stacks — one instance is the same as three. | `dice/` `d20` |
 | Expertise | Doubles the proficiency bonus. | `checks/` `totalModifier` |
-| Passive score | `10 + check bonus`, **+5** with Advantage, **−5** with Disadvantage. No die is rolled. | `checks/` `passiveScore` |
+| Passive score | `10 + check bonus`, **+5** with Advantage, **−5** with Disadvantage. No die is rolled. | `checks/` `passiveScore`; a character's Passive Perception is derived instead via `PASSIVE_BASE` in `character/` `deriveCharacter` (`passivePerception`) — the one a character actually goes through |
+| Saving throw proficiency | Ability modifier, plus Proficiency Bonus when the class grants proficiency in that save. | `character/` `deriveCharacter` (`savingThrows`) |
+| Skill bonus | Ability modifier of the skill's governing ability, plus Proficiency Bonus when proficient. | `character/` `deriveCharacter` (`skills`) |
+| Spell save DC | `8 + Proficiency Bonus + spellcasting ability modifier`. Absent for a class with no spellcasting ability. | `character/` `deriveCharacter`'s `SPELL_SAVE_BASE` (`spellSaveDc`) — structurally the same formula as `checks/` `imposedSaveDc` |
+| Hit dice | `<level>d<class hit die>`, e.g. `3d10` for a level-3 Fighter. Display notation only — `maxHp` is the sheet's stored, chosen value, not computed from this. | `character/` `deriveCharacter` (`hitDice`) |
 
 ### Trap: natural 20 / natural 1
 

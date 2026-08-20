@@ -38,4 +38,15 @@ describe("assertSheetConsistent", () => {
       assertSheetConsistent(bad, deriveCharacter(bad, GEAR), FIGHTER);
     }).toThrow(/savingThrowProficiencies/);
   });
+
+  // `combat.currentHp` has no upper bound in the schema (unlike `maxHp`, it
+  // cannot cross-check a sibling field there), and `combatantFromStatBlock`
+  // sets `status: "alive"` unconditionally — so nothing else in the pipeline
+  // would ever catch a sheet claiming more current HP than it has maximum.
+  it("rejects a sheet whose currentHp exceeds its maxHp", () => {
+    const bad = sheet({ combat: { ...sheet().combat, currentHp: 999 } });
+    expect(() => {
+      assertSheetConsistent(bad, deriveCharacter(bad, GEAR), FIGHTER);
+    }).toThrow(/currentHp/);
+  });
 });

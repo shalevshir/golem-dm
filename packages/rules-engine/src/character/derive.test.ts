@@ -90,6 +90,21 @@ describe("deriveCharacter", () => {
     expect(() => deriveCharacter(twoArmors, GEAR)).toThrow(/one suit of armor/i);
   });
 
+  // Mirrors the two-body-armor case above: "A creature can wear only one
+  // suit of armor at a time and wield only one Shield at a time." A sheet
+  // authored with two equipped Shields would otherwise silently resolve to
+  // last-shield-wins AC instead of being rejected.
+  it("rejects a sheet equipping two Shields", () => {
+    const twoShields = sheet({
+      inventory: [
+        { itemId: "longsword", quantity: 1, equipped: true },
+        { itemId: "shield", quantity: 1, equipped: true },
+        { itemId: "shield", quantity: 1, equipped: true },
+      ],
+    });
+    expect(() => deriveCharacter(twoShields, GEAR)).toThrow(/one Shield/i);
+  });
+
   it("rejects an unknown class", () => {
     const unknown = sheet({ class: "bard" } as unknown as Partial<CharacterSheet>);
     expect(() => deriveCharacter(unknown, GEAR)).toThrow(/bard/);

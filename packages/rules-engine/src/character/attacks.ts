@@ -8,6 +8,7 @@ import type {
   WeaponDefinition,
   WeaponProficiencies,
 } from "@ai-dm/schemas";
+import { parseNotation } from "../dice/index.js";
 
 export interface AttackDerivationInput {
   /** Equipped weapons only — carried ones are not actions. */
@@ -22,8 +23,6 @@ export interface AttackDerivationInput {
 const DEFAULT_REACH_FEET = 5;
 const REACH_PROPERTY_FEET = 10;
 const UNARMED_BASE_DAMAGE = 1;
-/** Mirrors `DiceNotation`'s grammar (primitives.ts) with capture groups. */
-const DICE_NOTATION_PATTERN = /^(\d+)d(\d+)([+-]\d+)?$/;
 
 /**
  * "Anyone can wield a weapon, but you must have proficiency with it to add
@@ -85,20 +84,16 @@ function damageDiceFor(weapon: WeaponDefinition, shieldEquipped: boolean) {
   return weapon.damage;
 }
 
-/** Average of `XdY[+-]Z`, floored — the convention the SRD prints stat blocks with. */
-function averageOfDice(diceNotation: string): number {
-  const [, countText, sidesText, modifierText] = DICE_NOTATION_PATTERN.exec(diceNotation) ?? [];
-  const count = Number(countText);
-  const sides = Number(sidesText);
-  return Math.floor((count * (sides + 1)) / 2) + Number(modifierText ?? 0);
+/** Average of `count`d`sides`, floored — the convention the SRD prints stat blocks with. */
+function averageOfDice(count: number, sides: number): number {
+  return Math.floor((count * (sides + 1)) / 2);
 }
 
-/** `1d8+3`, `1d8`, `1d8-1`. A zero modifier adds no suffix. */
-function withModifier(diceNotation: string, modifier: number): string {
-  if (modifier === 0) return diceNotation;
-  return modifier > 0
-    ? `${diceNotation}+${String(modifier)}`
-    : `${diceNotation}${String(modifier)}`;
+/** Rebuilds `XdY[+-]Z` from parsed components. A zero modifier adds no suffix. */
+function notationFor(count: number, sides: number, modifier: number): string {
+  const base = `${String(count)}d${String(sides)}`;
+  if (modifier === 0) return base;
+  return modifier > 0 ? `${base}+${String(modifier)}` : `${base}${String(modifier)}`;
 }
 
 function damageRollFor(
@@ -118,9 +113,17 @@ function damageRollFor(
     };
   }
 
+  // A weapon's own notation can carry a baked-in modifier of its own (no SRD
+  // row does, but `DiceNotation` permits it). Parse it and COMPOSE the two
+  // modifiers into one, rather than appending the ability modifier as a
+  // second suffix — `"1d6+2+3"` is not valid `DiceNotation` and `parseNotation`
+  // throws on it, which combat resolution would hit downstream.
+  const { count, sides, modifier: baseModifier } = parseNotation(dice.diceNotation);
+  const totalModifier = baseModifier + modifier;
+
   return {
-    diceNotation: withModifier(dice.diceNotation, modifier),
-    averageDamage: Math.max(0, averageOfDice(dice.diceNotation) + modifier),
+    diceNotation: notationFor(count, sides, totalModifier),
+    averageDamage: Math.max(0, averageOfDice(count, sides) + totalModifier),
     damageType: dice.damageType,
   };
 }

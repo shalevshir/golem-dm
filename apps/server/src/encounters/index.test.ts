@@ -1,5 +1,6 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { ExecuteTurn } from "@ai-dm/schemas";
+import { DerivedCharacter } from "@ai-dm/schemas";
 import { validateExecuteTurn } from "@ai-dm/rules-engine";
 import {
   buildEncounterById,
@@ -97,5 +98,33 @@ describe("the goblin-ambush hero", () => {
     // Guards the cross-check being wired into loadCharacter at all, not just
     // existing in the rules engine.
     expect(() => loadCharacter("inconsistent-fixture")).toThrow(/proficiencyBonus|armorClass/);
+  });
+});
+
+describe("loadCharacter", () => {
+  it("parses the derivation against DerivedCharacter at the server boundary", () => {
+    // No legal CharacterSheet can make `deriveCharacter`'s own output fail
+    // `DerivedCharacter.parse` today — every derived field is either a
+    // pass-through of an already-bounded sheet field or provably in range —
+    // so this guards the wiring itself, the same way the consistency test
+    // above does for `assertSheetConsistent`. "second-fixture" is used by no
+    // other test, so a pass cannot be explained by an earlier test having
+    // already cached "hero" through this code path.
+    const parseSpy = vi.spyOn(DerivedCharacter, "parse");
+    try {
+      loadCharacter("second-fixture");
+      expect(parseSpy).toHaveBeenCalled();
+    } finally {
+      parseSpy.mockRestore();
+    }
+  });
+
+  it("refuses a file whose characterId disagrees with the id it was requested under", () => {
+    // "mislabeled-fixture.json" is a copy of hero.json whose own
+    // characterId still says "hero" — a file renamed without updating its
+    // contents. Without this check it would cache under "mislabeled-fixture"
+    // while everything it produces (including characterStatBlock's
+    // nameEnglish) still says "hero".
+    expect(() => loadCharacter("mislabeled-fixture")).toThrow(/characterId/);
   });
 });

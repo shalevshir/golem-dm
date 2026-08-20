@@ -415,6 +415,21 @@ rediscovering:
   `packages/agents/src/providers/routing.ts` and rebuilding. The final
   pre-merge fix wave (2026-08-19) ruled against inventing an override
   mechanism unreviewed; recorded here so the gap is tracked, not lost.
+- **A session's genesis state is now re-derived from a mutable file.**
+  `loadSession` (`apps/server/src/core/session.ts`) rebuilds a session's
+  initial state by calling `buildEncounterById` again, which — now that the
+  hero is a real `CharacterSheet` (step 9 spec #1, §4.5) — reaches
+  `loadCharacter` (`apps/server/src/encounters/characters.ts`) and reads
+  `data/characters/hero.json`. Before that, `buildEncounterById` touched only
+  immutable SRD reference data. Editing the hero's level, gear or HP now
+  silently rewrites the starting state of every session already in the log,
+  so the stored event deltas fold onto a different world on replay.
+  Invariant 3 in root `CLAUDE.md` ("state is a projection of the append-only
+  `GameEvent` stream") has thereby acquired an unrecorded qualifier — plus
+  whatever the character sheet says at load time. No defect today: one
+  sheet, authored by us, and `GenesisPayload` deliberately omits `state`
+  itself. Recorded here per the final whole-branch review's fix wave
+  (2026-08-20) rather than re-architected.
 
 Deferred, as §4.2 already said: Postgres persistence, the intent agent, and
 the web client (spec #2).

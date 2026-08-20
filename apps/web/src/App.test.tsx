@@ -65,7 +65,7 @@ const catalogue = {
   ],
   actions: [
     { actionId: "spear", nameEnglish: "Spear", nameHebrew: "חנית" },
-    { actionId: "scimitar", nameEnglish: "Scimitar", nameHebrew: "חרב מגל" },
+    { actionId: "scimitar", nameEnglish: "Scimitar", nameHebrew: "חרב מעוקלת" },
   ],
 };
 

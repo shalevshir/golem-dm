@@ -20,6 +20,17 @@ export function assertSheetConsistent(
   derived: DerivedCharacter,
   classDefinition: ClassDefinition,
 ): void {
+  // Not a stored-vs-derived check like the others below — `maxHp` derives
+  // nothing to compare against. `combat.currentHp` has no upper bound in the
+  // schema, and a spawned combatant is marked `alive` regardless of its HP,
+  // so an impossible sheet like this would otherwise reach combat unnoticed.
+  if (sheet.combat.currentHp > sheet.combat.maxHp) {
+    throw new Error(
+      `${sheet.characterId}: combat.currentHp (${String(sheet.combat.currentHp)}) exceeds ` +
+        `combat.maxHp (${String(sheet.combat.maxHp)})`,
+    );
+  }
+
   if (sheet.proficiencyBonus !== derived.proficiencyBonus) {
     throw mismatch(
       sheet.characterId,
