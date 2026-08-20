@@ -563,14 +563,21 @@ describe("handleCommand — structured action", () => {
 
     const frames = await drain(handleCommand(session, dodge("hero"), portsWith(store)));
 
-    expect(frames).toEqual([
-      {
-        type: "error",
-        clientMessageId: "c1",
-        code: "internal_error",
-        message: expect.any(String) as string,
-      },
-    ]);
+    // The error frame first, then a fresh affordance set. A failed append
+    // does not advance the turn, so control is still the hero's, and the
+    // client has already nulled its affordances against the frames `emit`
+    // streamed before the throw — without the trailing frame the board goes
+    // inert on the player's own turn (the C-1 soft-lock, rarer route).
+    expect(frames[0]).toEqual({
+      type: "error",
+      clientMessageId: "c1",
+      code: "internal_error",
+      message: expect.any(String) as string,
+    });
+    const last = frames.at(-1);
+    expect(last?.type).toBe("turn_affordances");
+    expect(last?.type === "turn_affordances" && last.actorId).toBe("hero");
+    expect(frames).toHaveLength(2);
     // Append-and-yield stayed one operation: the failed append never bumped
     // nextSequence or added anything beyond the one rogue event already there.
     expect(session.nextSequence).toBe(1);
@@ -1000,8 +1007,8 @@ describe("handleCommand — turn timeout", () => {
   // 8-17% (55-127ms). What the scaling actually buys is headroom against
   // the OTHER scenario this threshold has to discriminate from — the
   // measured two-independent-budgets floor is 1013-1045ms, and 750ms sits
-  // ~28% below even the low end of that, so a run that regresses to
-  // separate budgets still fails loudly. Do not "optimise" this back down
+  // 26-28% below that (26.0% against the 1013ms low end), so a run that
+  // regresses to separate budgets still fails loudly. Do not "optimise" this back down
   // to a smaller budget — that reintroduces the exact fragility this round
   // exists to remove.
   it("shares one budget between the tactical call and the narration, not two", async () => {

@@ -37,7 +37,7 @@ describe("ErrorBanner", () => {
         error={{ code: "unknown_session", message: "gone" }}
         rejection={null}
         onDismiss={() => undefined}
-        onStartOver={() => undefined}
+        onReconnect={() => undefined}
       />,
     );
     expect(screen.getByText(he.errors.unknown_session)).toBeInTheDocument();
@@ -49,7 +49,7 @@ describe("ErrorBanner", () => {
         error={{ code: "some_future_code", message: "x" }}
         rejection={null}
         onDismiss={() => undefined}
-        onStartOver={() => undefined}
+        onReconnect={() => undefined}
       />,
     );
     expect(screen.getByText(/some_future_code/)).toBeInTheDocument();
@@ -61,7 +61,7 @@ describe("ErrorBanner", () => {
         error={null}
         rejection={null}
         onDismiss={() => undefined}
-        onStartOver={() => undefined}
+        onReconnect={() => undefined}
       />,
     );
     expect(container).toBeEmptyDOMElement();
@@ -73,7 +73,7 @@ describe("ErrorBanner", () => {
         error={null}
         rejection={{ reasons: ["target_out_of_reach"], messages: ["too far"] }}
         onDismiss={() => undefined}
-        onStartOver={() => undefined}
+        onReconnect={() => undefined}
       />,
     );
     expect(screen.getByText(he.rejections.target_out_of_reach)).toBeInTheDocument();
@@ -92,7 +92,7 @@ describe("ErrorBanner", () => {
           messages: ["too far", "also too far"],
         }}
         onDismiss={() => undefined}
-        onStartOver={() => undefined}
+        onReconnect={() => undefined}
       />,
     );
     expect(screen.getAllByText(he.rejections.target_out_of_reach)).toHaveLength(2);
@@ -107,7 +107,7 @@ describe("ErrorBanner", () => {
         error={{ code: "not_your_turn", message: "stale click" }}
         rejection={null}
         onDismiss={() => undefined}
-        onStartOver={() => undefined}
+        onReconnect={() => undefined}
       />,
     );
     expect(container).toBeEmptyDOMElement();
@@ -121,7 +121,7 @@ describe("ErrorBanner", () => {
         error={{ code: "internal_error", message: "boom" }}
         rejection={null}
         onDismiss={onDismiss}
-        onStartOver={() => undefined}
+        onReconnect={() => undefined}
       />,
     );
     // Two buttons render for `internal_error` now (start-over and dismiss),
@@ -130,31 +130,31 @@ describe("ErrorBanner", () => {
     expect(onDismiss).toHaveBeenCalled();
   });
 
-  it("offers a start-over control on internal_error, and not on other codes", async () => {
+  it("offers a reconnect control on internal_error, and not on other codes", async () => {
     // Spec's error table: `internal_error` → "Surface, and offer reconnect".
     // Every other code either has its own recovery path (`unknown_session`
     // resets automatically) or genuinely needs no reconnect, so the control
     // is scoped to this one code rather than shown for every error.
-    const onStartOver = vi.fn();
+    const onReconnect = vi.fn();
     const { rerender } = render(
       <ErrorBanner
         error={{ code: "internal_error", message: "boom" }}
         rejection={null}
         onDismiss={() => undefined}
-        onStartOver={onStartOver}
+        onReconnect={onReconnect}
       />,
     );
-    await userEvent.click(screen.getByRole("button", { name: he.app.startOver }));
-    expect(onStartOver).toHaveBeenCalled();
+    await userEvent.click(screen.getByRole("button", { name: he.app.reconnect }));
+    expect(onReconnect).toHaveBeenCalled();
 
     rerender(
       <ErrorBanner
         error={{ code: "unknown_session", message: "gone" }}
         rejection={null}
         onDismiss={() => undefined}
-        onStartOver={onStartOver}
+        onReconnect={onReconnect}
       />,
     );
-    expect(screen.queryByRole("button", { name: he.app.startOver })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: he.app.reconnect })).not.toBeInTheDocument();
   });
 });

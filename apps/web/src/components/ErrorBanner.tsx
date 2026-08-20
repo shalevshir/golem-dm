@@ -17,10 +17,11 @@ export interface ErrorBannerProps {
    * The spec's error table lists `internal_error` as "surface, and offer
    * reconnect" — dismiss alone leaves the player on a dead screen, since an
    * `error` frame does not close the socket and nothing else ever retries.
-   * Reuses the same teardown `unknown_session` already drives automatically
-   * (`App`'s `resetToStart`), just player-triggered here instead.
+   * Genuinely a reconnect, not a restart: the session survives the faults
+   * that raise this code, so `App`'s handler rejoins the same session id
+   * from the sequence already folded rather than discarding the fight.
    */
-  onStartOver: () => void;
+  onReconnect: () => void;
 }
 
 export function ErrorBanner(props: ErrorBannerProps): JSX.Element | null {
@@ -39,8 +40,8 @@ export function ErrorBanner(props: ErrorBannerProps): JSX.Element | null {
         <p key={`${String(index)}-${reason}`}>{rejectionMessage(reason)}</p>
       ))}
       {error?.code === "internal_error" && (
-        <button type="button" onClick={props.onStartOver}>
-          {he.app.startOver}
+        <button type="button" onClick={props.onReconnect}>
+          {he.app.reconnect}
         </button>
       )}
       <button type="button" onClick={props.onDismiss}>

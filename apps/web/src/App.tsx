@@ -8,6 +8,7 @@ import type {
   EncounterCatalogue,
   ServerFrame,
   Tile,
+  TurnAffordances,
 } from "@ai-dm/schemas";
 import { connect } from "./net/connection.js";
 import type { Connection, ConnectionStatus, WebSocketLike } from "./net/connection.js";
@@ -47,24 +48,27 @@ export function App(props: AppProps): JSX.Element {
   const [state, setState] = useState<ClientState>(initialClientState);
   const [catalogue, setCatalogue] = useState<EncounterCatalogue | null>(null);
   const [status, setStatus] = useState<ConnectionStatus>("connecting");
-  // Only the raw click is state; the effective selection is re-resolved
-  // against `state.affordances` on every render instead of being trusted
-  // across turns — the same pattern `ActionBar` already uses for its target
-  // picker (see its doc comment). A `turn_affordances` frame that lands
-  // between the click and the commit (e.g. the enemy sweep ending the
-  // player's next turn) can offer a completely different `reachableTiles`
-  // set; re-deriving means a stale tile from a previous turn can never be
-  // sent as this turn's `destinationTile`. No effect needed: this is plain
-  // derivation during render.
-  const [clickedTile, setClickedTile] = useState<Tile | null>(null);
-  const selectedTile =
-    clickedTile !== null &&
-    (state.affordances?.reachableTiles.some(
-      ([x, y]) => x === clickedTile[0] && y === clickedTile[1],
-    ) ??
-      false)
-      ? clickedTile
-      : null;
+  // A click is stored together with the affordance set it was made against,
+  // and counts only while that exact set is still the live one. `store.ts`
+  // builds a new `affordances` object in precisely one place — the
+  // `turn_affordances` case — and every other branch either keeps the same
+  // reference or nulls it, so reference identity is an exact test for "the
+  // offer the player was looking at when they clicked".
+  //
+  // Membership in `reachableTiles` is NOT the same test and is too weak: the
+  // reachable set recentres on the hero each turn, so a tile clicked on turn
+  // N is frequently still reachable on turn N+1, and a membership check
+  // would let it stay highlighted and committable as a selection the player
+  // never made this turn. Identity drops it. This is plain derivation during
+  // render — no effect, so it cannot loop.
+  const [click, setClick] = useState<{ tile: Tile; against: TurnAffordances } | null>(null);
+  const selectedTile = click !== null && click.against === state.affordances ? click.tile : null;
+  const selectTile = useCallback(
+    (tile: Tile) => {
+      setClick(state.affordances === null ? null : { tile, against: state.affordances });
+    },
+    [state.affordances],
+  );
   // A stored session id means a fight is already in progress: mounting goes
   // straight to reconnecting rather than showing the start screen again, or
   // a refresh mid-fight would look like it lost the session even though
@@ -95,6 +99,11 @@ export function App(props: AppProps): JSX.Element {
   // genuinely been superseded, never reset back to "current" by a run that
   // isn't itself.
   const runIdRef = useRef(0);
+  // Bumping this re-runs the connect effect: cleanup closes the live socket,
+  // the new run re-reads the SAME stored session id and rejoins with
+  // `resumeFrom`. That is a genuine reconnect rather than a new fight, which
+  // is what the spec's error table asks for on `internal_error`.
+  const [reconnectNonce, setReconnectNonce] = useState(0);
 
   useEffect(() => {
     if (!started) return;
@@ -137,24 +146,43 @@ export function App(props: AppProps): JSX.Element {
       connectionRef.current?.close();
       connectionRef.current = null;
     };
-  }, [started, props.wsUrl, props.socketFactory]);
+  }, [started, reconnectNonce, props.wsUrl, props.socketFactory]);
 
-  // The one teardown that gets back to a clean start screen: drop the
-  // stored session id, close whatever connection is live, and reset every
-  // piece of state a fresh mount would otherwise read as "still in
-  // progress". Shared by the automatic `unknown_session` recovery below and
-  // the player-triggered "start over" control `ErrorBanner` offers on
-  // `internal_error` — the spec's error table lists "surface, and offer
-  // reconnect" for that code, and this is the reconnect: there is no
-  // automatic recovery for a genuinely unknown server fault, so the player
-  // needs an explicit way back rather than being stuck on a dead screen.
+  // The one teardown that gets back to a clean start screen: drop the stored
+  // session id, close whatever connection is live, and reset every piece of
+  // state a fresh mount would otherwise read as "still in progress". Used by
+  // the automatic `unknown_session` recovery below — the session is gone, so
+  // there is nothing to resume and nothing to weigh.
+  //
+  // `sequenceRef` is part of "every piece": it is not React state, so it
+  // survives this reset unless cleared by hand, and the next session's join
+  // would otherwise carry a dead session's `resumeFrom`. Today that is
+  // harmless only by accident (a fresh log has just sequence 0, so the
+  // server falls back to a full `session_state`); if that fallback ever
+  // changes, the client would get bare `event` frames against a null
+  // snapshot and drop every one of them, hanging on "connecting…".
   const resetToStart = useCallback(() => {
     sessionStorage.removeItem(SESSION_STORAGE_KEY);
     connectionRef.current?.close();
     connectionRef.current = null;
+    sequenceRef.current = 0;
     setState(initialClientState);
     setCatalogue(null);
     setStarted(false);
+  }, []);
+
+  // `internal_error`: the spec's error table says "Surface, and offer
+  // reconnect", and reconnect is meant literally. Both producers
+  // (`SequenceConflictError`/`SessionMismatchError` on a failed append) leave
+  // the session ALIVE and resumable, and an `error` frame does not close the
+  // socket — so tearing the session down would throw away a fight the server
+  // is still perfectly willing to continue. This keeps the stored id and
+  // `sequenceRef` intact and just re-runs the connect effect, which rejoins
+  // and resumes. The error is cleared because the reconnect IS the response
+  // to it; if the fault persists, the next frame says so again.
+  const reconnect = useCallback(() => {
+    setState((previous) => ({ ...previous, lastError: null, lastRejection: null }));
+    setReconnectNonce((previous) => previous + 1);
   }, []);
 
   // `unknown_session`: the server has forgotten this session (error table,
@@ -207,7 +235,7 @@ export function App(props: AppProps): JSX.Element {
           ...(targetId === undefined ? {} : { targetId }),
         }),
       });
-      setClickedTile(null);
+      setClick(null);
     },
     [send, selectedTile, state.affordances],
   );
@@ -243,7 +271,7 @@ export function App(props: AppProps): JSX.Element {
           error={state.lastError}
           rejection={state.lastRejection}
           onDismiss={dismissError}
-          onStartOver={resetToStart}
+          onReconnect={reconnect}
         />
       </main>
     );
@@ -272,7 +300,7 @@ export function App(props: AppProps): JSX.Element {
         error={state.lastError}
         rejection={state.lastRejection}
         onDismiss={dismissError}
-        onStartOver={resetToStart}
+        onReconnect={reconnect}
       />
 
       <Grid
@@ -280,7 +308,7 @@ export function App(props: AppProps): JSX.Element {
         affordances={state.affordances}
         catalogue={catalogue.combatants}
         selectedTile={selectedTile}
-        onTileClick={setClickedTile}
+        onTileClick={selectTile}
         onCombatantClick={() => undefined}
       />
 

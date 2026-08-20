@@ -12,14 +12,17 @@ export const PathType = z.enum(["direct", "flank", "retreat_to_cover"]);
 export type PathType = z.infer<typeof PathType>;
 
 /**
- * The `pathType` every affordance probe and every client-built movement
- * segment uses when nothing more specific is being tested. Two packages
- * relied on the literal `"direct"` matching by coincidence (the rules-engine
- * probe in `combat/affordances.ts`, the web client's `turn/build-turn.ts`) —
- * the affordance guarantee ("a tile the client draws is a tile the validator
- * accepted") holds only because both agree. A shared constant makes that
- * agreement structural instead of a fact both sides had to independently get
- * right.
+ * The `pathType` to write when a movement segment is being built and nothing
+ * more specific is being expressed: the rules-engine affordance probe
+ * (`combat/affordances.ts`), the web client's `turn/build-turn.ts`, and the
+ * simulator's policy all mean "just go there".
+ *
+ * Deliberately NOT claimed as a correctness guarantee. Nothing reads the
+ * field today — `validate-turn.ts` ignores it entirely, so the affordance
+ * property ("a tile the client draws is a tile the validator accepted") does
+ * not depend on the writers agreeing. The value of naming it is that the day
+ * something DOES read it, the sites that must move together are already one
+ * definition instead of three literals to find.
  */
 export const DEFAULT_PATH_TYPE: PathType = "direct";
 

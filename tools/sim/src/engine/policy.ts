@@ -23,6 +23,7 @@ import {
   occupiedTiles,
   validateExecuteTurn,
 } from "@ai-dm/rules-engine";
+import { DEFAULT_PATH_TYPE } from "@ai-dm/schemas";
 import type { Combatant, ExecuteTurn, Faction, Tile } from "@ai-dm/schemas";
 
 export interface ScriptedPolicyInput {
@@ -91,7 +92,7 @@ function attackTurn(
     actorId,
     ...(movement === undefined
       ? {}
-      : { movement: [{ destinationTile: movement, pathType: "direct" as const }] }),
+      : { movement: [{ destinationTile: movement, pathType: DEFAULT_PATH_TYPE }] }),
     mainAction: { actionType: "attack", actionId, targetIds: [targetId] },
     tacticalRationaleEnglish: movement === undefined ? ATTACK_RATIONALE : ADVANCE_RATIONALE,
   };
@@ -248,7 +249,7 @@ function partialAdvanceTurn(
 
       const advance: ExecuteTurn = {
         actorId,
-        movement: [{ destinationTile: destination, pathType: "direct" }],
+        movement: [{ destinationTile: destination, pathType: DEFAULT_PATH_TYPE }],
         mainAction: { actionType: "dodge" },
         tacticalRationaleEnglish: PARTIAL_ADVANCE_RATIONALE,
       };

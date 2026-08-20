@@ -332,26 +332,88 @@ describe("App", () => {
     expect(ExecuteTurn.safeParse(structured?.turn).success).toBe(true);
   });
 
-  it("offers a start-over control on internal_error and returns to the start screen when clicked", async () => {
-    // Finding 3: the spec's error table lists `internal_error` -> "Surface,
-    // and offer reconnect", but an `error` frame never closes the socket, so
-    // without an explicit control the player is stuck reading the banner
-    // forever. This reuses the same teardown `unknown_session` already
-    // drives automatically (App's `resetToStart`), just behind a click.
+  it("does not carry a dead session's resumeFrom into the next fight", async () => {
+    // `sequenceRef` is a ref, not React state, so `resetToStart` clearing
+    // every `useState` leaves it holding the sequence of the session that
+    // just went away. The next fight's join would then resume from it.
+    // Harmless today only by accident — a fresh log holds just sequence 0,
+    // so the server falls back to a full `session_state` — which makes this
+    // exactly the kind of latent coupling worth pinning rather than
+    // rediscovering when that fallback changes.
     await start();
-    expect(sessionStorage.getItem(SESSION_STORAGE_KEY)).toBe("s1");
+    act(() => {
+      socket.emitMessage({
+        type: "session_state",
+        sequence: 7,
+        snapshot: snapshotWith([
+          combatant("hero", "party", "alive"),
+          combatant("goblin-a", "hostile", "alive"),
+        ]),
+      });
+    });
+
+    act(() => {
+      socket.emitMessage({ type: "error", code: "unknown_session", message: "gone" });
+    });
+    expect(await screen.findByRole("button", { name: he.app.startFight })).toBeInTheDocument();
+
+    socket.sent.length = 0;
+    act(() => {
+      screen.getByRole("button", { name: he.app.startFight }).click();
+    });
+
+    await waitFor(() => {
+      socket.emitOpen();
+      expect(socket.sent.length).toBeGreaterThan(0);
+    });
+    // A brand-new fight starts from the beginning: no resumeFrom at all.
+    expect(JSON.parse(socket.sent[0] ?? "{}")).toEqual({ type: "join", sessionId: "s1" });
+  });
+
+  it("reconnects to the same session on internal_error instead of discarding the fight", async () => {
+    // Spec's error table: `internal_error` → "Surface, and offer reconnect",
+    // and reconnect is meant literally. Both faults that raise this code
+    // (SequenceConflictError/SessionMismatchError on a failed append) leave
+    // the session alive and resumable, so a control that cleared the stored
+    // id would throw away a fight the server is still willing to continue.
+    // What this pins is the difference: the id SURVIVES, and a fresh join
+    // goes out carrying the sequence already folded.
+    await start();
+    act(() => {
+      socket.emitMessage({
+        type: "session_state",
+        sequence: 4,
+        snapshot: snapshotWith([
+          combatant("hero", "party", "alive"),
+          combatant("goblin-a", "hostile", "alive"),
+        ]),
+      });
+    });
+    const joinsBefore = socket.sent
+      .map((each) => JSON.parse(each) as { type: string })
+      .filter((each) => each.type === "join").length;
 
     act(() => {
       socket.emitMessage({ type: "error", code: "internal_error", message: "boom" });
     });
 
-    const startOver = await screen.findByRole("button", { name: he.app.startOver });
+    const reconnectButton = await screen.findByRole("button", { name: he.app.reconnect });
     act(() => {
-      startOver.click();
+      reconnectButton.click();
     });
 
-    expect(sessionStorage.getItem(SESSION_STORAGE_KEY)).toBeNull();
-    expect(await screen.findByRole("button", { name: he.app.startFight })).toBeInTheDocument();
+    // The whole point of the finding: not a teardown.
+    expect(sessionStorage.getItem(SESSION_STORAGE_KEY)).toBe("s1");
+    expect(screen.queryByRole("button", { name: he.app.startFight })).not.toBeInTheDocument();
+
+    await waitFor(() => {
+      socket.emitOpen();
+      const joins = socket.sent
+        .map((each) => JSON.parse(each) as { type: string; sessionId?: string; resumeFrom?: number })
+        .filter((each) => each.type === "join");
+      expect(joins).toHaveLength(joinsBefore + 1);
+      expect(joins.at(-1)).toEqual({ type: "join", sessionId: "s1", resumeFrom: 4 });
+    });
   });
 
   it("drops a tile selected on a previous turn instead of sending it as this turn's destination", async () => {
@@ -412,6 +474,99 @@ describe("App", () => {
     // drops the latter too, so this assertion would pass either way in this
     // test specifically — but `Object.hasOwn` is the correct check for what
     // "no movement key" actually means, per the finding).
+    expect(Object.hasOwn(turn, "movement")).toBe(false);
+  });
+
+  it("sends a tile clicked against the CURRENT affordances as this turn's destination", async () => {
+    // The positive direction of the same rule. Without this, a regression
+    // that permanently resolves the selection to null — no highlight, no
+    // `movement` ever sent — ships green: every other assertion about
+    // `selectedTile` is a negative one, and negatives all pass when the
+    // feature is simply dead.
+    await start();
+    act(() => {
+      socket.emitMessage({
+        type: "session_state",
+        sequence: 0,
+        snapshot: snapshotWith([
+          combatant("hero", "party", "alive"),
+          combatant("goblin-a", "hostile", "alive"),
+        ]),
+      });
+      socket.emitMessage({
+        type: "turn_affordances",
+        forSequence: 0,
+        actorId: "hero",
+        reachableTiles: [[5, 5]],
+        actions: [{ actionType: "dodge", requiresTarget: false, targetableCombatantIds: [] }],
+      });
+    });
+
+    act(() => {
+      screen.getByRole("button", { name: /\(5,5\)/ }).click();
+    });
+    act(() => {
+      screen.getByRole("button", { name: he.actions.dodge }).click();
+    });
+
+    const sent = socket.sent.map((each) => JSON.parse(each) as Record<string, unknown>);
+    const structured = sent.find((each) => each.type === "structured_action");
+    const turn = structured?.turn as Record<string, unknown>;
+    expect(turn.movement).toEqual([{ destinationTile: [5, 5], pathType: "direct" }]);
+  });
+
+  it("drops a selection when fresh affordances arrive even if the tile is still reachable", async () => {
+    // The ghost-selection case, and the reason the rule is reference
+    // identity rather than membership in `reachableTiles`. The reachable set
+    // recentres on the hero every turn, so a tile clicked on turn N is
+    // frequently still reachable on turn N+1 — a membership test would leave
+    // it highlighted and committable as a choice the player never made this
+    // turn. Note this test would PASS under the membership rule only if the
+    // tile vanished; it is included here precisely because it does not.
+    await start();
+    act(() => {
+      socket.emitMessage({
+        type: "session_state",
+        sequence: 0,
+        snapshot: snapshotWith([
+          combatant("hero", "party", "alive"),
+          combatant("goblin-a", "hostile", "alive"),
+        ]),
+      });
+      socket.emitMessage({
+        type: "turn_affordances",
+        forSequence: 0,
+        actorId: "hero",
+        reachableTiles: [[5, 5]],
+        actions: [{ actionType: "dodge", requiresTarget: false, targetableCombatantIds: [] }],
+      });
+    });
+
+    act(() => {
+      screen.getByRole("button", { name: /\(5,5\)/ }).click();
+    });
+
+    // A new offer that STILL contains the clicked tile.
+    act(() => {
+      socket.emitMessage({
+        type: "turn_affordances",
+        forSequence: 0,
+        actorId: "hero",
+        reachableTiles: [
+          [5, 5],
+          [1, 1],
+        ],
+        actions: [{ actionType: "dodge", requiresTarget: false, targetableCombatantIds: [] }],
+      });
+    });
+
+    act(() => {
+      screen.getByRole("button", { name: he.actions.dodge }).click();
+    });
+
+    const sent = socket.sent.map((each) => JSON.parse(each) as Record<string, unknown>);
+    const structured = sent.find((each) => each.type === "structured_action");
+    const turn = structured?.turn as Record<string, unknown>;
     expect(Object.hasOwn(turn, "movement")).toBe(false);
   });
 

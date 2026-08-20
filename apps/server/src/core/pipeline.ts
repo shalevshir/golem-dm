@@ -441,11 +441,14 @@ export async function* handleCommand(
   }
 
   /**
-   * Push the player's affordances, if it is a party member's turn. Called at
-   * the three points the pipeline knows control sits with the player: the end
-   * of a `join`, the end of a turn that came back round to them, and a
-   * rejected action from them (the turn did not advance, so it is still
-   * theirs).
+   * Push the player's affordances, if it is a party member's turn. The rule
+   * is one idea, not a list: emit whenever this call is about to hand control
+   * back without the turn having advanced past the player. That is the end of
+   * a `join`, the end of a turn that came back round to them, a rejected
+   * action, and a failed append — the last two because the turn did not
+   * advance, so the move is still theirs. The client nulls its affordances on
+   * every event frame, so any of these that does not re-push leaves the board
+   * inert with no way back short of a reconnect.
    *
    * Silent when it is a hostile's turn, when the actor is missing, or when the
    * encounter has no stat block for them — none of those are error conditions
@@ -701,6 +704,15 @@ export async function* handleCommand(
         code: "internal_error",
         message: error.message,
       };
+      // Same reasoning as the rejection path: a failed append leaves
+      // `session.state` untouched (that is the whole point of doing this
+      // outside `emit`), so the turn did not advance and control is still
+      // wherever it was. If that is the player, they must get a fresh
+      // affordance set — the frames `emit` already streamed before the
+      // throw have nulled the client's, and an `error` frame does not
+      // replace them. Without this the board goes inert on the player's
+      // own turn, which is exactly the C-1 soft-lock in a rarer costume.
+      yield* playerAffordances();
       return;
     }
     throw error;

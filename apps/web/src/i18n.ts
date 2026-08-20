@@ -17,7 +17,7 @@ export const he = {
     victory: "ניצחתם",
     defeat: "הובסתם",
     startFight: "התחל קרב",
-    startOver: "התחל מחדש",
+    reconnect: "התחבר מחדש",
   },
   actions: {
     dodge: "התחמקות",
