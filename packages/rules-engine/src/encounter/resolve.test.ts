@@ -229,6 +229,38 @@ describe("applyTurn", () => {
     expect(world.combatants.find((each) => each.combatantId === "guard_1")?.status).toBe("dead");
   });
 
+  it("kills a PC outright at 0 HP too -- death saves are not implemented (R45/C-31)", () => {
+    // Same fixture as "kills a monster outright at 0 HP", but the target now
+    // carries a populated characterId. Before the pin, resolve.ts read
+    // `diesAtZeroHp: target.characterId === undefined`, which is false here --
+    // this would have failed with status "unconscious". The pin makes it
+    // "dead" regardless of characterId.
+    const wounded = {
+      ...built.world,
+      combatants: built.world.combatants.map((each) =>
+        each.combatantId === "guard_1" ? { ...each, currentHp: 3, characterId: "guard_1" } : each,
+      ),
+    };
+    const turn = attack("goblin_1", "guard_1", "scimitar");
+    const actor = wounded.combatants.find((each) => each.combatantId === "goblin_1");
+    if (actor === undefined) throw new Error("no actor");
+    const validation = validateExecuteTurn(turn, actor, wounded);
+    if (!validation.valid) throw new Error("fixture turn is illegal");
+
+    const { world, effect } = applyTurn({
+      world: wounded,
+      actorId: "goblin_1",
+      turn,
+      plan: validation.plan,
+      context: { statBlocks: built.statBlocks },
+      rng: scripted([d20Exactly(18), 0.5]),
+    });
+
+    expect(effect.killed).toEqual(["guard_1"]);
+    const target = world.combatants.find((each) => each.combatantId === "guard_1");
+    expect(target?.status).toBe("dead");
+  });
+
   it("records flat damage as kind: flat, with no dice rolled", () => {
     const flatDamageBlock: MonsterStatBlock = {
       ...GOBLIN_WARRIOR,

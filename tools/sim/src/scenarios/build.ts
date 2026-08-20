@@ -12,6 +12,10 @@ import type { BuiltScenario, ScenarioDefinition } from "./types.js";
 export function buildScenario(definition: ScenarioDefinition): BuiltScenario {
   const byMonsterId = new Map<string, MonsterStatBlock>();
   for (const spawn of definition.spawns) {
+    // The sim has no character-spawn fixtures yet (@ai-dm/rules-engine's
+    // SpawnSpec became MonsterSpawn | CharacterSpawn in Task 13); skip a
+    // CharacterSpawn rather than load a monster for it.
+    if (!("monsterId" in spawn)) continue;
     if (!byMonsterId.has(spawn.monsterId))
       byMonsterId.set(spawn.monsterId, loadMonster(spawn.monsterId));
   }

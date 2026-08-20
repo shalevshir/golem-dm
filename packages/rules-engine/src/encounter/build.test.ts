@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 import type { MonsterStatBlock } from "@ai-dm/schemas";
 import { buildEncounter } from "./build.js";
 import type { EncounterDefinition } from "./build.js";
+import { deriveCharacter } from "../character/derive.js";
+import { GEAR, sheet } from "../character/test-fixtures.js";
 
 const goblin: MonsterStatBlock = {
   monsterId: "goblin_warrior",
@@ -133,5 +135,102 @@ describe("buildEncounter", () => {
   it("rejects a combatant missing from turnOrder", () => {
     const partial: EncounterDefinition = { ...definition, turnOrder: ["hero"] };
     expect(() => buildEncounter({ definition: partial, statBlocks })).toThrow(/turnOrder/);
+  });
+});
+
+const DERIVED_HERO = deriveCharacter(sheet(), GEAR);
+
+describe("character spawns", () => {
+  it("builds a combatant from a derived character", () => {
+    const built = buildEncounter({
+      definition: {
+        encounterId: "one-hero",
+        descriptionEnglish: "A hero alone.",
+        width: 5,
+        height: 5,
+        spawns: [{ combatantId: "hero", characterId: "hero", faction: "party", position: [1, 1] }],
+        turnOrder: ["hero"],
+        maxRounds: 5,
+      },
+      statBlocks: new Map(),
+      characters: new Map([["hero", DERIVED_HERO]]),
+    });
+
+    const hero = built.world.combatants[0];
+    expect(hero?.armorClass).toBe(16);
+    expect(hero?.maxHp).toBe(28);
+    // The field the schema has always documented as "Present when this
+    // combatant is driven by a CharacterSheet", and which nothing populated.
+    expect(hero?.characterId).toBe("hero");
+  });
+
+  it("puts the character's weapon ranges into the world", () => {
+    const built = buildEncounter({
+      definition: {
+        encounterId: "one-hero",
+        descriptionEnglish: "A hero alone.",
+        width: 5,
+        height: 5,
+        spawns: [{ combatantId: "hero", characterId: "hero", faction: "party", position: [1, 1] }],
+        turnOrder: ["hero"],
+        maxRounds: 5,
+      },
+      statBlocks: new Map(),
+      characters: new Map([["hero", DERIVED_HERO]]),
+    });
+    expect(built.world.actionRangesFeet?.longsword).toBe(5);
+  });
+
+  it("carries a below-full-health character's currentHp, not the sheet's maxHp", () => {
+    // R46: DERIVED_HERO has currentHp === maxHp (28 === 28), so the
+    // pass-through would look correct even if it were wrong or deleted.
+    // Damage the sheet first so the two numbers diverge. The `...sheet().combat`
+    // spread is required -- `sheet()`'s override merge is shallow, so a bare
+    // `{ combat: { currentHp: 10 } }` would drop every other combat field.
+    const wounded = deriveCharacter(sheet({ combat: { ...sheet().combat, currentHp: 10 } }), GEAR);
+    const built = buildEncounter({
+      definition: {
+        encounterId: "one-hero",
+        descriptionEnglish: "A wounded hero alone.",
+        width: 5,
+        height: 5,
+        spawns: [{ combatantId: "hero", characterId: "hero", faction: "party", position: [1, 1] }],
+        turnOrder: ["hero"],
+        maxRounds: 5,
+      },
+      statBlocks: new Map(),
+      characters: new Map([["hero", wounded]]),
+    });
+
+    const hero = built.world.combatants[0];
+    expect(hero?.currentHp).toBe(10);
+    expect(hero?.maxHp).toBe(28);
+  });
+
+  it("throws when a character spawn has no supplied character", () => {
+    expect(() =>
+      buildEncounter({
+        definition: {
+          encounterId: "one-hero",
+          descriptionEnglish: "A hero alone.",
+          width: 5,
+          height: 5,
+          spawns: [
+            { combatantId: "hero", characterId: "missing", faction: "party", position: [1, 1] },
+          ],
+          turnOrder: ["hero"],
+          maxRounds: 5,
+        },
+        statBlocks: new Map(),
+        characters: new Map(),
+      }),
+    ).toThrow(/missing/);
+  });
+
+  it("leaves characterId unset on a monster combatant", () => {
+    // R8-refined: reuse the module-scope goblin/definition/statBlocks fixtures
+    // instead of adding a separate monster-only fixture pair.
+    const built = buildEncounter({ definition, statBlocks });
+    expect(built.world.combatants[0]?.characterId).toBeUndefined();
   });
 });

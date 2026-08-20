@@ -7,6 +7,8 @@ export interface SpawnOptions {
   combatantId: string;
   faction: Faction;
   position: Tile;
+  /** Set when this combatant is driven by a `CharacterSheet`. */
+  characterId?: string;
   /** Defaults to the stat block's average hit points. */
   currentHp?: number;
 }
@@ -24,6 +26,7 @@ export function combatantFromStatBlock(
   const maxHp = statBlock.hitPoints.average;
   return {
     combatantId: options.combatantId,
+    ...(options.characterId === undefined ? {} : { characterId: options.characterId }),
     faction: options.faction,
     position: options.position,
     size: statBlock.size,

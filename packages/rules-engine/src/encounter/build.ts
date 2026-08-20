@@ -7,6 +7,7 @@
 import type {
   Combatant,
   CreatureStatBlock,
+  DerivedCharacter,
   Faction,
   GridMap,
   Tile,
@@ -15,19 +16,31 @@ import type {
 import { GridMap as GridMapSchema } from "@ai-dm/schemas";
 import { actionRangesFeetFrom, combatantFromStatBlock } from "../combat/index.js";
 import type { CombatWorld } from "../combat/index.js";
+import { characterStatBlock } from "../character/index.js";
 
 export interface TerrainOverride {
   tile: Tile;
   terrain: TerrainType;
 }
 
-export interface SpawnSpec {
+export interface MonsterSpawn {
   combatantId: string;
   /** Key into the caller's stat-block map. */
   monsterId: string;
   faction: Faction;
   position: Tile;
 }
+
+export interface CharacterSpawn {
+  combatantId: string;
+  /** Key into the caller's derived-character map. */
+  characterId: string;
+  faction: Faction;
+  position: Tile;
+}
+
+/** A spawn names either a monster or a player character, never both. */
+export type SpawnSpec = MonsterSpawn | CharacterSpawn;
 
 export interface EncounterDefinition {
   encounterId: string;
@@ -56,6 +69,8 @@ export interface BuildEncounterInput {
   definition: EncounterDefinition;
   /** By `monsterId`, already parsed against `MonsterStatBlock`. */
   statBlocks: ReadonlyMap<string, CreatureStatBlock>;
+  /** By `characterId`, already derived by `deriveCharacter`. */
+  characters?: ReadonlyMap<string, DerivedCharacter>;
 }
 
 function buildGrid(definition: EncounterDefinition): GridMap {
@@ -74,6 +89,33 @@ function buildGrid(definition: EncounterDefinition): GridMap {
 
   // Parse rather than trust: a definition is data, and data gets validated.
   return GridMapSchema.parse({ width: definition.width, height: definition.height, tiles });
+}
+
+interface ResolvedSpawn {
+  statBlock: CreatureStatBlock;
+  characterId?: string;
+  currentHp?: number;
+}
+
+function resolveSpawn(spawn: SpawnSpec, input: BuildEncounterInput): ResolvedSpawn {
+  if ("characterId" in spawn) {
+    const derived = input.characters?.get(spawn.characterId);
+    if (derived === undefined) {
+      throw new Error(`No character supplied for characterId ${spawn.characterId}`);
+    }
+    return {
+      statBlock: characterStatBlock(derived),
+      characterId: spawn.characterId,
+      // A character can join below full health; a monster never does.
+      currentHp: derived.currentHp,
+    };
+  }
+
+  const statBlock = input.statBlocks.get(spawn.monsterId);
+  if (statBlock === undefined) {
+    throw new Error(`No stat block supplied for monsterId ${spawn.monsterId}`);
+  }
+  return { statBlock };
 }
 
 export function buildEncounter(input: BuildEncounterInput): BuiltEncounter {
@@ -107,16 +149,18 @@ export function buildEncounter(input: BuildEncounterInput): BuiltEncounter {
     }
     claimedTiles.add(tileKey);
 
-    const statBlock = input.statBlocks.get(spawn.monsterId);
-    if (statBlock === undefined) {
-      throw new Error(`No stat block supplied for monsterId ${spawn.monsterId}`);
-    }
-    statBlocks.set(spawn.combatantId, statBlock);
+    // Two spawn kinds, one creature abstraction: a character is projected onto
+    // the same `CreatureStatBlock` a monster already is, so everything below
+    // this point is identical for both.
+    const resolved = resolveSpawn(spawn, input);
+    statBlocks.set(spawn.combatantId, resolved.statBlock);
     combatants.push(
-      combatantFromStatBlock(statBlock, {
+      combatantFromStatBlock(resolved.statBlock, {
         combatantId: spawn.combatantId,
         faction: spawn.faction,
         position: spawn.position,
+        ...(resolved.characterId === undefined ? {} : { characterId: resolved.characterId }),
+        ...(resolved.currentHp === undefined ? {} : { currentHp: resolved.currentHp }),
       }),
     );
   }

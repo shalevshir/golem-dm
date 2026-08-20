@@ -66,6 +66,10 @@ export function buildEncounterById(encounterId: string): BuiltEncounter {
   const definition = encounterById(encounterId);
   const statBlocks = new Map<string, MonsterStatBlock>();
   for (const spawn of definition.spawns) {
+    // No catalogue encounter has a CharacterSpawn yet (Task 13 widened
+    // @ai-dm/rules-engine's SpawnSpec to MonsterSpawn | CharacterSpawn); skip
+    // one here rather than loading a monster file for it.
+    if (!("monsterId" in spawn)) continue;
     if (!statBlocks.has(spawn.monsterId)) {
       statBlocks.set(spawn.monsterId, loadMonster(spawn.monsterId));
     }
