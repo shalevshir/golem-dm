@@ -146,6 +146,15 @@ describe("applyTurn", () => {
     expect(effect.attacks).toHaveLength(1);
     expect(effect.attacks[0]?.outcome).toBe("hit");
     expect(effect.damageDealt).toBe(6);
+    expect(effect.attacks[0]?.attackRoll).toEqual({
+      naturalRoll: 18,
+      rolls: [18],
+      total: 22,
+      targetArmorClass: 16,
+    });
+    expect(effect.attacks[0]?.damageRolls).toEqual([
+      { kind: "dice", notation: "1d6+2", rolls: [4], modifier: 2, total: 6 },
+    ]);
 
     const after = world.combatants.find((each) => each.combatantId === "guard_1");
     const before = built.world.combatants.find((each) => each.combatantId === "guard_1");
@@ -158,6 +167,13 @@ describe("applyTurn", () => {
 
     expect(effect.attacks[0]?.outcome).toBe("miss");
     expect(effect.damageDealt).toBe(0);
+    expect(effect.attacks[0]?.attackRoll).toEqual({
+      naturalRoll: 3,
+      rolls: [3],
+      total: 7,
+      targetArmorClass: 16,
+    });
+    expect(effect.attacks[0]?.damageRolls).toEqual([]);
   });
 
   it("doubles only the damage dice on a critical hit", () => {
@@ -170,6 +186,16 @@ describe("applyTurn", () => {
 
     expect(effect.attacks[0]?.outcome).toBe("critical_hit");
     expect(effect.damageDealt).toBe(10);
+    expect(effect.attacks[0]?.attackRoll).toEqual({
+      naturalRoll: 20,
+      rolls: [20],
+      total: 24,
+      targetArmorClass: 16,
+    });
+    // The dice double (two rolls), the notation and modifier do not.
+    expect(effect.attacks[0]?.damageRolls).toEqual([
+      { kind: "dice", notation: "1d6+2", rolls: [4, 4], modifier: 2, total: 10 },
+    ]);
   });
 
   it("kills a monster outright at 0 HP rather than downing it", () => {
@@ -196,6 +222,89 @@ describe("applyTurn", () => {
 
     expect(effect.killed).toEqual(["guard_1"]);
     expect(world.combatants.find((each) => each.combatantId === "guard_1")?.status).toBe("dead");
+  });
+
+  it("records flat damage as kind: flat, with no dice rolled", () => {
+    const flatDamageBlock: MonsterStatBlock = {
+      ...GOBLIN_WARRIOR,
+      monsterId: "cultist_test_fixture",
+      actions: [
+        {
+          actionId: "dagger",
+          nameEnglish: "Dagger",
+          attackBonus: 4,
+          reachFeet: 5,
+          damage: { averageDamage: 1, damageType: "piercing" }, // no diceNotation
+          extraDamage: [],
+        },
+      ],
+    };
+    // ResolveContext.statBlocks is keyed by combatantId (see its doc comment
+    // and every other test in this file, e.g. `built.statBlocks`) -- override
+    // goblin_1's entry rather than adding an unreferenced monsterId key.
+    const statBlocks = new Map([...built.statBlocks, ["goblin_1", flatDamageBlock]]);
+    const actor = built.world.combatants.find((each) => each.combatantId === "goblin_1");
+    if (actor === undefined) throw new Error("no actor");
+    const turn = attack("goblin_1", "guard_1", "dagger");
+    const validation = validateExecuteTurn(turn, actor, built.world);
+    if (!validation.valid) {
+      throw new Error(`fixture turn is illegal: ${validation.rejections.map((r) => r.reason).join()}`);
+    }
+    const { effect } = applyTurn({
+      world: built.world,
+      actorId: "goblin_1",
+      turn,
+      plan: validation.plan,
+      context: { statBlocks },
+      rng: scripted([d20Exactly(18)]),
+    });
+
+    expect(effect.attacks[0]?.outcome).toBe("hit");
+    expect(effect.attacks[0]?.damageRolls).toEqual([{ kind: "flat", total: 1 }]);
+    expect(effect.damageDealt).toBe(1);
+  });
+
+  it("gives each extra-damage rider its own entry in damageRolls", () => {
+    const riderBlock: MonsterStatBlock = {
+      ...GOBLIN_WARRIOR,
+      monsterId: "rider_test_fixture",
+      actions: [
+        {
+          actionId: "scimitar",
+          nameEnglish: "Scimitar",
+          attackBonus: 4,
+          reachFeet: 5,
+          damage: { diceNotation: "1d6+2", averageDamage: 5, damageType: "slashing" },
+          extraDamage: [{ diceNotation: "1d4", averageDamage: 2, damageType: "poison" }],
+        },
+      ],
+    };
+    const statBlocks = new Map([...built.statBlocks, ["goblin_1", riderBlock]]);
+    const actor = built.world.combatants.find((each) => each.combatantId === "goblin_1");
+    if (actor === undefined) throw new Error("no actor");
+    const turn = attack("goblin_1", "guard_1", "scimitar");
+    const validation = validateExecuteTurn(turn, actor, built.world);
+    if (!validation.valid) {
+      throw new Error(`fixture turn is illegal: ${validation.rejections.map((r) => r.reason).join()}`);
+    }
+    // Attack roll: 18. Main damage 1d6+2 at 0.5 -> floor(0.5*6)+1=4, +2=6.
+    // Extra 1d4 at 0.5 -> floor(0.5*4)+1=3 (a d4 and a d6 give DIFFERENT
+    // faces for the same 0.5 rng value -- rollDie's formula is
+    // floor(rng()*sides)+1, so this is not the same 4 the d6 above rolled).
+    const { effect } = applyTurn({
+      world: built.world,
+      actorId: "goblin_1",
+      turn,
+      plan: validation.plan,
+      context: { statBlocks },
+      rng: scripted([d20Exactly(18), 0.5, 0.5]),
+    });
+
+    expect(effect.attacks[0]?.damageRolls).toEqual([
+      { kind: "dice", notation: "1d6+2", rolls: [4], modifier: 2, total: 6 },
+      { kind: "dice", notation: "1d4", rolls: [3], modifier: 0, total: 3 },
+    ]);
+    expect(effect.damageDealt).toBe(9);
   });
 
   it("flags a non-attack action as mechanically inert", () => {

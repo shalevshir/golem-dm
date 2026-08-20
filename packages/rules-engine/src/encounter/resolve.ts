@@ -17,10 +17,12 @@
 import { roll } from "../dice/index.js";
 import type { Rng } from "../dice/index.js";
 import { applyDamage, coverAgainst, resolveAttack } from "../combat/index.js";
-import type { AttackOutcome, CombatWorld, CoverLevel, TurnPlan } from "../combat/index.js";
+import type { AttackOutcome, CombatWorld, TurnPlan } from "../combat/index.js";
 import type {
+  AttackRollTrace,
   Combatant,
   DamageRoll,
+  DamageRollTrace,
   EntityStatus,
   ExecuteTurn,
   MonsterAttack,
@@ -37,9 +39,10 @@ export interface AttackRecord {
   targetId: string;
   actionId: string;
   outcome: AttackOutcome;
-  cover: CoverLevel;
   damage: number;
   targetStatusAfter: EntityStatus;
+  attackRoll: AttackRollTrace;
+  damageRolls: DamageRollTrace[];
 }
 
 export interface TurnEffect {
@@ -105,10 +108,13 @@ function attackFor(
   return statBlock.actions.find((action) => action.actionId === actionId);
 }
 
-/** Dice when the roll has them, the printed average when it is flat damage. */
-function damageFrom(damage: DamageRoll, critical: boolean, rng: Rng): number {
-  if (damage.diceNotation === undefined) return damage.averageDamage;
-  return roll(damage.diceNotation, rng, { critical }).total;
+/** Dice when the roll has them, the printed average when it is flat damage.
+ *  Returns the full trace, not just the total, so the combat log can show
+ *  the roll itself, not only its result. */
+function damageFrom(damage: DamageRoll, critical: boolean, rng: Rng): DamageRollTrace {
+  if (damage.diceNotation === undefined) return { kind: "flat", total: damage.averageDamage };
+  const r = roll(damage.diceNotation, rng, { critical });
+  return { kind: "dice", notation: r.notation, rolls: r.rolls, modifier: r.modifier, total: r.total };
 }
 
 /** The swings this turn proposes, in the order the engine budgeted them. */
@@ -169,12 +175,19 @@ export function applyTurn(input: ApplyTurnInput): ApplyTurnResult {
     );
 
     let damage = 0;
+    const damageRolls: DamageRollTrace[] = [];
     let statusAfter: EntityStatus = target.status;
 
     if (result.hit) {
       const critical = result.outcome === "critical_hit";
-      damage = damageFrom(attack.damage, critical, rng);
-      for (const extra of attack.extraDamage) damage += damageFrom(extra, critical, rng);
+      const mainTrace = damageFrom(attack.damage, critical, rng);
+      damageRolls.push(mainTrace);
+      damage = mainTrace.total;
+      for (const extra of attack.extraDamage) {
+        const extraTrace = damageFrom(extra, critical, rng);
+        damageRolls.push(extraTrace);
+        damage += extraTrace.total;
+      }
 
       // Combatants built from a monster stat block have no `characterId` and
       // die at 0 HP. A PC combatant falls Unconscious instead (`applyDamage`'s
@@ -204,9 +217,15 @@ export function applyTurn(input: ApplyTurnInput): ApplyTurnResult {
       targetId: swing.targetId,
       actionId: attack.actionId,
       outcome: result.outcome,
-      cover,
       damage,
       targetStatusAfter: statusAfter,
+      attackRoll: {
+        naturalRoll: result.naturalRoll,
+        rolls: result.rolls,
+        total: result.total,
+        targetArmorClass: result.effectiveArmorClass,
+      },
+      damageRolls,
     });
   }
 
