@@ -27,11 +27,12 @@ describe("conclusionOf", () => {
   });
 
   it("is defeat when the party is wiped out", () => {
-    // The expected outcome (C-31): `combatantFromStatBlock` never sets
-    // `characterId`, so `diesAtZeroHp` is true for everyone including the
-    // hero, and two goblins out-damage one guard. No terminal frame is ever
-    // emitted (C-37) — the pipeline simply stops answering — so this must be
-    // read from the projection and rendered as a normal ending, not an error.
+    // The expected outcome (C-31): `diesAtZeroHp` is pinned true
+    // unconditionally, so the hero dies at 0 HP rather than falling
+    // Unconscious, and two goblins out-damage one level-3 fighter. No
+    // terminal frame is ever emitted (C-37) — the pipeline simply stops
+    // answering — so this must be read from the projection and rendered as
+    // a normal ending, not an error.
     expect(
       conclusionOf(
         stateWith([combatant("hero", "party", "dead"), combatant("goblin-a", "hostile", "alive")]),
