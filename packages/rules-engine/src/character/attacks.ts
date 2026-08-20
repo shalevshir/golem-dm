@@ -22,6 +22,8 @@ export interface AttackDerivationInput {
 const DEFAULT_REACH_FEET = 5;
 const REACH_PROPERTY_FEET = 10;
 const UNARMED_BASE_DAMAGE = 1;
+/** Mirrors `DiceNotation`'s grammar (primitives.ts) with capture groups. */
+const DICE_NOTATION_PATTERN = /^(\d+)d(\d+)([+-]\d+)?$/;
 
 /**
  * "Anyone can wield a weapon, but you must have proficiency with it to add
@@ -65,18 +67,30 @@ function attackAbilityFor(
  * The weapon deals that damage when used with two hands to make a melee
  * attack." Nothing in this engine models hands, so a shield stands in for the
  * off hand. Recorded in RULES_REFERENCE.md section 7.
+ *
+ * Known gap (Finding 1 / R35): a weapon that is both Versatile and Thrown
+ * (spear, trident — the only two such rows in the SRD) uses its two-handed
+ * die in BOTH modes, so a thrown spear deals 1d8 where RAW gives 1d6.
+ * `CreatureAttack` carries exactly one `damage` value and thrown mode is not
+ * separately modelled, so this is a deliberate, documented approximation.
+ *
+ * Known gap (Finding 4 / R38): the shield proxy also misses a dual-wielder —
+ * a shieldless character holding e.g. a longsword AND a shortsword still
+ * gets the longsword's two-handed die, though the off hand is occupied by
+ * the second weapon, not free. Same root cause: only the shield slot is
+ * checked, not whether the off hand is actually free.
  */
 function damageDiceFor(weapon: WeaponDefinition, shieldEquipped: boolean) {
   if (weapon.versatileDamage !== undefined && !shieldEquipped) return weapon.versatileDamage;
   return weapon.damage;
 }
 
-/** Average of `XdY`, floored — the convention the SRD prints stat blocks with. */
+/** Average of `XdY[+-]Z`, floored — the convention the SRD prints stat blocks with. */
 function averageOfDice(diceNotation: string): number {
-  const [countText, sidesText] = diceNotation.split("d");
+  const [, countText, sidesText, modifierText] = DICE_NOTATION_PATTERN.exec(diceNotation) ?? [];
   const count = Number(countText);
   const sides = Number(sidesText);
-  return Math.floor((count * (sides + 1)) / 2);
+  return Math.floor((count * (sides + 1)) / 2) + Number(modifierText ?? 0);
 }
 
 /** `1d8+3`, `1d8`, `1d8-1`. A zero modifier adds no suffix. */
@@ -147,8 +161,23 @@ function unarmedStrike(strengthModifier: number, proficiencyBonus: number): Crea
   };
 }
 
+/**
+ * First occurrence wins, order otherwise preserved. Two equipped daggers are
+ * one attack OPTION ("attack with a dagger"), not two different ones —
+ * two-weapon fighting is a separate bonus-action mechanic and an explicit
+ * non-goal of this slice.
+ */
+function dedupeByWeaponId(weapons: readonly WeaponDefinition[]): WeaponDefinition[] {
+  const seen = new Set<string>();
+  return weapons.filter((weapon) => {
+    if (seen.has(weapon.weaponId)) return false;
+    seen.add(weapon.weaponId);
+    return true;
+  });
+}
+
 export function attacksFor(input: AttackDerivationInput): CreatureAttack[] {
-  const attacks = input.weapons.map((weapon): CreatureAttack => {
+  const attacks = dedupeByWeaponId(input.weapons).map((weapon): CreatureAttack => {
     const ability = attackAbilityFor(weapon, input.abilityModifiers);
     const modifier = input.abilityModifiers[ability];
     const proficient = isProficientWith(weapon, input.proficiencies);
