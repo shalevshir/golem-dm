@@ -5,9 +5,10 @@
 // ESM import cycle. zod dereferences these bindings eagerly at module init
 // (`z.object({ damageType: DamageType })` reads `DamageType` immediately,
 // not lazily), so such a cycle throws `ReferenceError` on import, not just
-// on parse. `CreatureSize` lives here for the same reason: `character.ts`
-// and `world.ts` import each other, so a size type either one could own
-// must instead live in a file neither depends on.
+// on parse. `CreatureSize` lives here for the same reason: `world.ts`
+// imports `character.ts`, so `character.ts` cannot import a size type back
+// from `world.ts` without closing that cycle — it belongs in a file that
+// depends on neither.
 import { z } from "zod";
 
 export const DamageType = z.enum([
