@@ -94,9 +94,19 @@ describe("CombatLog", () => {
         ],
       },
     ];
-    render(<CombatLog turns={turns} catalogue={catalogue} />);
+    const { container } = render(<CombatLog turns={turns} catalogue={catalogue} />);
     expect(screen.getByText(he.log.miss)).toBeInTheDocument();
-    expect(screen.queryByText(he.log.damage)).not.toBeInTheDocument();
+    // queryByText(he.log.damage) would be a vacuous check here: "נזק" sits as
+    // a bare text-node sibling to <bdi> elements and other text fragments
+    // inside AttackLine's <p> (same structural situation the outcome label
+    // was in before it got wrapped in <span> -- see the comment at
+    // CombatLog.tsx's AttackLine), so getNodeText's direct-text-node-only
+    // reconstruction never isolates "נזק" as its own queryable node even
+    // when it DOES render. An exact-string queryByText for it is therefore
+    // always null, regardless of whether the guard at CombatLog.tsx:65
+    // actually suppressed the fragment -- it can't fail. A container-text
+    // substring check has no such blind spot.
+    expect(container.textContent).not.toContain(he.log.damage);
   });
 
   it("renders a flat damage roll without dice notation", () => {
