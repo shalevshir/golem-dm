@@ -77,7 +77,7 @@ export function CombatLog(props: CombatLogProps): JSX.Element {
     props.catalogue.find((each) => each.combatantId === id)?.nameEnglish ?? id;
 
   return (
-    <section>
+    <section className="combat-log">
       <p className="label">{he.log.heading}</p>
       <div className="log-panel">
         {props.turns.map((turn, index) => (
@@ -102,12 +102,9 @@ export function CombatLog(props: CombatLogProps): JSX.Element {
                 {he.log.feet}
               </p>
             )}
-            {!turn.forfeited &&
-              turn.attacks.length === 0 &&
-              turn.movedFeet === 0 &&
-              turn.actionType !== undefined && (
-                <p>{actionLabel(turn.actionType) ?? turn.actionType}</p>
-              )}
+            {!turn.forfeited && turn.attacks.length === 0 && turn.actionType !== undefined && (
+              <p>{actionLabel(turn.actionType) ?? <bdi>{turn.actionType}</bdi>}</p>
+            )}
           </div>
         ))}
       </div>
