@@ -15,13 +15,16 @@ export const DamageRoll = z.object({
 });
 
 /**
- * One attack from a stat block's Actions. An attack that is "Melee or Ranged"
- * in the SRD carries both `reachFeet` and a range pair.
+ * One attack from a creature's Actions. A monster's `attackBonus` is the
+ * printed final number — "A monster is proficient with any weapon in its stat
+ * block" — while a character's is computed by `deriveCharacter`. Both arrive
+ * here already resolved, which is why the engine needs only one shape.
  */
-export const MonsterAttack = z.object({
+export const CreatureAttack = z.object({
   /** snake_case key; also the `actionId` the tactical agent proposes. */
   actionId: z.string().regex(/^[a-z0-9_]+$/),
   nameEnglish: z.string(),
+  nameHebrew: z.string().min(1),
   attackBonus: z.number().int(),
   /** Melee reach. Absent for an attack that is ranged only. */
   reachFeet: z.number().int().multipleOf(5).optional(),
@@ -37,23 +40,35 @@ export const MonsterAttack = z.object({
   extraDamage: z.array(DamageRoll).default([]),
 });
 
-export const MonsterStatBlock = z.object({
-  monsterId: z.string().regex(/^[a-z0-9_]+$/),
+/**
+ * Exactly what the rules engine reads off a creature — verified by grep, not
+ * by intent: `actions`, `nameEnglish`, `speedFeet`, `size`, `hitPoints`,
+ * `attacksPerAction`, `armorClass`, and nothing else. Monsters extend this
+ * with their SRD-only fields; characters are projected onto it by
+ * `characterStatBlock`. Keeping the supertype this narrow is what makes a
+ * player character a type-only change rather than a union at six call sites.
+ */
+export const CreatureStatBlock = z.object({
   nameEnglish: z.string(),
+  nameHebrew: z.string().min(1),
   size: CreatureSize,
-  /** SRD creature type line, e.g. "Fey (Goblinoid)". */
-  creatureType: z.string(),
-  alignment: z.string(),
   armorClass: z.number().int().min(1),
   hitPoints: z.object({ average: z.number().int().min(1), diceNotation: DiceNotation }),
   speedFeet: z.number().int().min(0).multipleOf(5),
+  /** Attacks a single Attack action grants — 2 when the stat block has Multiattack. */
+  attacksPerAction: z.number().int().min(1).default(1),
+  actions: z.array(CreatureAttack).min(1),
+});
+
+export const MonsterStatBlock = CreatureStatBlock.extend({
+  monsterId: z.string().regex(/^[a-z0-9_]+$/),
+  /** SRD creature type line, e.g. "Fey (Goblinoid)". */
+  creatureType: z.string(),
+  alignment: z.string(),
   abilities: Abilities,
   /** Fractional below 1, so a string: "1/8", "1/4", "1/2", "2". */
   challengeRating: z.string(),
   proficiencyBonus: z.number().int().min(2).max(9),
-  /** Attacks a single Attack action grants — 2 when the stat block has Multiattack. */
-  attacksPerAction: z.number().int().min(1).default(1),
-  actions: z.array(MonsterAttack).min(1),
 });
 
 /** A condition's mechanical effects, as named in its SRD glossary entry. */
@@ -96,7 +111,8 @@ export const SkillDefinition = z.object({
 });
 
 export type DamageRoll = z.infer<typeof DamageRoll>;
-export type MonsterAttack = z.infer<typeof MonsterAttack>;
+export type CreatureAttack = z.infer<typeof CreatureAttack>;
+export type CreatureStatBlock = z.infer<typeof CreatureStatBlock>;
 export type MonsterStatBlock = z.infer<typeof MonsterStatBlock>;
 export type ConditionDefinition = z.infer<typeof ConditionDefinition>;
 export type WeaponProficiencies = z.infer<typeof WeaponProficiencies>;

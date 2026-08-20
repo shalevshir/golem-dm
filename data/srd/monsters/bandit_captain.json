@@ -1,6 +1,7 @@
 {
   "monsterId": "bandit_captain",
   "nameEnglish": "Bandit Captain",
+  "nameHebrew": "קפטן שודדים",
   "size": "medium",
   "creatureType": "Humanoid",
   "alignment": "Neutral",
@@ -15,6 +16,7 @@
     {
       "actionId": "scimitar",
       "nameEnglish": "Scimitar",
+      "nameHebrew": "חרב מעוקלת",
       "attackBonus": 5,
       "reachFeet": 5,
       "damage": { "diceNotation": "1d6+3", "averageDamage": 6, "damageType": "slashing" }
@@ -22,6 +24,7 @@
     {
       "actionId": "pistol",
       "nameEnglish": "Pistol",
+      "nameHebrew": "אקדח",
       "attackBonus": 5,
       "rangeFeet": 30,
       "longRangeFeet": 90,

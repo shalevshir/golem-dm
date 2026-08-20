@@ -1,6 +1,7 @@
 {
   "monsterId": "ogre",
   "nameEnglish": "Ogre",
+  "nameHebrew": "אוגר",
   "size": "large",
   "creatureType": "Giant",
   "alignment": "Chaotic Evil",
@@ -15,6 +16,7 @@
     {
       "actionId": "greatclub",
       "nameEnglish": "Greatclub",
+      "nameHebrew": "אלה גדולה",
       "attackBonus": 6,
       "reachFeet": 5,
       "damage": { "diceNotation": "2d8+4", "averageDamage": 13, "damageType": "bludgeoning" }
@@ -22,6 +24,7 @@
     {
       "actionId": "javelin",
       "nameEnglish": "Javelin",
+      "nameHebrew": "כידון",
       "attackBonus": 6,
       "reachFeet": 5,
       "rangeFeet": 30,

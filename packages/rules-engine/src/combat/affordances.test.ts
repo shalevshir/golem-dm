@@ -8,6 +8,7 @@ import type { CombatWorld } from "./validate-turn.js";
 const goblinStatBlock: MonsterStatBlock = {
   monsterId: "goblin_warrior",
   nameEnglish: "Goblin Warrior",
+  nameHebrew: "גובלין לוחם",
   size: "small",
   creatureType: "Fey (Goblinoid)",
   alignment: "Chaotic Neutral",
@@ -22,6 +23,7 @@ const goblinStatBlock: MonsterStatBlock = {
     {
       actionId: "scimitar",
       nameEnglish: "Scimitar",
+      nameHebrew: "חרב מעוקלת",
       attackBonus: 4,
       reachFeet: 5,
       damage: { diceNotation: "1d6+2", averageDamage: 5, damageType: "slashing" },

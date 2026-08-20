@@ -21,17 +21,17 @@ import type { AttackOutcome, CombatWorld, TurnPlan } from "../combat/index.js";
 import type {
   AttackRollTrace,
   Combatant,
+  CreatureAttack,
+  CreatureStatBlock,
   DamageRoll,
   DamageRollTrace,
   EntityStatus,
   ExecuteTurn,
-  MonsterAttack,
-  MonsterStatBlock,
 } from "@ai-dm/schemas";
 
 export interface ResolveContext {
   /** By `combatantId`. Supplies attack bonuses and damage dice. */
-  statBlocks: ReadonlyMap<string, MonsterStatBlock>;
+  statBlocks: ReadonlyMap<string, CreatureStatBlock>;
 }
 
 export interface AttackRecord {
@@ -101,9 +101,9 @@ function replace(world: CombatWorld, updated: Combatant): CombatWorld {
  * reach for the same case.
  */
 function attackFor(
-  statBlock: MonsterStatBlock,
+  statBlock: CreatureStatBlock,
   actionId: string | undefined,
-): MonsterAttack | undefined {
+): CreatureAttack | undefined {
   if (actionId === undefined) return statBlock.actions[0];
   return statBlock.actions.find((action) => action.actionId === actionId);
 }

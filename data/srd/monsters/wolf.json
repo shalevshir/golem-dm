@@ -1,6 +1,7 @@
 {
   "monsterId": "wolf",
   "nameEnglish": "Wolf",
+  "nameHebrew": "זאב",
   "size": "medium",
   "creatureType": "Beast",
   "alignment": "Unaligned",
@@ -15,6 +16,7 @@
     {
       "actionId": "bite",
       "nameEnglish": "Bite",
+      "nameHebrew": "נשיכה",
       "attackBonus": 4,
       "reachFeet": 5,
       "damage": { "diceNotation": "1d6+2", "averageDamage": 5, "damageType": "piercing" }

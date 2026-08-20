@@ -6,9 +6,9 @@
 // `apps/server/src/encounters/srd.ts`) parses them and hands them in.
 import type {
   Combatant,
+  CreatureStatBlock,
   Faction,
   GridMap,
-  MonsterStatBlock,
   Tile,
   TerrainType,
 } from "@ai-dm/schemas";
@@ -47,7 +47,7 @@ export interface BuiltEncounter {
   encounterId: string;
   world: CombatWorld;
   /** By `combatantId` — the resolver needs attack bonuses, which `Combatant` lacks. */
-  statBlocks: ReadonlyMap<string, MonsterStatBlock>;
+  statBlocks: ReadonlyMap<string, CreatureStatBlock>;
   turnOrder: readonly string[];
   maxRounds: number;
 }
@@ -55,7 +55,7 @@ export interface BuiltEncounter {
 export interface BuildEncounterInput {
   definition: EncounterDefinition;
   /** By `monsterId`, already parsed against `MonsterStatBlock`. */
-  statBlocks: ReadonlyMap<string, MonsterStatBlock>;
+  statBlocks: ReadonlyMap<string, CreatureStatBlock>;
 }
 
 function buildGrid(definition: EncounterDefinition): GridMap {
@@ -78,7 +78,7 @@ function buildGrid(definition: EncounterDefinition): GridMap {
 
 export function buildEncounter(input: BuildEncounterInput): BuiltEncounter {
   const { definition } = input;
-  const statBlocks = new Map<string, MonsterStatBlock>();
+  const statBlocks = new Map<string, CreatureStatBlock>();
   const combatants: Combatant[] = [];
   const seenCombatantIds = new Set<string>();
   // Anchor-tile collisions only, not full footprints: a Large creature's real

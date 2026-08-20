@@ -13,7 +13,7 @@ import { FEET_PER_TILE } from "../spatial/index.js";
 import { validateExecuteTurn } from "./validate-turn.js";
 import type { CombatWorld, TurnRejectionReason, TurnValidation } from "./validate-turn.js";
 import { DEFAULT_PATH_TYPE } from "@ai-dm/schemas";
-import type { ActionAffordance, MonsterStatBlock, Tile, TurnAffordances } from "@ai-dm/schemas";
+import type { ActionAffordance, CreatureStatBlock, Tile, TurnAffordances } from "@ai-dm/schemas";
 import type { ExecuteTurn } from "@ai-dm/schemas";
 
 /**
@@ -71,7 +71,7 @@ function permits(verdict: TurnValidation, blockers: readonly TurnRejectionReason
 export function affordancesFor(
   world: CombatWorld,
   actorId: string,
-  statBlock: MonsterStatBlock,
+  statBlock: CreatureStatBlock,
 ): TurnAffordances {
   const actor = world.combatants.find((each) => each.combatantId === actorId);
   if (actor === undefined) {

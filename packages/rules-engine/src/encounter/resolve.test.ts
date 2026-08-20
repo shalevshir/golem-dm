@@ -26,6 +26,7 @@ function d20Exactly(target: number): number {
 const GOBLIN_WARRIOR: MonsterStatBlock = {
   monsterId: "goblin_warrior",
   nameEnglish: "Goblin Warrior",
+  nameHebrew: "גובלין לוחם",
   size: "small",
   creatureType: "Fey (Goblinoid)",
   alignment: "Chaotic Neutral",
@@ -40,6 +41,7 @@ const GOBLIN_WARRIOR: MonsterStatBlock = {
     {
       actionId: "scimitar",
       nameEnglish: "Scimitar",
+      nameHebrew: "חרב מעוקלת",
       attackBonus: 4,
       reachFeet: 5,
       damage: { diceNotation: "1d6+2", averageDamage: 5, damageType: "slashing" },
@@ -48,6 +50,7 @@ const GOBLIN_WARRIOR: MonsterStatBlock = {
     {
       actionId: "shortbow",
       nameEnglish: "Shortbow",
+      nameHebrew: "קשת קצרה",
       attackBonus: 4,
       rangeFeet: 80,
       longRangeFeet: 320,
@@ -60,6 +63,7 @@ const GOBLIN_WARRIOR: MonsterStatBlock = {
 const GUARD: MonsterStatBlock = {
   monsterId: "guard",
   nameEnglish: "Guard",
+  nameHebrew: "שומר",
   size: "medium",
   creatureType: "Humanoid",
   alignment: "Neutral",
@@ -74,6 +78,7 @@ const GUARD: MonsterStatBlock = {
     {
       actionId: "spear",
       nameEnglish: "Spear",
+      nameHebrew: "חנית",
       attackBonus: 3,
       reachFeet: 5,
       rangeFeet: 20,
@@ -232,6 +237,7 @@ describe("applyTurn", () => {
         {
           actionId: "dagger",
           nameEnglish: "Dagger",
+          nameHebrew: "פגיון",
           attackBonus: 4,
           reachFeet: 5,
           damage: { averageDamage: 1, damageType: "piercing" }, // no diceNotation
@@ -274,6 +280,7 @@ describe("applyTurn", () => {
         {
           actionId: "scimitar",
           nameEnglish: "Scimitar",
+          nameHebrew: "חרב מעוקלת",
           attackBonus: 4,
           reachFeet: 5,
           damage: { diceNotation: "1d6+2", averageDamage: 5, damageType: "slashing" },

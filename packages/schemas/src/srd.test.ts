@@ -9,6 +9,7 @@ import {
   ClassDefinition,
   ConditionDefinition,
   Condition,
+  CreatureStatBlock,
   MonsterStatBlock,
   Skill,
   SkillDefinition,
@@ -263,5 +264,31 @@ describe("SRD armor", () => {
     for (const each of armor()) {
       expect(each.nameHebrew.trim(), each.armorId).not.toBe("");
     }
+  });
+});
+
+describe("CreatureStatBlock", () => {
+  it("names every monster and every attack in Hebrew", () => {
+    for (const file of monsterFiles) {
+      const parsed = MonsterStatBlock.parse(readJson(join(MONSTER_DIR, file)));
+      expect(parsed.nameHebrew.trim(), file).not.toBe("");
+      for (const action of parsed.actions) {
+        expect(action.nameHebrew.trim(), `${file}:${action.actionId}`).not.toBe("");
+      }
+    }
+  });
+
+  // The widening's whole promise: a monster IS a creature, so anything the
+  // engine accepts as a CreatureStatBlock accepts a parsed monster unchanged.
+  it("accepts a parsed monster as a CreatureStatBlock", () => {
+    const guard = readJson(join(MONSTER_DIR, "guard.json"));
+    const creature = CreatureStatBlock.parse(guard);
+    expect(creature.nameEnglish).toBe("Guard");
+    expect(creature.actions).toHaveLength(1);
+  });
+
+  it("keeps monster-only fields off the creature supertype", () => {
+    const creature = CreatureStatBlock.parse(readJson(join(MONSTER_DIR, "guard.json")));
+    expect("challengeRating" in creature).toBe(false);
   });
 });

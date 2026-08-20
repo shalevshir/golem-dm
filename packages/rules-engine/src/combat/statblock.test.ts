@@ -7,6 +7,7 @@ import { combatant, parseGrid } from "./test-fixtures.js";
 const GOBLIN_WARRIOR: MonsterStatBlock = {
   monsterId: "goblin_warrior",
   nameEnglish: "Goblin Warrior",
+  nameHebrew: "גובלין לוחם",
   size: "small",
   creatureType: "Fey (Goblinoid)",
   alignment: "Chaotic Neutral",
@@ -21,6 +22,7 @@ const GOBLIN_WARRIOR: MonsterStatBlock = {
     {
       actionId: "scimitar",
       nameEnglish: "Scimitar",
+      nameHebrew: "חרב מעוקלת",
       attackBonus: 4,
       reachFeet: 5,
       damage: { diceNotation: "1d6+2", averageDamage: 5, damageType: "slashing" },
@@ -29,6 +31,7 @@ const GOBLIN_WARRIOR: MonsterStatBlock = {
     {
       actionId: "shortbow",
       nameEnglish: "Shortbow",
+      nameHebrew: "קשת קצרה",
       attackBonus: 4,
       rangeFeet: 80,
       longRangeFeet: 320,
@@ -45,6 +48,7 @@ const OGRE: MonsterStatBlock = {
   ...GOBLIN_WARRIOR,
   monsterId: "ogre",
   nameEnglish: "Ogre",
+  nameHebrew: "אוגר",
   size: "large",
   armorClass: 11,
   hitPoints: { average: 68, diceNotation: "8d10+24" },
@@ -54,6 +58,7 @@ const OGRE: MonsterStatBlock = {
     {
       actionId: "greatclub",
       nameEnglish: "Greatclub",
+      nameHebrew: "אלה גדולה",
       attackBonus: 6,
       reachFeet: 5,
       damage: { diceNotation: "2d8+4", averageDamage: 13, damageType: "bludgeoning" },

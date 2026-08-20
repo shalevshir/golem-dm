@@ -1,6 +1,6 @@
 // Turns SRD stat blocks into the shapes the turn validator consumes. Pure —
 // the caller does the file reading and hands the parsed data in.
-import type { Combatant, Faction, MonsterStatBlock, Tile } from "@ai-dm/schemas";
+import type { Combatant, CreatureStatBlock, Faction, Tile } from "@ai-dm/schemas";
 import { startTurn } from "./action-economy.js";
 
 export interface SpawnOptions {
@@ -18,7 +18,7 @@ export interface SpawnOptions {
  * variety is wanted.
  */
 export function combatantFromStatBlock(
-  statBlock: MonsterStatBlock,
+  statBlock: CreatureStatBlock,
   options: SpawnOptions,
 ): Combatant {
   const maxHp = statBlock.hitPoints.average;
@@ -43,7 +43,7 @@ export function combatantFromStatBlock(
 }
 
 /** The longest melee reach the stat block has; 5 ft when it is ranged-only. */
-export function meleeReachFeet(statBlock: MonsterStatBlock): number {
+export function meleeReachFeet(statBlock: CreatureStatBlock): number {
   const reaches = statBlock.actions
     .map((action) => action.reachFeet)
     .filter((reach): reach is number => reach !== undefined);
@@ -57,7 +57,7 @@ export function meleeReachFeet(statBlock: MonsterStatBlock): number {
  * belongs to resolution, not legality.
  */
 export function actionRangesFeetFrom(
-  statBlocks: readonly MonsterStatBlock[],
+  statBlocks: readonly CreatureStatBlock[],
 ): Record<string, number> {
   const ranges: Record<string, number> = {};
   for (const statBlock of statBlocks) {
