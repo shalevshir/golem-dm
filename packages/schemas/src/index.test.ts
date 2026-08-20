@@ -279,6 +279,35 @@ describe("ActionRejectedPayload", () => {
   });
 });
 
+describe("AttackOutcome", () => {
+  it("is a closed enum of the four outcomes", () => {
+    expect(AttackOutcome.options).toStrictEqual(["hit", "miss", "critical_hit", "critical_miss"]);
+  });
+});
+
+describe("AttackRollTrace", () => {
+  it("rejects a naturalRoll outside 1-20", () => {
+    const result = AttackRollTrace.safeParse({
+      naturalRoll: 21,
+      rolls: [21],
+      total: 25,
+      targetArmorClass: 15,
+    });
+
+    if (result.success) throw new Error("expected the parse to fail");
+    expect(result.error.issues[0]?.path).toStrictEqual(["naturalRoll"]);
+  });
+});
+
+describe("DamageRollTrace", () => {
+  it("rejects an unknown kind", () => {
+    const result = DamageRollTrace.safeParse({ kind: "average", total: 1 });
+
+    if (result.success) throw new Error("expected the parse to fail");
+    expect(result.error.issues[0]?.path).toStrictEqual(["kind"]);
+  });
+});
+
 describe("AttackTrace", () => {
   it("parses a hit with a single damage roll", () => {
     const trace = AttackTrace.parse({
@@ -377,6 +406,12 @@ describe("DiceRolledPayload", () => {
     // failure (see store.ts's defensive handling in Task 5), not a crash —
     // this test only pins that the schema itself is strict about it.
     const result = DiceRolledPayload.safeParse({ actorId: "hero", attacks: [] });
+    if (result.success) throw new Error("expected the parse to fail");
+    expect(result.error.issues[0]?.path).toStrictEqual(["movedFeet"]);
+  });
+
+  it("rejects a negative movedFeet", () => {
+    const result = DiceRolledPayload.safeParse({ actorId: "hero", movedFeet: -5, attacks: [] });
     if (result.success) throw new Error("expected the parse to fail");
     expect(result.error.issues[0]?.path).toStrictEqual(["movedFeet"]);
   });
