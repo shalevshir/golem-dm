@@ -360,7 +360,7 @@ answers with `session_state` snapshots, `event` frames (the same
 creates a session against one of the catalogue's encounters (`goblin-ambush`
 is the only one so far) and returns a `sessionId`; everything after that
 happens over the socket. A client is never handed state directly — it is
-always a fold of the event log (`apps/server/src/core/reduce.ts`), which is
+always a fold of the event log (`packages/schemas/src/reduce.ts`), which is
 what makes a reconnecting client and the server's own in-memory projection
 provably the same function of the same events, rather than two
 implementations that happen to agree.

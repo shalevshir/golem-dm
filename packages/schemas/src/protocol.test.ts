@@ -100,6 +100,16 @@ describe("turn_affordances frame", () => {
   it("parses as a ServerFrame", () => {
     const parsed = ServerFrame.parse(frame);
     expect(parsed.type).toBe("turn_affordances");
+    // zod strips unknown keys, so asserting only `type` here would still pass
+    // a variant that dropped `reachableTiles` (or any other field) entirely
+    // — the client's affordance rendering depends on this payload actually
+    // surviving the parse, not just the discriminant.
+    expect(parsed).toMatchObject({
+      reachableTiles: [
+        [5, 3],
+        [6, 4],
+      ],
+    });
   });
 
   it("keeps actionId optional so no-target actions need not invent one", () => {

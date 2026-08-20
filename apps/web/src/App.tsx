@@ -47,7 +47,24 @@ export function App(props: AppProps): JSX.Element {
   const [state, setState] = useState<ClientState>(initialClientState);
   const [catalogue, setCatalogue] = useState<EncounterCatalogue | null>(null);
   const [status, setStatus] = useState<ConnectionStatus>("connecting");
-  const [selectedTile, setSelectedTile] = useState<Tile | null>(null);
+  // Only the raw click is state; the effective selection is re-resolved
+  // against `state.affordances` on every render instead of being trusted
+  // across turns — the same pattern `ActionBar` already uses for its target
+  // picker (see its doc comment). A `turn_affordances` frame that lands
+  // between the click and the commit (e.g. the enemy sweep ending the
+  // player's next turn) can offer a completely different `reachableTiles`
+  // set; re-deriving means a stale tile from a previous turn can never be
+  // sent as this turn's `destinationTile`. No effect needed: this is plain
+  // derivation during render.
+  const [clickedTile, setClickedTile] = useState<Tile | null>(null);
+  const selectedTile =
+    clickedTile !== null &&
+    (state.affordances?.reachableTiles.some(
+      ([x, y]) => x === clickedTile[0] && y === clickedTile[1],
+    ) ??
+      false)
+      ? clickedTile
+      : null;
   // A stored session id means a fight is already in progress: mounting goes
   // straight to reconnecting rather than showing the start screen again, or
   // a refresh mid-fight would look like it lost the session even though
@@ -122,20 +139,34 @@ export function App(props: AppProps): JSX.Element {
     };
   }, [started, props.wsUrl, props.socketFactory]);
 
-  // `unknown_session`: the server has forgotten this session (error table,
-  // design doc `## Error handling`). The stored id must not outlive it, and
-  // the only sane recovery is back to the start screen — there is nothing
-  // left here to resume.
-  useEffect(() => {
-    if (state.lastError?.code !== "unknown_session") return;
-
+  // The one teardown that gets back to a clean start screen: drop the
+  // stored session id, close whatever connection is live, and reset every
+  // piece of state a fresh mount would otherwise read as "still in
+  // progress". Shared by the automatic `unknown_session` recovery below and
+  // the player-triggered "start over" control `ErrorBanner` offers on
+  // `internal_error` — the spec's error table lists "surface, and offer
+  // reconnect" for that code, and this is the reconnect: there is no
+  // automatic recovery for a genuinely unknown server fault, so the player
+  // needs an explicit way back rather than being stuck on a dead screen.
+  const resetToStart = useCallback(() => {
     sessionStorage.removeItem(SESSION_STORAGE_KEY);
     connectionRef.current?.close();
     connectionRef.current = null;
     setState(initialClientState);
     setCatalogue(null);
     setStarted(false);
-  }, [state.lastError]);
+  }, []);
+
+  // `unknown_session`: the server has forgotten this session (error table,
+  // design doc `## Error handling`). The stored id must not outlive it, and
+  // the only sane recovery is back to the start screen — there is nothing
+  // left here to resume. Automatic, unlike `internal_error`'s player-
+  // triggered control below: there is nothing to weigh here, the session is
+  // simply gone.
+  useEffect(() => {
+    if (state.lastError?.code !== "unknown_session") return;
+    resetToStart();
+  }, [state.lastError, resetToStart]);
 
   // Once the fight is over, the stored id must not outlive it either —
   // otherwise a later refresh rejoins a session that has already ended,
@@ -176,7 +207,7 @@ export function App(props: AppProps): JSX.Element {
           ...(targetId === undefined ? {} : { targetId }),
         }),
       });
-      setSelectedTile(null);
+      setClickedTile(null);
     },
     [send, selectedTile, state.affordances],
   );
@@ -212,6 +243,7 @@ export function App(props: AppProps): JSX.Element {
           error={state.lastError}
           rejection={state.lastRejection}
           onDismiss={dismissError}
+          onStartOver={resetToStart}
         />
       </main>
     );
@@ -240,6 +272,7 @@ export function App(props: AppProps): JSX.Element {
         error={state.lastError}
         rejection={state.lastRejection}
         onDismiss={dismissError}
+        onStartOver={resetToStart}
       />
 
       <Grid
@@ -247,7 +280,7 @@ export function App(props: AppProps): JSX.Element {
         affordances={state.affordances}
         catalogue={catalogue.combatants}
         selectedTile={selectedTile}
-        onTileClick={setSelectedTile}
+        onTileClick={setClickedTile}
         onCombatantClick={() => undefined}
       />
 

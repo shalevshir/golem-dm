@@ -332,6 +332,89 @@ describe("App", () => {
     expect(ExecuteTurn.safeParse(structured?.turn).success).toBe(true);
   });
 
+  it("offers a start-over control on internal_error and returns to the start screen when clicked", async () => {
+    // Finding 3: the spec's error table lists `internal_error` -> "Surface,
+    // and offer reconnect", but an `error` frame never closes the socket, so
+    // without an explicit control the player is stuck reading the banner
+    // forever. This reuses the same teardown `unknown_session` already
+    // drives automatically (App's `resetToStart`), just behind a click.
+    await start();
+    expect(sessionStorage.getItem(SESSION_STORAGE_KEY)).toBe("s1");
+
+    act(() => {
+      socket.emitMessage({ type: "error", code: "internal_error", message: "boom" });
+    });
+
+    const startOver = await screen.findByRole("button", { name: he.app.startOver });
+    act(() => {
+      startOver.click();
+    });
+
+    expect(sessionStorage.getItem(SESSION_STORAGE_KEY)).toBeNull();
+    expect(await screen.findByRole("button", { name: he.app.startFight })).toBeInTheDocument();
+  });
+
+  it("drops a tile selected on a previous turn instead of sending it as this turn's destination", async () => {
+    // Finding 2: `selectedTile` used to be cleared only inside `commit`, so a
+    // tile clicked (but never committed) on one turn's affordances survived
+    // into the next turn's and could be sent as a destination the server
+    // never sanctioned for the new board. The fix re-derives the effective
+    // selection from the CURRENT `reachableTiles` every render, the same
+    // pattern `ActionBar` already uses for its target picker.
+    await start();
+
+    act(() => {
+      socket.emitMessage({
+        type: "session_state",
+        sequence: 0,
+        snapshot: snapshotWith([
+          combatant("hero", "party", "alive"),
+          combatant("goblin-a", "hostile", "alive"),
+        ]),
+      });
+      socket.emitMessage({
+        type: "turn_affordances",
+        forSequence: 0,
+        actorId: "hero",
+        reachableTiles: [[5, 5]],
+        actions: [{ actionType: "dodge", requiresTarget: false, targetableCombatantIds: [] }],
+      });
+    });
+
+    act(() => {
+      screen.getByRole("button", { name: /\(5,5\)/ }).click();
+    });
+
+    // A fresh affordance frame lands — same actor, same turn in terms of the
+    // store's `sequence` guard, but a `reachableTiles` set that no longer
+    // includes the tile clicked above (exactly what the enemy sweep landing
+    // back on the player would look like).
+    act(() => {
+      socket.emitMessage({
+        type: "turn_affordances",
+        forSequence: 0,
+        actorId: "hero",
+        reachableTiles: [[1, 1]],
+        actions: [{ actionType: "dodge", requiresTarget: false, targetableCombatantIds: [] }],
+      });
+    });
+
+    act(() => {
+      screen.getByRole("button", { name: he.actions.dodge }).click();
+    });
+
+    const sent = socket.sent.map((each) => JSON.parse(each) as Record<string, unknown>);
+    const structured = sent.find((each) => each.type === "structured_action");
+    expect(structured).toBeDefined();
+    const turn = structured?.turn as Record<string, unknown>;
+    // `exactOptionalPropertyTypes` means an omitted key and a key explicitly
+    // set to `undefined` are different states on the wire (JSON.stringify
+    // drops the latter too, so this assertion would pass either way in this
+    // test specifically — but `Object.hasOwn` is the correct check for what
+    // "no movement key" actually means, per the finding).
+    expect(Object.hasOwn(turn, "movement")).toBe(false);
+  });
+
   it("keeps exactly one live connection through StrictMode's dev double-invoke", async () => {
     // StrictMode double-invokes an effect (mount -> cleanup -> mount) only
     // around a component's INITIAL mount, not on a later re-run triggered by

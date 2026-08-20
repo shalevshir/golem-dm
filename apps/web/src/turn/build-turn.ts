@@ -2,6 +2,7 @@
 // It makes no legality decision: every option offered came from a
 // `turn_affordances` frame, which the server derived by running the real
 // validator. This file only assembles.
+import { DEFAULT_PATH_TYPE } from "@ai-dm/schemas";
 import type { ActionAffordance, ExecuteTurn, Tile } from "@ai-dm/schemas";
 
 export interface Selection {
@@ -51,7 +52,7 @@ export function buildTurn(selection: Selection): ExecuteTurn {
     ...(selection.destinationTile === undefined
       ? {}
       : {
-          movement: [{ destinationTile: selection.destinationTile, pathType: "direct" as const }],
+          movement: [{ destinationTile: selection.destinationTile, pathType: DEFAULT_PATH_TYPE }],
         }),
     mainAction,
     tacticalRationaleEnglish: describeSelection(selection),

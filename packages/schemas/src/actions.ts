@@ -8,6 +8,21 @@ export const ActionType = z.enum([
   "help", "hide", "ready", "shove", "grapple", "use_object",
 ]);
 
+export const PathType = z.enum(["direct", "flank", "retreat_to_cover"]);
+export type PathType = z.infer<typeof PathType>;
+
+/**
+ * The `pathType` every affordance probe and every client-built movement
+ * segment uses when nothing more specific is being tested. Two packages
+ * relied on the literal `"direct"` matching by coincidence (the rules-engine
+ * probe in `combat/affordances.ts`, the web client's `turn/build-turn.ts`) —
+ * the affordance guarantee ("a tile the client draws is a tile the validator
+ * accepted") holds only because both agree. A shared constant makes that
+ * agreement structural instead of a fact both sides had to independently get
+ * right.
+ */
+export const DEFAULT_PATH_TYPE: PathType = "direct";
+
 /**
  * Tactical turn proposed by the LLM tactical agent.
  * The rules engine VALIDATES this; illegal proposals are rejected with a
@@ -16,9 +31,7 @@ export const ActionType = z.enum([
 export const ExecuteTurn = z.object({
   actorId: z.string(),
   /** Ordered segments allow move–attack–move. */
-  movement: z
-    .array(z.object({ destinationTile: Tile, pathType: z.enum(["direct", "flank", "retreat_to_cover"]) }))
-    .optional(),
+  movement: z.array(z.object({ destinationTile: Tile, pathType: PathType })).optional(),
   mainAction: z.object({
     actionType: ActionType,
     actionId: z.string().optional(),

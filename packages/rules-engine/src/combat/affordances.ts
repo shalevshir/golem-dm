@@ -12,6 +12,7 @@
 import { FEET_PER_TILE } from "../spatial/index.js";
 import { validateExecuteTurn } from "./validate-turn.js";
 import type { CombatWorld, TurnRejectionReason, TurnValidation } from "./validate-turn.js";
+import { DEFAULT_PATH_TYPE } from "@ai-dm/schemas";
 import type { ActionAffordance, MonsterStatBlock, Tile, TurnAffordances } from "@ai-dm/schemas";
 import type { ExecuteTurn } from "@ai-dm/schemas";
 
@@ -100,7 +101,7 @@ export function affordancesFor(
       if (x < 0 || x >= world.grid.width || y < 0 || y >= world.grid.height) continue;
       const destinationTile: Tile = [x, y];
       const verdict = probe({
-        movement: [{ destinationTile, pathType: "direct" }],
+        movement: [{ destinationTile, pathType: DEFAULT_PATH_TYPE }],
         mainAction: { actionType: "dodge" },
       });
       if (permits(verdict, BLOCKS_MOVEMENT)) reachableTiles.push(destinationTile);

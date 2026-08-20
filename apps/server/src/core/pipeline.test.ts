@@ -994,12 +994,16 @@ describe("handleCommand — turn timeout", () => {
   // shared band (~240ms) left only ~60ms — about 25% — of headroom below
   // the 300ms threshold, which a loaded machine or a parallel `pnpm test`
   // run eats easily: measured failing at 331ms under full-suite contention
-  // while passing 5/5 alone. Scaling the whole experiment up keeps the
-  // *same* ~25% ratio but against a much larger absolute number, so a
-  // fixed contention overhead (a scheduler hiccup of tens of ms) becomes
-  // proportionally small instead of consuming the whole margin. Do not
-  // "optimise" this back down to a smaller budget — that reintroduces the
-  // exact fragility this round exists to remove.
+  // while passing 5/5 alone. Scaling the whole experiment up does NOT keep
+  // that same ~25% ratio: the measured shared band at these numbers is
+  // 623-695ms, so the real headroom under the 750ms threshold is only
+  // 8-17% (55-127ms). What the scaling actually buys is headroom against
+  // the OTHER scenario this threshold has to discriminate from — the
+  // measured two-independent-budgets floor is 1013-1045ms, and 750ms sits
+  // ~28% below even the low end of that, so a run that regresses to
+  // separate budgets still fails loudly. Do not "optimise" this back down
+  // to a smaller budget — that reintroduces the exact fragility this round
+  // exists to remove.
   it("shares one budget between the tactical call and the narration, not two", async () => {
     const store = createInMemoryEventStore();
     const session = await freshSession(store);
@@ -1019,9 +1023,19 @@ describe("handleCommand — turn timeout", () => {
     // and stamping a timestamp only on frames the turn timeout actually
     // governs — i.e. everything except `turn_affordances` — excludes that
     // trailing computation by construction, so this keeps measuring the
-    // deadline-governed stretch the test claims to measure. Do not
-    // "simplify" this back to timing the whole drain: that would silently
-    // reconflate pipeline throughput with timeout-budget sharing.
+    // deadline-governed stretch the test claims to measure.
+    //
+    // What this relies on is narrower than "the drain ends with
+    // `turn_affordances`": it is that a `turn_affordances` frame, WHEREVER
+    // it appears in the stream, is never deadline-governed — `playerAffordances`
+    // is a pure synchronous generator with no `await` in it (see its doc
+    // comment in pipeline.ts), at every one of the three points the pipeline
+    // emits one, including the rejection path a rejected `structured_action`
+    // now also ends on. This test only exercises a successful dodge, so it
+    // never reaches that path — but the exclusion is correct there too, for
+    // the same reason. Do not "simplify" this back to timing the whole
+    // drain: that would silently reconflate pipeline throughput with
+    // timeout-budget sharing.
     const start = Date.now();
     let lastGovernedFrameAt = start;
     for await (const frame of handleCommand(session, dodge("hero"), ports)) {
@@ -1029,14 +1043,14 @@ describe("handleCommand — turn timeout", () => {
     }
     const elapsed = lastGovernedFrameAt - start;
 
-    // Shared deadline: hero (~200ms, narration-only) + goblin-a (~200ms:
-    // 150ms tactical + ~50ms remaining narration cap) + goblin-b (~200ms)
-    // is roughly 600ms. Two independent budgets per enemy turn would
-    // instead be hero (~200ms) + goblin-a (150 + 200 = 350ms) + goblin-b
-    // (350ms), or roughly 900ms. 750ms — roughly 3.75x the budget — sits
-    // midway between the two, the same proportional margin the original
-    // 240/360/300ms figures had, now against numbers large enough that
-    // ordinary scheduler noise cannot erase it.
+    // Shared deadline (theoretical): hero (~200ms, narration-only) +
+    // goblin-a (~200ms: 150ms tactical + ~50ms remaining narration cap) +
+    // goblin-b (~200ms) is roughly 600ms. Two independent budgets per enemy
+    // turn would instead be hero (~200ms) + goblin-a (150 + 200 = 350ms) +
+    // goblin-b (350ms), or roughly 900ms. Measured wall-clock reality runs
+    // higher than either estimate (see the "Review round 3" comment above
+    // for the actual figures and the real headroom the 750ms threshold
+    // gives against each scenario).
     expect(elapsed).toBeLessThan(750);
     expect(session.state.round).toBe(2);
   }, 10_000);
@@ -1108,7 +1122,14 @@ describe("handleCommand — turn_affordances", () => {
     expect(frames.findIndex((each) => each.type === "turn_affordances")).toBe(frames.length - 1);
   });
 
-  it("does not follow a rejected action, which does not advance the turn", async () => {
+  // A rejection does not advance the turn, so control is still the
+  // player's — the pipeline treats it as a third affordance point alongside
+  // `join` and a completed turn (see `playerAffordances`'s doc comment).
+  // Without a trailing affordance frame here, the client's fold (which
+  // clears affordances on every event frame, including `action_rejected`)
+  // is left with no way to recover: the action bar stays unmounted and the
+  // board stays inert for the rest of the player's own turn.
+  it("follows a rejected action, which does not advance the turn, with a fresh affordance frame", async () => {
     const store = createInMemoryEventStore();
     const session = await freshSession(store);
     const frames = await drain(
@@ -1129,7 +1150,9 @@ describe("handleCommand — turn_affordances", () => {
       ),
     );
 
-    expect(frames.some((each) => each.type === "turn_affordances")).toBe(false);
-    expect(frames.at(-1)?.type).toBe("rejected");
+    const last = frames.at(-1);
+    expect(last?.type).toBe("turn_affordances");
+    expect(last?.type === "turn_affordances" && last.actorId).toBe("hero");
+    expect(frames.findIndex((each) => each.type === "turn_affordances")).toBe(frames.length - 1);
   });
 });

@@ -442,8 +442,10 @@ export async function* handleCommand(
 
   /**
    * Push the player's affordances, if it is a party member's turn. Called at
-   * the two points the pipeline knows control sits with the player: the end of
-   * a `join`, and the end of a turn that came back round to them.
+   * the three points the pipeline knows control sits with the player: the end
+   * of a `join`, the end of a turn that came back round to them, and a
+   * rejected action from them (the turn did not advance, so it is still
+   * theirs).
    *
    * Silent when it is a hostile's turn, when the actor is missing, or when the
    * encounter has no stat block for them — none of those are error conditions
@@ -625,6 +627,14 @@ export async function* handleCommand(
           // No auto-retry for a human: that loop exists because a model
           // cannot read a UI. The turn does not advance.
           yield { type: "rejected", clientMessageId: command.clientMessageId, reasons, messages };
+          // A rejection is a third point at which the pipeline knows control
+          // sits with the player, alongside `join` and a completed turn: the
+          // turn did not advance, so it is still their move. Without this,
+          // the client's own event-frame fold (which clears affordances on
+          // every event, including `action_rejected`) is left with no
+          // affordance frame ever following, and no way to recover short of
+          // a reconnect.
+          yield* playerAffordances();
           return;
         }
 

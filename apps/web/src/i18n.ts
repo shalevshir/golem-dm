@@ -17,6 +17,7 @@ export const he = {
     victory: "ניצחתם",
     defeat: "הובסתם",
     startFight: "התחל קרב",
+    startOver: "התחל מחדש",
   },
   actions: {
     dodge: "התחמקות",

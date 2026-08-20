@@ -4,7 +4,7 @@
 // it means a stale click, and the affordance frame governs what is clickable.
 // `free_text_not_supported` is unreachable because no free-text UI ships.
 import type { JSX } from "react";
-import { errorMessage, rejectionMessage } from "../i18n.js";
+import { errorMessage, he, rejectionMessage } from "../i18n.js";
 
 /** Ignored on purpose: a stale click the affordance frame already governs. */
 const SILENT_CODES = new Set(["not_your_turn"]);
@@ -13,6 +13,14 @@ export interface ErrorBannerProps {
   error: { code: string; message: string } | null;
   rejection: { reasons: string[]; messages: string[] } | null;
   onDismiss: () => void;
+  /**
+   * The spec's error table lists `internal_error` as "surface, and offer
+   * reconnect" — dismiss alone leaves the player on a dead screen, since an
+   * `error` frame does not close the socket and nothing else ever retries.
+   * Reuses the same teardown `unknown_session` already drives automatically
+   * (`App`'s `resetToStart`), just player-triggered here instead.
+   */
+  onStartOver: () => void;
 }
 
 export function ErrorBanner(props: ErrorBannerProps): JSX.Element | null {
@@ -30,6 +38,11 @@ export function ErrorBanner(props: ErrorBannerProps): JSX.Element | null {
         // same way is reachable, so `reason` alone can collide.
         <p key={`${String(index)}-${reason}`}>{rejectionMessage(reason)}</p>
       ))}
+      {error?.code === "internal_error" && (
+        <button type="button" onClick={props.onStartOver}>
+          {he.app.startOver}
+        </button>
+      )}
       <button type="button" onClick={props.onDismiss}>
         ✕
       </button>
