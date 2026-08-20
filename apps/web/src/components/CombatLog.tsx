@@ -46,7 +46,7 @@ function AttackLine(props: { attack: AttackTrace; nameOf: (id: string) => string
 
   return (
     <p>
-      {nameOf(attack.attackerId)} ← {nameOf(attack.targetId)} ·{" "}
+      <bdi>{nameOf(attack.attackerId)}</bdi> ← <bdi>{nameOf(attack.targetId)}</bdi> ·{" "}
       <bdi>
         {rollsText} {modifierText} = {total}
       </bdi>{" "}
@@ -86,7 +86,7 @@ export function CombatLog(props: CombatLogProps): JSX.Element {
           // actorId across a fight, so actorId alone would collide.
           <div className="log-entry" key={`${String(index)}-${turn.actorId}`}>
             <p className="log-turn-header">
-              — {he.log.turnOf} {nameOf(turn.actorId)} —
+              — {he.log.turnOf} <bdi>{nameOf(turn.actorId)}</bdi> —
             </p>
             {turn.forfeited && <p>{he.log.forfeited}</p>}
             {turn.attacks.map((attack, attackIndex) => (
@@ -98,7 +98,8 @@ export function CombatLog(props: CombatLogProps): JSX.Element {
             ))}
             {turn.movedFeet > 0 && (
               <p>
-                {nameOf(turn.actorId)} {he.log.moved} <bdi>{turn.movedFeet}</bdi> {he.log.feet}
+                <bdi>{nameOf(turn.actorId)}</bdi> {he.log.moved} <bdi>{turn.movedFeet}</bdi>{" "}
+                {he.log.feet}
               </p>
             )}
             {!turn.forfeited &&
