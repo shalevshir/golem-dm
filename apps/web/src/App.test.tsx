@@ -7,9 +7,10 @@
 // that needs a join to land calls `socket.emitOpen()` itself, inside
 // `waitFor` where the timing after `createSession`/`fetchCatalogue` resolve
 // is not otherwise observable from outside the component.
+import { StrictMode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, render, screen, waitFor } from "@testing-library/react";
-import { fold } from "@ai-dm/schemas";
+import { ExecuteTurn, fold } from "@ai-dm/schemas";
 import type { Combatant, GameEvent, SessionState } from "@ai-dm/schemas";
 import { App, SESSION_STORAGE_KEY } from "./App.js";
 import { he } from "./i18n.js";
@@ -100,6 +101,13 @@ beforeEach(() => {
     } as Response);
   });
   vi.stubGlobal("fetch", fetchMock);
+  // `vi.spyOn` wraps the one method rather than spreading `globalThis.crypto`
+  // (a class instance — spreading it would lose its prototype, which
+  // `@typescript-eslint/no-misused-spread` correctly flags). Real dash
+  // positions are required: `Crypto.randomUUID`'s return type is a template
+  // literal of five dash-separated segments, so a plain string like
+  // "fixed-id" does not satisfy it at the type level.
+  vi.spyOn(globalThis.crypto, "randomUUID").mockReturnValue("11111111-1111-4111-8111-111111111111");
 });
 
 afterEach(() => {
@@ -247,5 +255,120 @@ describe("App", () => {
 
     expect(sessionStorage.getItem(SESSION_STORAGE_KEY)).toBeNull();
     expect(await screen.findByRole("button", { name: he.app.startFight })).toBeInTheDocument();
+  });
+
+  it("clears the stored session id once the fight concludes, so a later refresh doesn't rejoin a finished session", async () => {
+    await start();
+    expect(sessionStorage.getItem(SESSION_STORAGE_KEY)).toBe("s1");
+
+    act(() => {
+      socket.emitMessage({
+        type: "session_state",
+        sequence: 9,
+        snapshot: snapshotWith([
+          combatant("hero", "party", "dead"),
+          combatant("goblin-a", "hostile", "alive"),
+        ]),
+      });
+    });
+
+    expect(await screen.findByText(he.app.defeat)).toBeInTheDocument();
+    // Without this, every refresh after the fight ends rejoins the same
+    // finished session forever — a dead end sitting on the exit criterion.
+    expect(sessionStorage.getItem(SESSION_STORAGE_KEY)).toBeNull();
+  });
+
+  it("surfaces an error frame that arrives before the first snapshot instead of hanging on the connecting screen", async () => {
+    // internal_error/malformed_message can arrive on join, before any
+    // session_state — unlike unknown_session there is no recovery effect for
+    // these, so ErrorBanner is the only way the player ever finds out.
+    await start();
+
+    act(() => {
+      socket.emitMessage({ type: "error", code: "internal_error", message: "boom" });
+    });
+
+    expect(await screen.findByRole("alert")).toBeInTheDocument();
+    expect(screen.getByText(he.errors.internal_error)).toBeInTheDocument();
+    // Still pre-snapshot: the connecting text is still there alongside it,
+    // not replaced by it.
+    expect(screen.getByText(he.app.connecting)).toBeInTheDocument();
+  });
+
+  it("sends a structured_action whose turn parses against ExecuteTurn when a player commits an action", async () => {
+    // The ActionBar -> buildTurn -> structured_action send path, driven
+    // through the real ActionBar component rather than calling `commit`
+    // directly — this is the one integration edge "fights to conclusion"
+    // actually depends on.
+    await start();
+
+    act(() => {
+      socket.emitMessage({
+        type: "session_state",
+        sequence: 0,
+        snapshot: snapshotWith([
+          combatant("hero", "party", "alive"),
+          combatant("goblin-a", "hostile", "alive"),
+        ]),
+      });
+      socket.emitMessage({
+        type: "turn_affordances",
+        forSequence: 0,
+        actorId: "hero",
+        reachableTiles: [],
+        actions: [{ actionType: "dodge", requiresTarget: false, targetableCombatantIds: [] }],
+      });
+    });
+
+    act(() => {
+      screen.getByRole("button", { name: he.actions.dodge }).click();
+    });
+
+    const sent = socket.sent.map((each) => JSON.parse(each) as Record<string, unknown>);
+    const structured = sent.find((each) => each.type === "structured_action");
+    expect(structured).toBeDefined();
+    expect(structured?.actorId).toBe("hero");
+    expect(structured?.clientMessageId).toBe("11111111-1111-4111-8111-111111111111");
+    expect(ExecuteTurn.safeParse(structured?.turn).success).toBe(true);
+  });
+
+  it("keeps exactly one live connection through StrictMode's dev double-invoke", async () => {
+    // StrictMode double-invokes an effect (mount -> cleanup -> mount) only
+    // around a component's INITIAL mount, not on a later re-run triggered by
+    // a dependency change — so this has to start `started` true from the
+    // very first render (a stored session id, exactly like a real refresh
+    // mid-fight) rather than mounting idle and clicking the start button
+    // afterward, or the effect's "real" (non-early-return) body would only
+    // ever run once and the bug this guards against would go unexercised.
+    //
+    // main.tsx ships <StrictMode>, which in development runs this effect
+    // mount -> cleanup -> mount. A single shared `cancelled` boolean gets
+    // reset to false by the SECOND mount before the FIRST mount's still
+    // -pending async IIFE ever reads it, so both runs reach `connect()` —
+    // the socket factory call count is the observable proxy for that.
+    sessionStorage.setItem(SESSION_STORAGE_KEY, "s1");
+    const sockets: FakeSocket[] = [];
+    const factory = vi.fn((): FakeSocket => {
+      const created = fakeSocket();
+      sockets.push(created);
+      return created;
+    });
+
+    render(
+      <StrictMode>
+        <App socketFactory={factory} wsUrl="ws://test/ws" />
+      </StrictMode>,
+    );
+
+    // Whichever socket survives eventually opens and joins; by that point a
+    // second, erroneous `connect()` call (if the guard were broken) would
+    // already have happened too — every run shares the exact same two
+    // mocked awaits, with no extra delay on either.
+    await waitFor(() => {
+      for (const each of sockets) each.emitOpen();
+      expect(sockets.some((each) => each.sent.length > 0)).toBe(true);
+    });
+
+    expect(factory).toHaveBeenCalledTimes(1);
   });
 });

@@ -57,23 +57,32 @@ export function App(props: AppProps): JSX.Element {
   );
 
   // `resumeFrom` is read at join time, not captured at connect time — a
-  // reconnect must resume from where the client actually got to.
+  // reconnect must resume from where the client actually got to. Written
+  // only from `onFrame` below (the point the sequence actually changes),
+  // never during render — React forbids a ref write during render, and a
+  // discarded concurrent render could otherwise store a sequence that was
+  // never committed.
   const sequenceRef = useRef(0);
-  sequenceRef.current = state.sequence;
   const connectionRef = useRef<Connection | null>(null);
-  // A ref rather than a plain `let cancelled` closure variable: the
-  // mutation below happens in a sibling closure (the effect's cleanup),
-  // which only ever runs later, so TypeScript's control-flow analysis
-  // narrows a captured `let` to a literal `false` for the entire async IIFE
-  // and flags every check against it as dead code — even though at runtime
-  // the effect can genuinely be cleaned up mid-flight (fast unmount, a
-  // `started`/`wsUrl`/`socketFactory` change) while the awaits below are
-  // still pending. `.current` on a ref sidesteps that false narrowing.
-  const cancelledRef = useRef(false);
+  // A monotonic run id rather than a shared boolean. `<StrictMode>` (which
+  // `main.tsx` ships) runs this effect mount -> cleanup -> mount in dev: a
+  // single `cancelled` boolean is reset to `false` by the SECOND mount
+  // before the FIRST mount's still-pending async IIFE ever reads it, so
+  // both runs sail past their cancellation check and both call `connect()`
+  // — the first connection is then unreachable (overwritten in
+  // `connectionRef`) and never closed, leaking a socket whose 1s retry
+  // loop (`net/connection.ts`) runs forever. Each run instead captures its
+  // OWN id at the top of the effect; the effect (on cleanup) and every
+  // later run bump the shared counter, so a stale run's post-await check
+  // (`runIdRef.current !== runId`) is only ever true for a run that has
+  // genuinely been superseded, never reset back to "current" by a run that
+  // isn't itself.
+  const runIdRef = useRef(0);
 
   useEffect(() => {
     if (!started) return;
-    cancelledRef.current = false;
+    runIdRef.current += 1;
+    const runId = runIdRef.current;
 
     void (async () => {
       // Reuse a stored id rather than minting a new one: `createSession` is
@@ -82,11 +91,12 @@ export function App(props: AppProps): JSX.Element {
       const stored = sessionStorage.getItem(SESSION_STORAGE_KEY);
       const sessionId = stored ?? (await createSession(ENCOUNTER_ID));
       if (stored === null) sessionStorage.setItem(SESSION_STORAGE_KEY, sessionId);
+      if (runIdRef.current !== runId) return;
 
       const fetched = await fetchCatalogue(ENCOUNTER_ID);
-      // The one guard that matters: no state update reaches a component that
-      // has since unmounted or moved on to a different session.
-      if (cancelledRef.current) return;
+      // The guard that matters: no state update, and no connection, reaches
+      // a run that has since been cancelled or superseded.
+      if (runIdRef.current !== runId) return;
       setCatalogue(fetched);
 
       connectionRef.current = connect({
@@ -94,7 +104,11 @@ export function App(props: AppProps): JSX.Element {
         ...(props.wsUrl === undefined ? {} : { url: props.wsUrl }),
         ...(props.socketFactory === undefined ? {} : { socketFactory: props.socketFactory }),
         onFrame: (frame: ServerFrame) => {
-          setState((previous) => applyFrame(previous, frame));
+          setState((previous) => {
+            const next = applyFrame(previous, frame);
+            sequenceRef.current = next.sequence;
+            return next;
+          });
         },
         onStatus: setStatus,
         resumeFrom: () => (sequenceRef.current === 0 ? undefined : sequenceRef.current),
@@ -102,7 +116,7 @@ export function App(props: AppProps): JSX.Element {
     })();
 
     return () => {
-      cancelledRef.current = true;
+      runIdRef.current += 1;
       connectionRef.current?.close();
       connectionRef.current = null;
     };
@@ -123,8 +137,27 @@ export function App(props: AppProps): JSX.Element {
     setStarted(false);
   }, [state.lastError]);
 
+  // Once the fight is over, the stored id must not outlive it either —
+  // otherwise a later refresh rejoins a session that has already ended,
+  // with no path back to the start screen short of clearing storage by
+  // hand. The live view still shows the victory/defeat screen normally;
+  // this only affects what a subsequent mount reads.
+  useEffect(() => {
+    if (state.snapshot === null) return;
+    if (conclusionOf(state.snapshot) === "ongoing") return;
+    sessionStorage.removeItem(SESSION_STORAGE_KEY);
+  }, [state.snapshot]);
+
   const send = useCallback((message: ClientMessage) => {
     connectionRef.current?.send(message);
+  }, []);
+
+  // Shared by both the pre- and post-snapshot renders below: an `error` or
+  // `rejected` frame can arrive before the first `session_state` (e.g. an
+  // `internal_error` on join), so `ErrorBanner` is not exclusive to the
+  // post-snapshot view either.
+  const dismissError = useCallback(() => {
+    setState((previous) => ({ ...previous, lastError: null, lastRejection: null }));
   }, []);
 
   const commit = useCallback(
@@ -165,7 +198,23 @@ export function App(props: AppProps): JSX.Element {
   }
 
   if (state.snapshot === null || catalogue === null) {
-    return <main>{status === "reconnecting" ? he.app.reconnecting : he.app.connecting}</main>;
+    // `ErrorBanner` renders here too: an `error` frame that is not
+    // `unknown_session` (`internal_error`, `malformed_message`) can arrive
+    // on join, before any `session_state` — without this, the player would
+    // be stuck reading "מתחבר…" forever with no explanation.
+    return (
+      <main>
+        <h1>{he.app.title}</h1>
+        <p className="status">
+          {status === "reconnecting" ? he.app.reconnecting : he.app.connecting}
+        </p>
+        <ErrorBanner
+          error={state.lastError}
+          rejection={state.lastRejection}
+          onDismiss={dismissError}
+        />
+      </main>
+    );
   }
 
   const conclusion = conclusionOf(state.snapshot);
@@ -190,9 +239,7 @@ export function App(props: AppProps): JSX.Element {
       <ErrorBanner
         error={state.lastError}
         rejection={state.lastRejection}
-        onDismiss={() => {
-          setState((previous) => ({ ...previous, lastError: null, lastRejection: null }));
-        }}
+        onDismiss={dismissError}
       />
 
       <Grid
@@ -216,7 +263,15 @@ export function App(props: AppProps): JSX.Element {
           actions={state.affordances.actions}
           catalogue={catalogue.actions}
           combatants={catalogue.combatants}
-          disabled={!yourTurn}
+          // NOT `!yourTurn` — that is exactly the mount guard above, so it
+          // can never be true here. `status` is a genuinely independent
+          // condition: the socket can drop mid-turn while the last known
+          // `turn_affordances` frame is still what is rendered (nothing
+          // clears it on a status change), so this is what actually
+          // disables input while reconnecting instead of leaving the
+          // player click into a message `connect()`'s `send()` silently
+          // drops.
+          disabled={status !== "open"}
           onCommit={commit}
         />
       )}
