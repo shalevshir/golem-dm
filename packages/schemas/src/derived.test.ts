@@ -51,4 +51,8 @@ describe("DerivedCharacter", () => {
   it("requires at least one attack", () => {
     expect(() => DerivedCharacter.parse({ ...minimal, attacks: [] })).toThrow();
   });
+
+  it("rejects an unknown grammaticalGender", () => {
+    expect(() => DerivedCharacter.parse({ ...minimal, grammaticalGender: "neuter" })).toThrow();
+  });
 });

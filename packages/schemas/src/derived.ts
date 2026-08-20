@@ -4,7 +4,7 @@
 // hold the TYPE without importing the MATH — invariant 1 keeps the
 // calculation in the engine, invariant 5 keeps the engine out of the client.
 import { z } from "zod";
-import { AbilityKey, CharacterClass, Skill } from "./character.js";
+import { AbilityKey, CharacterClass, GrammaticalGender, Skill } from "./character.js";
 import { CreatureSize, DiceNotation } from "./primitives.js";
 import { CreatureAttack } from "./srd.js";
 
@@ -13,7 +13,7 @@ const ByAbility = z.record(AbilityKey, z.number().int());
 export const DerivedCharacter = z.object({
   characterId: z.string(),
   nameHebrew: z.string().min(1),
-  grammaticalGender: z.enum(["masculine", "feminine"]),
+  grammaticalGender: GrammaticalGender,
   class: CharacterClass,
   level: z.number().int().min(1).max(20),
   size: CreatureSize,

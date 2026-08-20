@@ -61,6 +61,10 @@ describe("CharacterSheet", () => {
     expect(() => CharacterSheet.parse(bad)).toThrow();
   });
 
+  it("rejects an unknown grammaticalGender", () => {
+    expect(() => CharacterSheet.parse({ ...validSheet, grammaticalGender: "neuter" })).toThrow();
+  });
+
   it("defaults size to medium", () => {
     const parsed = CharacterSheet.parse(validSheet);
     expect(parsed.size).toBe("medium");

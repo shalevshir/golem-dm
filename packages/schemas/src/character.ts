@@ -47,6 +47,9 @@ export const Skill = z.enum([
 /** POC scope — widening this is a reviewed change (see the schemas CLAUDE.md). */
 export const CharacterClass = z.enum(["fighter", "wizard", "rogue", "cleric"]);
 
+/** Hebrew narration is gendered, so every character declares one. */
+export const GrammaticalGender = z.enum(["masculine", "feminine"]);
+
 export const Abilities = z.object({
   str: z.number().int().min(1).max(30),
   dex: z.number().int().min(1).max(30),
@@ -59,8 +62,7 @@ export const Abilities = z.object({
 export const CharacterSheet = z.object({
   characterId: z.string(),
   nameHebrew: z.string(),
-  /** Required for grammatically correct Hebrew narration. */
-  grammaticalGender: z.enum(["masculine", "feminine"]),
+  grammaticalGender: GrammaticalGender,
   /**
    * No species field exists and this schema does not add one, so a default
    * beats inventing a species system for a single value. Read by
@@ -105,4 +107,5 @@ export type Condition = z.infer<typeof Condition>;
 export type AbilityKey = z.infer<typeof AbilityKey>;
 export type Skill = z.infer<typeof Skill>;
 export type CharacterClass = z.infer<typeof CharacterClass>;
+export type GrammaticalGender = z.infer<typeof GrammaticalGender>;
 export type Abilities = z.infer<typeof Abilities>;
