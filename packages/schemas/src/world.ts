@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { Tile } from "./actions.js";
 import { ActiveCondition, SpellSlots } from "./character.js";
+import { CreatureSize } from "./primitives.js";
 
 export const EntityStatus = z.enum(["alive", "dead", "unconscious", "fled"]);
 
@@ -19,12 +20,6 @@ export const FactionRelation = z.object({
 });
 
 export const Faction = z.enum(["party", "hostile", "neutral"]);
-
-/**
- * SRD 5.2.1 Creature Size and Space. Order matters — the rule for moving
- * through another creature's space is stated in size categories apart.
- */
-export const CreatureSize = z.enum(["tiny", "small", "medium", "large", "huge", "gargantuan"]);
 
 /**
  * What the creature has already spent during the current turn. The rules engine
@@ -82,6 +77,5 @@ export type EntityStatus = z.infer<typeof EntityStatus>;
 export type TerrainType = z.infer<typeof TerrainType>;
 export type FactionRelation = z.infer<typeof FactionRelation>;
 export type Faction = z.infer<typeof Faction>;
-export type CreatureSize = z.infer<typeof CreatureSize>;
 export type ActionEconomy = z.infer<typeof ActionEconomy>;
 export type Combatant = z.infer<typeof Combatant>;

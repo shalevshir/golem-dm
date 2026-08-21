@@ -6,6 +6,7 @@
 // the browser.
 import { z } from "zod";
 import { ActionType, ExecuteTurn, Tile } from "./actions.js";
+import { DerivedCharacter } from "./derived.js";
 import { GameEvent } from "./events.js";
 import { Combatant, Faction, GridMap } from "./world.js";
 
@@ -146,6 +147,7 @@ export type TurnAffordances = z.infer<typeof TurnAffordances>;
 export const CatalogueCombatant = z.object({
   combatantId: z.string(),
   nameEnglish: z.string(),
+  nameHebrew: z.string().min(1),
   maxHp: z.number().int().min(1),
   faction: Faction,
 });
@@ -156,6 +158,7 @@ export type CatalogueCombatant = z.infer<typeof CatalogueCombatant>;
 export const CatalogueAction = z.object({
   actionId: z.string(),
   nameEnglish: z.string(),
+  nameHebrew: z.string().min(1),
 });
 
 export type CatalogueAction = z.infer<typeof CatalogueAction>;
@@ -177,6 +180,13 @@ export const EncounterCatalogue = z.object({
   encounterId: z.string(),
   combatants: z.array(CatalogueCombatant),
   actions: z.array(CatalogueAction),
+  /**
+   * Every player character in this encounter, fully derived. The client
+   * renders these numbers and computes none of them: AC and attack bonuses
+   * are game math, which invariant 1 keeps in the rules engine and invariant 5
+   * keeps out of `apps/web`. Empty for a monster-only encounter.
+   */
+  characters: z.array(DerivedCharacter).default([]),
 });
 
 export type EncounterCatalogue = z.infer<typeof EncounterCatalogue>;

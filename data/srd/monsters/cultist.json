@@ -1,6 +1,7 @@
 {
   "monsterId": "cultist",
   "nameEnglish": "Cultist",
+  "nameHebrew": "חבר כת",
   "size": "medium",
   "creatureType": "Humanoid",
   "alignment": "Neutral",
@@ -15,6 +16,7 @@
     {
       "actionId": "ritual_sickle",
       "nameEnglish": "Ritual Sickle",
+      "nameHebrew": "מגל פולחן",
       "attackBonus": 3,
       "reachFeet": 5,
       "damage": { "diceNotation": "1d4+1", "averageDamage": 3, "damageType": "slashing" },

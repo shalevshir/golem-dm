@@ -5,9 +5,12 @@
 // The catalogue's shape is NOT redeclared here. `EncounterCatalogue` and its
 // members are zod schemas in `@ai-dm/schemas` (invariant 4: schemas define
 // everything once — never hand-write a duplicate interface), and both ends of
-// this request read that one definition. `nameEnglish` is English because
-// there is no Hebrew name data anywhere in the repo and the SRD is English
-// (ADR 0001) — which is why every render of it is wrapped in `<bdi>`.
+// this request read that one definition. Hebrew names now exist for every
+// creature and action and are served in the catalogue as `nameHebrew`, but
+// this client still renders `nameEnglish`, which is why every render of it
+// stays wrapped in `<bdi>`. Switching to Hebrew labels is a deliberate
+// follow-up, not blocked by missing data; the SRD itself is still English
+// (ADR 0001).
 import type { z } from "zod";
 import { EncounterCatalogue, SessionCreated } from "@ai-dm/schemas";
 import type { CatalogueAction, CatalogueCombatant } from "@ai-dm/schemas";

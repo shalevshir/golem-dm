@@ -1,6 +1,7 @@
 {
   "monsterId": "bandit",
   "nameEnglish": "Bandit",
+  "nameHebrew": "שודד",
   "size": "medium",
   "creatureType": "Humanoid",
   "alignment": "Neutral",
@@ -15,6 +16,7 @@
     {
       "actionId": "scimitar",
       "nameEnglish": "Scimitar",
+      "nameHebrew": "חרב מעוקלת",
       "attackBonus": 3,
       "reachFeet": 5,
       "damage": { "diceNotation": "1d6+1", "averageDamage": 4, "damageType": "slashing" }
@@ -22,6 +24,7 @@
     {
       "actionId": "light_crossbow",
       "nameEnglish": "Light Crossbow",
+      "nameHebrew": "קשת רוחב קלה",
       "attackBonus": 3,
       "rangeFeet": 80,
       "longRangeFeet": 320,

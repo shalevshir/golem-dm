@@ -26,6 +26,7 @@ function d20Exactly(target: number): number {
 const GOBLIN_WARRIOR: MonsterStatBlock = {
   monsterId: "goblin_warrior",
   nameEnglish: "Goblin Warrior",
+  nameHebrew: "גובלין לוחם",
   size: "small",
   creatureType: "Fey (Goblinoid)",
   alignment: "Chaotic Neutral",
@@ -40,6 +41,7 @@ const GOBLIN_WARRIOR: MonsterStatBlock = {
     {
       actionId: "scimitar",
       nameEnglish: "Scimitar",
+      nameHebrew: "חרב מעוקלת",
       attackBonus: 4,
       reachFeet: 5,
       damage: { diceNotation: "1d6+2", averageDamage: 5, damageType: "slashing" },
@@ -48,6 +50,7 @@ const GOBLIN_WARRIOR: MonsterStatBlock = {
     {
       actionId: "shortbow",
       nameEnglish: "Shortbow",
+      nameHebrew: "קשת קצרה",
       attackBonus: 4,
       rangeFeet: 80,
       longRangeFeet: 320,
@@ -60,6 +63,7 @@ const GOBLIN_WARRIOR: MonsterStatBlock = {
 const GUARD: MonsterStatBlock = {
   monsterId: "guard",
   nameEnglish: "Guard",
+  nameHebrew: "שומר",
   size: "medium",
   creatureType: "Humanoid",
   alignment: "Neutral",
@@ -74,6 +78,7 @@ const GUARD: MonsterStatBlock = {
     {
       actionId: "spear",
       nameEnglish: "Spear",
+      nameHebrew: "חנית",
       attackBonus: 3,
       reachFeet: 5,
       rangeFeet: 20,
@@ -224,6 +229,38 @@ describe("applyTurn", () => {
     expect(world.combatants.find((each) => each.combatantId === "guard_1")?.status).toBe("dead");
   });
 
+  it("kills a PC outright at 0 HP too -- death saves are implemented but not driven by the pipeline (C-31)", () => {
+    // Same fixture as "kills a monster outright at 0 HP", but the target now
+    // carries a populated characterId. Before the pin, resolve.ts read
+    // `diesAtZeroHp: target.characterId === undefined`, which is false here --
+    // this would have failed with status "unconscious". The pin makes it
+    // "dead" regardless of characterId.
+    const wounded = {
+      ...built.world,
+      combatants: built.world.combatants.map((each) =>
+        each.combatantId === "guard_1" ? { ...each, currentHp: 3, characterId: "guard_1" } : each,
+      ),
+    };
+    const turn = attack("goblin_1", "guard_1", "scimitar");
+    const actor = wounded.combatants.find((each) => each.combatantId === "goblin_1");
+    if (actor === undefined) throw new Error("no actor");
+    const validation = validateExecuteTurn(turn, actor, wounded);
+    if (!validation.valid) throw new Error("fixture turn is illegal");
+
+    const { world, effect } = applyTurn({
+      world: wounded,
+      actorId: "goblin_1",
+      turn,
+      plan: validation.plan,
+      context: { statBlocks: built.statBlocks },
+      rng: scripted([d20Exactly(18), 0.5]),
+    });
+
+    expect(effect.killed).toEqual(["guard_1"]);
+    const target = world.combatants.find((each) => each.combatantId === "guard_1");
+    expect(target?.status).toBe("dead");
+  });
+
   it("records flat damage as kind: flat, with no dice rolled", () => {
     const flatDamageBlock: MonsterStatBlock = {
       ...GOBLIN_WARRIOR,
@@ -232,6 +269,7 @@ describe("applyTurn", () => {
         {
           actionId: "dagger",
           nameEnglish: "Dagger",
+          nameHebrew: "פגיון",
           attackBonus: 4,
           reachFeet: 5,
           damage: { averageDamage: 1, damageType: "piercing" }, // no diceNotation
@@ -274,6 +312,7 @@ describe("applyTurn", () => {
         {
           actionId: "scimitar",
           nameEnglish: "Scimitar",
+          nameHebrew: "חרב מעוקלת",
           attackBonus: 4,
           reachFeet: 5,
           damage: { diceNotation: "1d6+2", averageDamage: 5, damageType: "slashing" },

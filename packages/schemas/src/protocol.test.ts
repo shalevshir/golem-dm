@@ -146,10 +146,17 @@ describe("turn_affordances frame", () => {
 });
 
 describe("EncounterCatalogue", () => {
-  const hero = { combatantId: "hero", nameEnglish: "Guard", maxHp: 11, faction: "party" };
+  const hero = {
+    combatantId: "hero",
+    nameEnglish: "Guard",
+    nameHebrew: "שומר",
+    maxHp: 11,
+    faction: "party",
+  };
   const goblin = {
     combatantId: "goblin-a",
     nameEnglish: "Goblin Warrior",
+    nameHebrew: "גובלין לוחם",
     maxHp: 9,
     faction: "hostile",
   };
@@ -157,14 +164,17 @@ describe("EncounterCatalogue", () => {
     encounterId: "goblin-ambush",
     combatants: [hero, goblin],
     actions: [
-      { actionId: "spear", nameEnglish: "Spear" },
-      { actionId: "scimitar", nameEnglish: "Scimitar" },
+      { actionId: "spear", nameEnglish: "Spear", nameHebrew: "חנית" },
+      { actionId: "scimitar", nameEnglish: "Scimitar", nameHebrew: "חרב מעוקלת" },
     ],
   };
 
   it("parses a valid catalogue", () => {
     const parsed = EncounterCatalogue.parse(catalogue);
     expect(parsed.combatants).toHaveLength(2);
+    // No character spawns in this fixture, so the default must fill in
+    // rather than leaving the field missing or undefined.
+    expect(parsed.characters).toEqual([]);
   });
 
   it("rejects a combatant with a non-positive maxHp", () => {
@@ -176,6 +186,48 @@ describe("EncounterCatalogue", () => {
   it("rejects a combatant with an unknown faction", () => {
     expect(() =>
       EncounterCatalogue.parse({ ...catalogue, combatants: [{ ...hero, faction: "wildling" }] }),
+    ).toThrow();
+  });
+
+  it("rejects a combatant with an empty nameHebrew", () => {
+    expect(() =>
+      EncounterCatalogue.parse({ ...catalogue, combatants: [{ ...hero, nameHebrew: "" }] }),
+    ).toThrow();
+  });
+
+  it("rejects a combatant missing nameHebrew entirely", () => {
+    // Distinct from the empty-string case above: `.min(1)` rejects a
+    // present-but-empty value either way, required or optional, so only an
+    // omitted key exercises whether the field is actually required. Built as
+    // a fresh literal rather than a destructuring-omit of `hero`, which would
+    // leave an unused `nameHebrew` binding behind.
+    const combatantWithoutNameHebrew = {
+      combatantId: hero.combatantId,
+      nameEnglish: hero.nameEnglish,
+      maxHp: hero.maxHp,
+      faction: hero.faction,
+    };
+    expect(() =>
+      EncounterCatalogue.parse({ ...catalogue, combatants: [combatantWithoutNameHebrew] }),
+    ).toThrow();
+  });
+
+  it("rejects an action with an empty nameHebrew", () => {
+    expect(() =>
+      EncounterCatalogue.parse({
+        ...catalogue,
+        actions: [{ actionId: "spear", nameEnglish: "Spear", nameHebrew: "" }],
+      }),
+    ).toThrow();
+  });
+
+  it("rejects an action missing nameHebrew entirely", () => {
+    // Mirrors "rejects a combatant missing nameHebrew entirely" above: a
+    // fresh literal, not a destructuring-omit, so no unused binding is left
+    // behind.
+    const actionWithoutNameHebrew = { actionId: "spear", nameEnglish: "Spear" };
+    expect(() =>
+      EncounterCatalogue.parse({ ...catalogue, actions: [actionWithoutNameHebrew] }),
     ).toThrow();
   });
 });

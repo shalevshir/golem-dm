@@ -1,6 +1,7 @@
 {
   "monsterId": "guard",
   "nameEnglish": "Guard",
+  "nameHebrew": "שומר",
   "size": "medium",
   "creatureType": "Humanoid",
   "alignment": "Neutral",
@@ -15,6 +16,7 @@
     {
       "actionId": "spear",
       "nameEnglish": "Spear",
+      "nameHebrew": "חנית",
       "attackBonus": 3,
       "reachFeet": 5,
       "rangeFeet": 20,

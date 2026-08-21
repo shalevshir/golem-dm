@@ -6,14 +6,19 @@
 // test hang or pass for the wrong reason (task-corrections.md, "Task 15 —
 // end-to-end" plus addendum C-31/C-37/C-38):
 //
-//   1. C-31 — `combatantFromStatBlock` never sets `characterId`
-//      (packages/rules-engine/src/combat/statblock.ts), so
-//      `resolve.ts:188`'s `diesAtZeroHp: target.characterId === undefined`
-//      is true for every combatant in `goblin-ambush`, hero included — the
-//      hero borrows the "guard" stat block because no PC data exists yet.
-//      The hero therefore DIES at 0 HP rather than falling unconscious, and
-//      that is exactly what makes the fight terminate at all. This file
-//      asserts "one faction left standing", never a party win.
+//   1. C-31 — `applyTurn`'s `applyDamage` call in
+//      packages/rules-engine/src/encounter/resolve.ts pins `diesAtZeroHp:
+//      true` unconditionally for every combatant (death saves are
+//      implemented but not driven by the encounter pipeline —
+//      RULES_REFERENCE.md §8's gap), so the hero DIES at 0 HP rather than
+//      falling unconscious, and that is exactly what makes the fight
+//      terminate at all. `goblin-ambush`'s hero is a real character spawn
+//      (Task 14) and so carries a real `characterId` — which is exactly
+//      why the pin is load-bearing rather than incidental: without it, a
+//      combatant with a `characterId` would fall Unconscious at 0 HP
+//      instead, and with death saves undriven here the fight would have
+//      nothing left to conclude on. This file asserts "one faction left
+//      standing", never a party win.
 //   2. C-37 — once the hero dies, `runEnemyTurns` (pipeline.ts) returns at
 //      its `livingFactions.size < 2` check with `currentActorIndex` still
 //      pointing at a hostile. No terminal event is emitted, and the next
@@ -346,9 +351,10 @@ describe("end to end", () => {
     // C-38: nothing under apps/server/src or packages/rules-engine/src
     // enforces EncounterDefinition.maxRounds — this constant is the ONLY
     // bound on how many hero commands this test will send. 20 is generous:
-    // two scimitars at +4 vs the guard's AC 16 hit ~45% of the time for an
-    // average of 5, so ~4.5 expected damage per round against 11 HP
-    // concludes in 3-5 rounds; 20 gives wide headroom without letting a
+    // two scimitars at +4 vs the hero's AC 16 (Chain Mail — same AC the
+    // guard it replaced had) hit ~45% of the time for an average of 5, so
+    // ~4.5 expected damage per round against the hero's 28 HP concludes in
+    // roughly 6-7 rounds; 20 still gives about 3x headroom without letting a
     // genuinely wedged pipeline spin unbounded.
     const MAX_HERO_COMMANDS = 20;
     let concluded: Session | undefined;
@@ -406,12 +412,15 @@ describe("end to end", () => {
     const hero = concluded.state.combatants.find((c) => c.combatantId === "hero");
     if (hero === undefined) throw new Error("hero missing from the final projection");
     expect(hero.currentHp).toBe(0);
-    // C-31: combatantFromStatBlock never sets characterId, so
-    // resolve.ts:188's diesAtZeroHp is true for the hero — it dies rather
-    // than falling unconscious. That is a real, load-bearing property of
-    // this encounter (an unconscious hero with no death saves implemented
-    // would leave the pipeline with nothing to conclude on), not an
-    // incidental detail.
+    // C-31: applyTurn's applyDamage call in
+    // packages/rules-engine/src/encounter/resolve.ts pins diesAtZeroHp true
+    // unconditionally (death saves are implemented but not driven by the
+    // encounter pipeline — RULES_REFERENCE.md §8's gap), so the hero dies
+    // here rather than falling unconscious, regardless of whether it
+    // carries a characterId. That is a real, load-bearing property of this
+    // encounter (an unconscious hero, with death saves undriven, would
+    // leave the pipeline with nothing to conclude on), not an incidental
+    // detail.
     expect(hero.status).toBe("dead");
 
     // Real combat happened — not merely 20+ frames of any kind (C-24's

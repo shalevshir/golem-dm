@@ -1,6 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
 import Fastify from "fastify";
+import { EncounterCatalogue } from "@ai-dm/schemas";
 import { createInMemoryEventStore } from "../core/event-store.js";
+import { encounterCatalogue } from "../encounters/index.js";
 import { createSessionRegistry, registerHttpRoutes } from "./http.js";
 import type { SessionRegistry } from "./http.js";
 
@@ -146,11 +148,7 @@ describe("GET /encounters/:encounterId", () => {
     const response = await app.inject({ method: "GET", url: "/encounters/goblin-ambush" });
     expect(response.statusCode).toBe(200);
 
-    const body = response.json<{
-      encounterId: string;
-      combatants: { combatantId: string; nameEnglish: string; maxHp: number; faction: string }[];
-      actions: { actionId: string; nameEnglish: string }[];
-    }>();
+    const body = EncounterCatalogue.parse(response.json());
 
     expect(body.encounterId).toBe("goblin-ambush");
     expect(body.combatants.map((each) => each.combatantId).sort()).toEqual([
@@ -160,9 +158,10 @@ describe("GET /encounters/:encounterId", () => {
     ]);
 
     const hero = body.combatants.find((each) => each.combatantId === "hero");
-    // No player-character data exists, so the hero borrows the `guard` stat
-    // block (C-13) and its English name is all a label can show.
-    expect(hero?.nameEnglish).toBe("Guard");
+    // The hero is a real CharacterSheet (C-13 is closed); a character sheet
+    // is authored in Hebrew and has no English name, so `characterStatBlock`
+    // uses the characterId as `nameEnglish`.
+    expect(hero?.nameEnglish).toBe("hero");
     expect(hero?.faction).toBe("party");
     expect(hero?.maxHp).toBeGreaterThan(0);
   });
@@ -171,11 +170,11 @@ describe("GET /encounters/:encounterId", () => {
     const { app } = appWith();
     const response = await app.inject({ method: "GET", url: "/encounters/goblin-ambush" });
     expect(response.statusCode).toBe(200);
-    const body = response.json<{ actions: { actionId: string; nameEnglish: string }[] }>();
+    const body = EncounterCatalogue.parse(response.json());
 
     const ids = body.actions.map((each) => each.actionId);
     expect(new Set(ids).size).toBe(ids.length);
-    expect(ids).toContain("spear");
+    expect(ids).toContain("longsword");
     expect(ids).toContain("scimitar");
   });
 
@@ -183,5 +182,46 @@ describe("GET /encounters/:encounterId", () => {
     const { app } = appWith();
     const response = await app.inject({ method: "GET", url: "/encounters/nope" });
     expect(response.statusCode).toBe(404);
+  });
+});
+
+describe("GET /encounters/:encounterId — derived characters and Hebrew labels", () => {
+  it("serves the hero's full derivation in the catalogue", async () => {
+    const { app } = appWith();
+    const response = await app.inject({ method: "GET", url: "/encounters/goblin-ambush" });
+    expect(response.statusCode).toBe(200);
+
+    const catalogue = EncounterCatalogue.parse(response.json());
+    const hero = catalogue.characters.find((each) => each.characterId === "hero");
+
+    expect(hero?.armorClass).toBe(16);
+    expect(hero?.passivePerception).toBe(13);
+    expect(hero?.savingThrows.str).toBe(5);
+    expect(Object.keys(hero?.skills ?? {})).toHaveLength(18);
+    // The client must never need to compute any of this itself.
+    expect(hero?.grammaticalGender).toBe("masculine");
+  });
+
+  it("labels every combatant and action in Hebrew", async () => {
+    const { app } = appWith();
+    const response = await app.inject({ method: "GET", url: "/encounters/goblin-ambush" });
+    const catalogue = EncounterCatalogue.parse(response.json());
+
+    for (const combatant of catalogue.combatants) {
+      expect(combatant.nameHebrew.trim(), combatant.combatantId).not.toBe("");
+    }
+    for (const action of catalogue.actions) {
+      expect(action.nameHebrew.trim(), action.actionId).not.toBe("");
+    }
+  });
+
+  it("populates characters from the encounter's character spawn, not every combatant", () => {
+    // goblin-ambush has three combatants but only one character spawn, so a
+    // length of 1 discriminates a spawn-driven list from a combatant-driven
+    // one — this guards against `characters` being populated from something
+    // other than the spawns.
+    const built = encounterCatalogue("goblin-ambush");
+    expect(built.characters).toHaveLength(1);
+    expect(built.characters[0]?.characterId).toBe("hero");
   });
 });

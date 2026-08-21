@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { CreatureSize } from "./primitives.js";
 
 /** The 15 core 5e conditions. Extend only via ADR. */
 export const Condition = z.enum([
@@ -21,8 +22,33 @@ export const SpellSlots = z.record(
 
 export const AbilityKey = z.enum(["str", "dex", "con", "int", "wis", "cha"]);
 
+/** The 18 SRD skills. A bare string here would accept "banana". */
+export const Skill = z.enum([
+  "acrobatics",
+  "animal_handling",
+  "arcana",
+  "athletics",
+  "deception",
+  "history",
+  "insight",
+  "intimidation",
+  "investigation",
+  "medicine",
+  "nature",
+  "perception",
+  "performance",
+  "persuasion",
+  "religion",
+  "sleight_of_hand",
+  "stealth",
+  "survival",
+]);
+
 /** POC scope — widening this is a reviewed change (see the schemas CLAUDE.md). */
 export const CharacterClass = z.enum(["fighter", "wizard", "rogue", "cleric"]);
+
+/** Hebrew narration is gendered, so every character declares one. */
+export const GrammaticalGender = z.enum(["masculine", "feminine"]);
 
 export const Abilities = z.object({
   str: z.number().int().min(1).max(30),
@@ -35,15 +61,20 @@ export const Abilities = z.object({
 
 export const CharacterSheet = z.object({
   characterId: z.string(),
-  nameHebrew: z.string(),
-  /** Required for grammatically correct Hebrew narration. */
-  grammaticalGender: z.enum(["masculine", "feminine"]),
+  nameHebrew: z.string().min(1),
+  grammaticalGender: GrammaticalGender,
+  /**
+   * No species field exists and this schema does not add one, so a default
+   * beats inventing a species system for a single value. Read by
+   * `characterStatBlock` — the engine needs a size for every combatant.
+   */
+  size: CreatureSize.default("medium"),
   class: CharacterClass,
   level: z.number().int().min(1).max(20),
   proficiencyBonus: z.number().int().min(2).max(6),
   abilities: Abilities,
   savingThrowProficiencies: z.array(AbilityKey),
-  skillProficiencies: z.array(z.string()),
+  skillProficiencies: z.array(Skill),
   combat: z.object({
     maxHp: z.number().int().min(1),
     currentHp: z.number().int().min(0),
@@ -55,7 +86,18 @@ export const CharacterSheet = z.object({
     spellSlots: SpellSlots,
   }),
   conditions: z.array(ActiveCondition),
-  inventory: z.array(z.object({ itemId: z.string(), quantity: z.number().int().min(1) })),
+  inventory: z.array(
+    z.object({
+      itemId: z.string(),
+      quantity: z.number().int().min(1),
+      /**
+       * Worn or wielded, as opposed to carried. `deriveCharacter` reads this
+       * to decide which armor sets AC and which weapons become actions; a
+       * character page reads it to separate equipped from carried.
+       */
+      equipped: z.boolean().default(false),
+    }),
+  ),
 });
 
 export type CharacterSheet = z.infer<typeof CharacterSheet>;
@@ -63,5 +105,7 @@ export type ActiveCondition = z.infer<typeof ActiveCondition>;
 export type SpellSlots = z.infer<typeof SpellSlots>;
 export type Condition = z.infer<typeof Condition>;
 export type AbilityKey = z.infer<typeof AbilityKey>;
+export type Skill = z.infer<typeof Skill>;
 export type CharacterClass = z.infer<typeof CharacterClass>;
+export type GrammaticalGender = z.infer<typeof GrammaticalGender>;
 export type Abilities = z.infer<typeof Abilities>;

@@ -276,10 +276,11 @@ rule).
 - [ ] **7b:** before publishing the benchmark, adjudicate any disputed
       `action_rejected` codes against the notebook — a validator bug pooled
       into a model's rejection rate corrupts the comparison.
-- [ ] **Step 8 pre-work:** transcribe player weapon data (damage, properties,
+- [x] **Step 8 pre-work:** transcribe player weapon data (damage, properties,
       ranges) and armor/base AC into `data/srd/`, notebook-checked — closes
       the caller-supplied default on `CombatWorld.actionRangesFeet` for
-      players and the base-AC row in `RULES_REFERENCE.md` §2.
+      players and the base-AC row in `RULES_REFERENCE.md` §2. Shipped inside
+      step 9 spec #1 (§4.5), not step 8.
 - [ ] **Step 9:** build the rules digest for the narrative/tactical static
       prompt tier; verify each line against the notebook, then pin it under
       the same hash-guard as `TACTICAL_PROMPT_VERSION`.
@@ -380,7 +381,15 @@ rediscovering:
   living-faction check fire and the fight actually stop. This guarantee
   disappears the moment real `CharacterSheet`-backed heroes arrive, and
   whatever step adds them also has to decide what ends a fight the party can
-  survive.
+  survive. **Superseded by step 9 spec #1 (§4.5):** `combatantFromStatBlock`
+  now sets `characterId` for a character spawn, the hero is a real
+  `CharacterSheet`-derived character rather than a borrowed `guard` stat
+  block, and the question above is answered — `resolve.ts` still pins
+  `diesAtZeroHp: true` unconditionally rather than reading it off
+  `characterId`, so a real hero still dies at 0 HP rather than falling
+  Unconscious, now recorded as a known gap rather than an artifact of the
+  stand-in (`RULES_REFERENCE.md` §8, "Every combatant dies at 0 HP, PCs
+  included").
 - **`EncounterDefinition.maxRounds` is inert.** It is set (20, for
   `goblin-ambush`) and threaded through `buildEncounter`, but nothing under
   `apps/server/src` or `packages/rules-engine/src` reads it — there is no
@@ -406,6 +415,21 @@ rediscovering:
   `packages/agents/src/providers/routing.ts` and rebuilding. The final
   pre-merge fix wave (2026-08-19) ruled against inventing an override
   mechanism unreviewed; recorded here so the gap is tracked, not lost.
+- **A session's genesis state is now re-derived from a mutable file.**
+  `loadSession` (`apps/server/src/core/session.ts`) rebuilds a session's
+  initial state by calling `buildEncounterById` again, which — now that the
+  hero is a real `CharacterSheet` (step 9 spec #1, §4.5) — reaches
+  `loadCharacter` (`apps/server/src/encounters/characters.ts`) and reads
+  `data/characters/hero.json`. Before that, `buildEncounterById` touched only
+  immutable SRD reference data. Editing the hero's level, gear or HP now
+  silently rewrites the starting state of every session already in the log,
+  so the stored event deltas fold onto a different world on replay.
+  Invariant 3 in root `CLAUDE.md` ("state is a projection of the append-only
+  `GameEvent` stream") has thereby acquired an unrecorded qualifier — plus
+  whatever the character sheet says at load time. No defect today: one
+  sheet, authored by us, and `GenesisPayload` deliberately omits `state`
+  itself. Recorded here per the final whole-branch review's fix wave
+  (2026-08-20) rather than re-architected.
 
 Deferred, as §4.2 already said: Postgres persistence, the intent agent, and
 the web client (spec #2).
@@ -465,10 +489,11 @@ Costs and gotchas the next engineer should know:
 - The narrative pane currently renders **English**, because the narrative
   agent is spec #1's deterministic stand-in; the Hebrew agent arrives in
   step 9. Today the only Hebrew a player sees is UI chrome.
-- There is still no Hebrew name data anywhere in the repo (the SRD is
-  English per ADR 0001), so combatant and action names render as English
-  inside the RTL UI — which is why every such fragment is wrapped in
-  `<bdi>`.
+- Hebrew name data now exists throughout `data/srd/` and `data/characters/`
+  (`nameHebrew`, added by step 9 spec #1 — see §4.5), but the web client
+  does not consume it yet: combatant and action names still render as
+  English (`nameEnglish`) inside the RTL UI — which is why every such
+  fragment is wrapped in `<bdi>`.
 
 The process finding, stated plainly, is the most transferable thing the
 slice produced: **seven separate tasks shipped a test whose name promised a
@@ -482,3 +507,33 @@ written to catch, and none was caught by the suite going red — all came out
 of review. The rule that follows: **when a test exists to protect a
 specific line, delete that line and watch the test fail.** The sabotage
 check, not the green run, is the evidence.
+
+### 4.5 Step 9 decomposition (designed 2026-08-20)
+
+Step 9's narrative agent needs Hebrew names for every creature and action,
+and a real player character to narrate about — neither existed: monster and
+weapon data was English-only, and `goblin-ambush`'s hero was the `guard`
+monster stat block borrowed as a stand-in (§4.3). Building the narrative
+agent straight onto that foundation would mean building it twice, so step 9
+splits into two specs, each with its own plan → implementation cycle.
+
+**Spec #1 — player characters and SRD gear data.**
+[`docs/superpowers/specs/2026-08-20-player-character-design.md`](docs/superpowers/specs/2026-08-20-player-character-design.md),
+plan at
+[`docs/superpowers/plans/2026-08-20-player-character.md`](docs/superpowers/plans/2026-08-20-player-character.md)
+(16 tasks). Transcribes the SRD weapon, armor and skill tables into
+`data/srd/`; builds `deriveCharacter` / `characterStatBlock` in
+`@ai-dm/rules-engine` so a character's AC, speed, attacks and damage are
+computed from equipped gear instead of hand-entered; gives `goblin-ambush`'s
+hero a real `CharacterSheet` (server-side only — `loadCharacter` never
+leaves `apps/server`) whose `DerivedCharacter` projection crosses HTTP
+inside `EncounterCatalogue.characters`; and adds `nameHebrew` to every
+creature, action, weapon and armor row plus a required `grammaticalGender` on
+every character sheet.
+
+**Spec #2 — the narrative agent**, not yet designed. It can now assume
+Hebrew names on every creature and action, and a real `grammaticalGender` to
+narrate by, rather than having to invent either at prompt time.
+
+The roadmap's step 9 row (§4 above) stays **⬜ not started**: spec #1 is
+prerequisite infrastructure, not the narrative agent itself.

@@ -1,0 +1,15 @@
+[
+  { "armorId": "padded", "nameEnglish": "Padded Armor", "nameHebrew": "שריון מרופד", "category": "light", "baseAc": 11, "stealthDisadvantage": true },
+  { "armorId": "leather", "nameEnglish": "Leather Armor", "nameHebrew": "שריון עור", "category": "light", "baseAc": 11, "stealthDisadvantage": false },
+  { "armorId": "studded_leather", "nameEnglish": "Studded Leather Armor", "nameHebrew": "שריון עור ממוסמר", "category": "light", "baseAc": 12, "stealthDisadvantage": false },
+  { "armorId": "hide", "nameEnglish": "Hide Armor", "nameHebrew": "שריון פרווה", "category": "medium", "baseAc": 12, "stealthDisadvantage": false },
+  { "armorId": "chain_shirt", "nameEnglish": "Chain Shirt", "nameHebrew": "כותונת טבעות", "category": "medium", "baseAc": 13, "stealthDisadvantage": false },
+  { "armorId": "scale_mail", "nameEnglish": "Scale Mail", "nameHebrew": "שריון קשקשים", "category": "medium", "baseAc": 14, "stealthDisadvantage": true },
+  { "armorId": "breastplate", "nameEnglish": "Breastplate", "nameHebrew": "שריון חזה", "category": "medium", "baseAc": 14, "stealthDisadvantage": false },
+  { "armorId": "half_plate", "nameEnglish": "Half Plate Armor", "nameHebrew": "חצי שריון לוחות", "category": "medium", "baseAc": 15, "stealthDisadvantage": true },
+  { "armorId": "ring_mail", "nameEnglish": "Ring Mail", "nameHebrew": "שריון טבעות", "category": "heavy", "baseAc": 14, "stealthDisadvantage": true },
+  { "armorId": "chain_mail", "nameEnglish": "Chain Mail", "nameHebrew": "שריון שרשראות", "category": "heavy", "baseAc": 16, "strengthRequirement": 13, "stealthDisadvantage": true },
+  { "armorId": "splint", "nameEnglish": "Splint Armor", "nameHebrew": "שריון רצועות", "category": "heavy", "baseAc": 17, "strengthRequirement": 15, "stealthDisadvantage": true },
+  { "armorId": "plate", "nameEnglish": "Plate Armor", "nameHebrew": "שריון לוחות", "category": "heavy", "baseAc": 18, "strengthRequirement": 15, "stealthDisadvantage": true },
+  { "armorId": "shield", "nameEnglish": "Shield", "nameHebrew": "מגן", "category": "shield", "acBonus": 2, "stealthDisadvantage": false }
+]

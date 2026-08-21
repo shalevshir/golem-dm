@@ -1,6 +1,7 @@
 {
   "monsterId": "skeleton",
   "nameEnglish": "Skeleton",
+  "nameHebrew": "שלד",
   "size": "medium",
   "creatureType": "Undead",
   "alignment": "Lawful Evil",
@@ -15,6 +16,7 @@
     {
       "actionId": "shortsword",
       "nameEnglish": "Shortsword",
+      "nameHebrew": "חרב קצרה",
       "attackBonus": 5,
       "reachFeet": 5,
       "damage": { "diceNotation": "1d6+3", "averageDamage": 6, "damageType": "piercing" }
@@ -22,6 +24,7 @@
     {
       "actionId": "shortbow",
       "nameEnglish": "Shortbow",
+      "nameHebrew": "קשת קצרה",
       "attackBonus": 5,
       "rangeFeet": 80,
       "longRangeFeet": 320,

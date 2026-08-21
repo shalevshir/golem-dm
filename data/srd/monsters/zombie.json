@@ -1,6 +1,7 @@
 {
   "monsterId": "zombie",
   "nameEnglish": "Zombie",
+  "nameHebrew": "זומבי",
   "size": "medium",
   "creatureType": "Undead",
   "alignment": "Neutral Evil",
@@ -15,6 +16,7 @@
     {
       "actionId": "slam",
       "nameEnglish": "Slam",
+      "nameHebrew": "מהלומה",
       "attackBonus": 3,
       "reachFeet": 5,
       "damage": { "diceNotation": "1d8+1", "averageDamage": 5, "damageType": "bludgeoning" }

@@ -1,6 +1,7 @@
 {
   "monsterId": "boar",
   "nameEnglish": "Boar",
+  "nameHebrew": "חזיר בר",
   "size": "medium",
   "creatureType": "Beast",
   "alignment": "Unaligned",
@@ -15,6 +16,7 @@
     {
       "actionId": "gore",
       "nameEnglish": "Gore",
+      "nameHebrew": "נגיחה",
       "attackBonus": 3,
       "reachFeet": 5,
       "damage": { "diceNotation": "1d6+1", "averageDamage": 4, "damageType": "piercing" }

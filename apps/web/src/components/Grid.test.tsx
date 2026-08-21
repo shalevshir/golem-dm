@@ -29,10 +29,17 @@ const snapshot: SessionState = {
 };
 
 const catalogue = [
-  { combatantId: "hero", nameEnglish: "Guard", maxHp: 11, faction: "party" as const },
+  {
+    combatantId: "hero",
+    nameEnglish: "Guard",
+    nameHebrew: "שומר",
+    maxHp: 11,
+    faction: "party" as const,
+  },
   {
     combatantId: "goblin-a",
     nameEnglish: "Goblin Warrior",
+    nameHebrew: "גובלין לוחם",
     maxHp: 10,
     faction: "hostile" as const,
   },
@@ -101,14 +108,16 @@ describe("Grid", () => {
   });
 
   it("wraps every English name in <bdi> inside the RTL document", () => {
-    // The mixed-direction rule from apps/web/CLAUDE.md: there is no Hebrew
-    // name data anywhere in the repo and the SRD is English, so English names
-    // are rendered inside an RTL Hebrew UI and MUST be isolated or the
-    // punctuation around them reorders. Three distinct fragment kinds get
-    // isolated: combatant names, tile coordinates, and HP ratios — all three
-    // are LTR content (English text, or digits with a "," / "/" separator)
-    // sitting inside an RTL document, so all three must appear as their own
-    // <bdi> node, not merely somewhere in the rendered text.
+    // The mixed-direction rule from apps/web/CLAUDE.md: this component
+    // renders `nameEnglish`, not the `nameHebrew` the catalogue now also
+    // carries (switching is a deliberate follow-up, not blocked by missing
+    // data), so English names are rendered inside an RTL Hebrew UI and MUST
+    // be isolated or the punctuation around them reorders. Three distinct
+    // fragment kinds get isolated: combatant names, tile coordinates, and HP
+    // ratios — all three are LTR content (English text, or digits with a
+    // "," / "/" separator) sitting inside an RTL document, so all three must
+    // appear as their own <bdi> node, not merely somewhere in the rendered
+    // text.
     const { container } = render(
       <Grid
         snapshot={snapshot}

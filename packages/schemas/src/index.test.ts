@@ -60,6 +60,48 @@ describe("CharacterSheet", () => {
     const bad = { ...validSheet, conditions: [{ condition: "cursed", durationRounds: 1 }] };
     expect(() => CharacterSheet.parse(bad)).toThrow();
   });
+
+  it("rejects an unknown grammaticalGender", () => {
+    expect(() => CharacterSheet.parse({ ...validSheet, grammaticalGender: "neuter" })).toThrow();
+  });
+
+  it("rejects an empty nameHebrew", () => {
+    expect(() => CharacterSheet.parse({ ...validSheet, nameHebrew: "" })).toThrow();
+  });
+
+  it("defaults size to medium", () => {
+    const parsed = CharacterSheet.parse(validSheet);
+    expect(parsed.size).toBe("medium");
+  });
+
+  it("defaults inventory entries to not equipped", () => {
+    const parsed = CharacterSheet.parse({
+      ...validSheet,
+      inventory: [{ itemId: "longsword", quantity: 1 }],
+    });
+    expect(parsed.inventory[0]?.equipped).toBe(false);
+  });
+
+  it("carries an equipped flag when given one", () => {
+    const parsed = CharacterSheet.parse({
+      ...validSheet,
+      inventory: [{ itemId: "longsword", quantity: 1, equipped: true }],
+    });
+    expect(parsed.inventory[0]?.equipped).toBe(true);
+  });
+
+  it("rejects a skill proficiency that is not a real skill", () => {
+    const bad = { ...validSheet, skillProficiencies: ["banana"] };
+    expect(() => CharacterSheet.parse(bad)).toThrow();
+  });
+
+  it("accepts real skill proficiencies", () => {
+    const parsed = CharacterSheet.parse({
+      ...validSheet,
+      skillProficiencies: ["athletics", "perception"],
+    });
+    expect(parsed.skillProficiencies).toEqual(["athletics", "perception"]);
+  });
 });
 
 describe("ExecuteTurn", () => {

@@ -951,9 +951,11 @@ describe("handleCommand — turn timeout", () => {
       (each) => each.type === "narrative_emitted",
     );
     expect(emitted.length).toBeGreaterThan(0);
-    // "Guard": goblin-ambush's hero borrows the "guard" stat block (C-13).
+    // "hero": the hero is a real CharacterSheet (C-13 is closed), and
+    // `characterStatBlock` uses the characterId as `nameEnglish` — a
+    // character sheet is authored in Hebrew and has no English name.
     expect(emitted[0]?.payload).toMatchObject({
-      text: expect.stringContaining("Guard") as string,
+      text: expect.stringContaining("hero") as string,
     });
     expect(frames.some((each) => each.type === "event")).toBe(true);
   }, 10_000);
@@ -1112,7 +1114,7 @@ describe("handleCommand — turn_affordances", () => {
     expect(last?.type === "turn_affordances" && last.forSequence).toBe(session.nextSequence - 1);
   });
 
-  it("offers the hero a reachable set and the spear against an adjacent goblin", async () => {
+  it("offers the hero a reachable set and the longsword against an adjacent goblin", async () => {
     const store = createInMemoryEventStore();
     const session = await freshSession(store);
     const frames = await drain(
@@ -1123,8 +1125,8 @@ describe("handleCommand — turn_affordances", () => {
     if (affordances?.type !== "turn_affordances") throw new Error("expected affordances");
     expect(affordances.reachableTiles.length).toBeGreaterThan(0);
 
-    const spear = affordances.actions.find((each) => each.actionId === "spear");
-    expect(spear?.targetableCombatantIds).toContain("goblin-a");
+    const longsword = affordances.actions.find((each) => each.actionId === "longsword");
+    expect(longsword?.targetableCombatantIds).toContain("goblin-a");
   });
 
   it("does NOT follow a join that lands on a hostile's turn", async () => {

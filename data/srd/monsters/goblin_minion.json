@@ -1,6 +1,7 @@
 {
   "monsterId": "goblin_minion",
   "nameEnglish": "Goblin Minion",
+  "nameHebrew": "גובלין משרת",
   "size": "small",
   "creatureType": "Fey (Goblinoid)",
   "alignment": "Chaotic Neutral",
@@ -15,6 +16,7 @@
     {
       "actionId": "dagger",
       "nameEnglish": "Dagger",
+      "nameHebrew": "פגיון",
       "attackBonus": 4,
       "reachFeet": 5,
       "rangeFeet": 20,

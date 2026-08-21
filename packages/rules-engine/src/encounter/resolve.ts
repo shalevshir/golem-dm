@@ -21,17 +21,17 @@ import type { AttackOutcome, CombatWorld, TurnPlan } from "../combat/index.js";
 import type {
   AttackRollTrace,
   Combatant,
+  CreatureAttack,
+  CreatureStatBlock,
   DamageRoll,
   DamageRollTrace,
   EntityStatus,
   ExecuteTurn,
-  MonsterAttack,
-  MonsterStatBlock,
 } from "@ai-dm/schemas";
 
 export interface ResolveContext {
   /** By `combatantId`. Supplies attack bonuses and damage dice. */
-  statBlocks: ReadonlyMap<string, MonsterStatBlock>;
+  statBlocks: ReadonlyMap<string, CreatureStatBlock>;
 }
 
 export interface AttackRecord {
@@ -101,9 +101,9 @@ function replace(world: CombatWorld, updated: Combatant): CombatWorld {
  * reach for the same case.
  */
 function attackFor(
-  statBlock: MonsterStatBlock,
+  statBlock: CreatureStatBlock,
   actionId: string | undefined,
-): MonsterAttack | undefined {
+): CreatureAttack | undefined {
   if (actionId === undefined) return statBlock.actions[0];
   return statBlock.actions.find((action) => action.actionId === actionId);
 }
@@ -195,16 +195,17 @@ export function applyTurn(input: ApplyTurnInput): ApplyTurnResult {
         damage += extraTrace.total;
       }
 
-      // Combatants built from a monster stat block have no `characterId` and
-      // die at 0 HP. A PC combatant falls Unconscious instead (`applyDamage`'s
-      // default). Nothing here rolls death saves per turn, and damage taken at
-      // 0 HP does not produce death-save failures — RULES_REFERENCE.md §8's
-      // gap. `rollDeathSave` exists in `../combat/`; this file does not drive
-      // it.
+      // Correction C-31: every combatant dies at 0 HP, PCs included — not just
+      // monsters. Death saving throws are not implemented
+      // (RULES_REFERENCE.md §8's gap), so letting a PC fall Unconscious
+      // instead would strand it with nothing that ever resolves that state.
+      // `diesAtZeroHp` is therefore pinned `true` unconditionally, not read
+      // off `target.characterId`, until death saves exist. `rollDeathSave`
+      // exists in `../combat/`; this file does not drive it.
       const applied = applyDamage(
         { currentHp: target.currentHp, maxHp: target.maxHp, tempHp: target.tempHp },
         damage,
-        { diesAtZeroHp: target.characterId === undefined },
+        { diesAtZeroHp: true },
       );
       statusAfter = applied.status;
       if (applied.status === "dead") killed.push(target.combatantId);

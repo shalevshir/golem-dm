@@ -1,7 +1,13 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { ExecuteTurn } from "@ai-dm/schemas";
+import { DerivedCharacter } from "@ai-dm/schemas";
 import { validateExecuteTurn } from "@ai-dm/rules-engine";
-import { buildEncounterById, encounterById, UnknownEncounterError } from "./index.js";
+import {
+  buildEncounterById,
+  encounterById,
+  loadCharacter,
+  UnknownEncounterError,
+} from "./index.js";
 
 describe("encounter catalogue", () => {
   it("knows the starter encounter", () => {
@@ -40,7 +46,9 @@ describe("encounter catalogue", () => {
 
     const turn: ExecuteTurn = {
       actorId: "hero",
-      mainAction: { actionType: "attack", actionId: "spear", targetIds: ["goblin-a"] },
+      // Longsword, not the borrowed guard's spear: the hero is a real
+      // CharacterSheet as of Task 14 (C-13 is closed).
+      mainAction: { actionType: "attack", actionId: "longsword", targetIds: ["goblin-a"] },
       tacticalRationaleEnglish: "Test fixture.",
     };
     const validation = validateExecuteTurn(turn, hero, built.world);
@@ -61,5 +69,62 @@ describe("encounter catalogue", () => {
     const validation = validateExecuteTurn(turn, goblinB, built.world);
 
     expect(validation.valid).toBe(true);
+  });
+});
+
+describe("the goblin-ambush hero", () => {
+  it("is a real character, not a borrowed guard stat block", () => {
+    const built = buildEncounterById("goblin-ambush");
+    const hero = built.world.combatants.find((each) => each.combatantId === "hero");
+    expect(hero?.characterId).toBe("hero");
+    expect(hero?.maxHp).toBe(28);
+    // Chain Mail, matching the guard's AC so C-14's reach geometry is
+    // unaffected by the swap.
+    expect(hero?.armorClass).toBe(16);
+  });
+
+  it("wields a longsword and can always punch", () => {
+    const built = buildEncounterById("goblin-ambush");
+    const actions = built.statBlocks.get("hero")?.actions.map((each) => each.actionId);
+    expect(actions).toEqual(["longsword", "unarmed_strike"]);
+  });
+
+  // The "legal melee attack on turn 1" case for the hero is already covered
+  // by "makes a scripted melee attack from the hero legal on turn 1" above
+  // (same encounter, validator, actor and target, and the fuller C-14
+  // comment on why the geometry is tested at all) — not repeated here.
+
+  it("refuses to load a sheet whose stored values disagree with the derivation", () => {
+    // Guards the cross-check being wired into loadCharacter at all, not just
+    // existing in the rules engine.
+    expect(() => loadCharacter("inconsistent-fixture")).toThrow(/proficiencyBonus|armorClass/);
+  });
+});
+
+describe("loadCharacter", () => {
+  it("parses the derivation against DerivedCharacter at the server boundary", () => {
+    // No legal CharacterSheet can make `deriveCharacter`'s own output fail
+    // `DerivedCharacter.parse` today — every derived field is either a
+    // pass-through of an already-bounded sheet field or provably in range —
+    // so this guards the wiring itself, the same way the consistency test
+    // above does for `assertSheetConsistent`. "second-fixture" is used by no
+    // other test, so a pass cannot be explained by an earlier test having
+    // already cached "hero" through this code path.
+    const parseSpy = vi.spyOn(DerivedCharacter, "parse");
+    try {
+      loadCharacter("second-fixture");
+      expect(parseSpy).toHaveBeenCalled();
+    } finally {
+      parseSpy.mockRestore();
+    }
+  });
+
+  it("refuses a file whose characterId disagrees with the id it was requested under", () => {
+    // "mislabeled-fixture.json" is a copy of hero.json whose own
+    // characterId still says "hero" — a file renamed without updating its
+    // contents. Without this check it would cache under "mislabeled-fixture"
+    // while everything it produces (including characterStatBlock's
+    // nameEnglish) still says "hero".
+    expect(() => loadCharacter("mislabeled-fixture")).toThrow(/characterId/);
   });
 });

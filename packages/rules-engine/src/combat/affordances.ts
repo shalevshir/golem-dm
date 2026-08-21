@@ -13,7 +13,7 @@ import { FEET_PER_TILE } from "../spatial/index.js";
 import { validateExecuteTurn } from "./validate-turn.js";
 import type { CombatWorld, TurnRejectionReason, TurnValidation } from "./validate-turn.js";
 import { DEFAULT_PATH_TYPE } from "@ai-dm/schemas";
-import type { ActionAffordance, MonsterStatBlock, Tile, TurnAffordances } from "@ai-dm/schemas";
+import type { ActionAffordance, CreatureStatBlock, Tile, TurnAffordances } from "@ai-dm/schemas";
 import type { ExecuteTurn } from "@ai-dm/schemas";
 
 /**
@@ -71,7 +71,7 @@ function permits(verdict: TurnValidation, blockers: readonly TurnRejectionReason
 export function affordancesFor(
   world: CombatWorld,
   actorId: string,
-  statBlock: MonsterStatBlock,
+  statBlock: CreatureStatBlock,
 ): TurnAffordances {
   const actor = world.combatants.find((each) => each.combatantId === actorId);
   if (actor === undefined) {
@@ -118,14 +118,20 @@ export function affordancesFor(
     // (e.g. a coup de grace). This filter simply keeps the client from
     // suggesting attacks on corpses.
     //
-    // It is unreachable today: every combatant in the current encounter
-    // pipeline is built via `combatantFromStatBlock`, which never sets
-    // `characterId`, so `resolve.ts`'s `diesAtZeroHp: target.characterId ===
-    // undefined` is always true and nobody ever ends up "unconscious" — they
-    // go straight to "dead". It becomes load-bearing once real player
-    // character data gives combatants a genuine `characterId`: PCs will then
-    // fall unconscious instead of dying, and this filter should be revisited
-    // so the client still offers attacks against them.
+    // Only the unconscious case is unreachable today -- the dead case is not:
+    // the `status === "alive"` check just below excludes a corpse every turn
+    // once a kill happens. Unconscious is unreachable no longer because
+    // combatants lack a `characterId` — a character spawn populates a real
+    // one now (`combatantFromStatBlock`, ../encounter/build.ts's
+    // `resolveSpawn`). The reason is correction C-31: `applyTurn`'s
+    // `applyDamage` call in `../encounter/resolve.ts` pins `diesAtZeroHp:
+    // true` unconditionally (death saves are implemented but not driven by
+    // the encounter pipeline — RULES_REFERENCE.md §8's gap), so nobody, PC
+    // or monster, ever ends up "unconscious" — everyone who hits 0 HP goes
+    // straight to "dead". This filter becomes load-bearing for the
+    // unconscious case only once death saves land and the pin is lifted,
+    // and should be revisited then so the client still offers attacks
+    // against an unconscious PC.
     const targetableCombatantIds = world.combatants
       .filter((each) => each.combatantId !== actorId && each.status === "alive")
       .filter((candidate) =>

@@ -5,7 +5,9 @@
     "hitDie": 10,
     "primaryAbilities": ["str", "dex"],
     "savingThrowProficiencies": ["str", "con"],
-    "extraAttackLevel": 5
+    "extraAttackLevel": 5,
+    "weaponProficiencies": { "categories": ["simple", "martial"] },
+    "armorTraining": ["light", "medium", "heavy", "shield"]
   },
   {
     "class": "wizard",
@@ -13,14 +15,21 @@
     "hitDie": 6,
     "primaryAbilities": ["int"],
     "savingThrowProficiencies": ["int", "wis"],
-    "spellcastingAbility": "int"
+    "spellcastingAbility": "int",
+    "weaponProficiencies": { "categories": ["simple"] },
+    "armorTraining": []
   },
   {
     "class": "rogue",
     "nameEnglish": "Rogue",
     "hitDie": 8,
     "primaryAbilities": ["dex"],
-    "savingThrowProficiencies": ["dex", "int"]
+    "savingThrowProficiencies": ["dex", "int"],
+    "weaponProficiencies": {
+      "categories": ["simple"],
+      "martialWithProperties": ["finesse", "light"]
+    },
+    "armorTraining": ["light"]
   },
   {
     "class": "cleric",
@@ -28,6 +37,8 @@
     "hitDie": 8,
     "primaryAbilities": ["wis"],
     "savingThrowProficiencies": ["wis", "cha"],
-    "spellcastingAbility": "wis"
+    "spellcastingAbility": "wis",
+    "weaponProficiencies": { "categories": ["simple"] },
+    "armorTraining": ["light", "medium", "shield"]
   }
 ]

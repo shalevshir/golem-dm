@@ -249,10 +249,12 @@ describe("createDeterministicNarrative", () => {
   });
 
   it("narrates a downed-but-alive target distinctly from a kill (ADR 0002: solo game)", async () => {
-    // diesAtZeroHp is false for any combatant with a characterId
-    // (resolve.ts), so a player character dropped to 0 HP always lands here,
-    // never in "dead" — this is the default narration the player sees on a
-    // losing turn, not a corner case.
+    // The narrator distinguishes a downed-but-alive target from a kill, and
+    // that distinction is exercised here directly because the pipeline
+    // cannot currently produce it: `diesAtZeroHp` is pinned true pending
+    // death saves (RULES_REFERENCE.md §8's gap, correction C-31), so every
+    // 0-HP outcome in play today is a kill. This test keeps the narrator's
+    // other branch honest for when death saves land.
     const narrative = createDeterministicNarrative();
     const text = await collect(
       narrative.stream({

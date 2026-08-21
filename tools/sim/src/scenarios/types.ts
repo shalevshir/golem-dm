@@ -2,7 +2,7 @@
 // here is data. `buildScenario` is the only thing that turns it into state.
 import type { CombatWorld, SpawnSpec, TerrainOverride } from "@ai-dm/rules-engine";
 import type { AvailableAction } from "@ai-dm/agents";
-import type { MonsterStatBlock } from "@ai-dm/schemas";
+import type { CreatureStatBlock } from "@ai-dm/schemas";
 
 export type { SpawnSpec, TerrainOverride };
 
@@ -27,7 +27,7 @@ export interface BuiltScenario {
   scenarioId: string;
   world: CombatWorld;
   /** By `combatantId` — the resolver needs attack bonuses, which `Combatant` lacks. */
-  statBlocks: ReadonlyMap<string, MonsterStatBlock>;
+  statBlocks: ReadonlyMap<string, CreatureStatBlock>;
   /** By `combatantId`. What that creature may propose this turn. */
   availableActions: ReadonlyMap<string, readonly AvailableAction[]>;
   turnOrder: readonly string[];

@@ -45,8 +45,11 @@ export function ActionBar(props: ActionBarProps): JSX.Element {
     const universal = action.actionId === undefined ? actionLabel(action.actionType) : undefined;
     if (universal !== undefined) return <span>{universal}</span>;
 
-    // English name inside an RTL document — no Hebrew name data exists (the
-    // SRD is English, ADR 0001), so <bdi> is mandatory here, not optional.
+    // English name inside an RTL document. Hebrew names now exist and are
+    // served as `nameHebrew` on this catalogue entry, but this component
+    // still renders `nameEnglish`, so <bdi> stays mandatory here, not
+    // optional — switching to Hebrew labels is a deliberate follow-up, not
+    // blocked by missing data (the SRD itself is still English, ADR 0001).
     const named = props.catalogue.find((each) => each.actionId === action.actionId);
     return <bdi>{named?.nameEnglish ?? action.actionId ?? action.actionType}</bdi>;
   }

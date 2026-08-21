@@ -54,12 +54,18 @@ function event(
 const catalogue = {
   encounterId: "goblin-ambush",
   combatants: [
-    { combatantId: "hero", nameEnglish: "Guard", maxHp: 11, faction: "party" },
-    { combatantId: "goblin-a", nameEnglish: "Goblin Warrior", maxHp: 10, faction: "hostile" },
+    { combatantId: "hero", nameEnglish: "Guard", nameHebrew: "שומר", maxHp: 11, faction: "party" },
+    {
+      combatantId: "goblin-a",
+      nameEnglish: "Goblin Warrior",
+      nameHebrew: "גובלין לוחם",
+      maxHp: 10,
+      faction: "hostile",
+    },
   ],
   actions: [
-    { actionId: "spear", nameEnglish: "Spear" },
-    { actionId: "scimitar", nameEnglish: "Scimitar" },
+    { actionId: "spear", nameEnglish: "Spear", nameHebrew: "חנית" },
+    { actionId: "scimitar", nameEnglish: "Scimitar", nameHebrew: "חרב מעוקלת" },
   ],
 };
 
