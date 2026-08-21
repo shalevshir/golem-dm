@@ -115,18 +115,35 @@ const HOW_TO_REVIEW =
  * Required scope disclosure. Without this, the opening paragraph's claim
  * to cover the change's Hebrew is not true: `apps/web/src/i18n.ts` carries
  * 49 Hebrew string literals of its own, and `data/characters/*.json`
- * carries character names — including `hero.json`'s `nameHebrew`, "אלדד",
- * the exact actor every sample below renders — with no correction path
- * named anywhere else on this sheet. Named here rather than added as a
- * fifth and sixth table: the brief this sheet implements specifies exactly
- * four sections, and growing the sheet's scope is redesigning the
- * deliverable, not fixing this gap.
+ * carries character names, with no correction path named anywhere else on
+ * this sheet. Named here rather than added as a fifth and sixth table: the
+ * brief this sheet implements specifies exactly four sections, and growing
+ * the sheet's scope is redesigning the deliverable, not fixing this gap.
  */
 const SCOPE_NOTE =
   "Not covered on this sheet: `apps/web/src/i18n.ts`'s UI strings (the client's own Hebrew, " +
   "corrected by editing that file directly) and `data/characters/*.json`'s character names — " +
-  'e.g. `hero.json`\'s `nameHebrew`, "אלדד", the actor printed in every sample below — ' +
-  "corrected the same way as a weapon or monster row: a data-only edit to that file.";
+  "corrected the same way as a weapon or monster row: a data-only edit to that file (but see " +
+  "the note below for the one name that IS effectively on this sheet already).";
+
+/**
+ * `hero.json`'s `nameHebrew` is the one character name that is effectively
+ * on this sheet already: "אלדד" is the actor in most of the samples above
+ * — 7 of 9 in `SCRIPTED_BRIEFS` (`tools/sim/src/live/narrative.ts`); the
+ * goblin's target, not actor, in an 8th; absent from the 9th, where the
+ * ranger acts alone. But the correction path `SCOPE_NOTE` above states for
+ * every other character name is inert for this one specifically:
+ * `hero.json` plays no part in producing these samples.
+ * `tools/sim/src/live/narrative.ts:24` hardcodes `ELDAD` as its own
+ * literal, read from nowhere — the exact "one name lives in two places"
+ * defect `CONDITIONS_TEST_NOTE` below already warns about for `שרוע`.
+ */
+const HERO_NAME_NOTE =
+  'Note: `hero.json`\'s `nameHebrew`, "אלדד", is the actor in most of the samples above — ' +
+  "but `hero.json` is not what produced them. `tools/sim/src/live/narrative.ts`'s own " +
+  "`ELDAD` fixture is a hardcoded literal, independent of `hero.json`. A correction to " +
+  "`hero.json` alone changes the shipped game's hero and leaves every sample above exactly " +
+  "as it was — correcting אלדד's Hebrew name means editing both files together.";
 
 /**
  * Required reading before touching `conditions.json`: `nameHebrew` is not
@@ -202,6 +219,8 @@ export function renderReviewSheet(input: ReviewSheetInput): string {
   lines.push("");
   lines.push(SCOPE_NOTE);
   lines.push("");
+  lines.push(HERO_NAME_NOTE);
+  lines.push("");
   lines.push(CONDITIONS_TEST_NOTE);
   lines.push("");
   lines.push(PREPOSITION_FLAG);
@@ -210,9 +229,10 @@ export function renderReviewSheet(input: ReviewSheetInput): string {
   lines.push("## Narration samples");
   lines.push("");
   if (input.erroredSampleCount !== undefined && input.erroredSampleCount > 0) {
-    lines.push(
-      `${String(input.erroredSampleCount)} samples errored and were omitted from this section.`,
-    );
+    const count = input.erroredSampleCount;
+    const noun = count === 1 ? "sample" : "samples";
+    const verb = count === 1 ? "was" : "were";
+    lines.push(`${String(count)} ${noun} errored and ${verb} omitted from this section.`);
     lines.push("");
   }
   input.samples.forEach((sample, index) => {

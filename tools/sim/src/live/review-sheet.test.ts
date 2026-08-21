@@ -177,6 +177,33 @@ describe("renderReviewSheet", () => {
     expect(sheet).toContain("data/characters/*.json");
   });
 
+  // --- Fix round 2: Important 1 (re-opened) — the note written to fix the
+  // overclaim contained a new overclaim, and its correction path was inert
+  // ---------------------------------------------------------------------
+
+  it("no longer claims the hero's Hebrew name is printed in every sample", () => {
+    // False for 2 of 9 SCRIPTED_BRIEFS entries: the ranger acts alone with
+    // no target in one, and the goblin — not אלדד — is the ACTOR in
+    // another (אלדד is only the target there). Checked against the exact
+    // retired phrase, not the bare substring "every sample": the fix's own
+    // replacement text legitimately says a hero.json-only correction
+    // "leaves every sample above exactly as it was" — a true statement
+    // using the same two words for an unrelated claim.
+    const sheet = renderReviewSheet(INPUT);
+    expect(sheet).not.toContain("printed in every sample");
+  });
+
+  it("says correcting the hero's Hebrew name requires editing both hero.json and the narrative.ts fixture", () => {
+    // The correction path SCOPE_NOTE states for every other character name
+    // — a data-only edit to data/characters/*.json — does nothing here:
+    // narrative.ts's own ELDAD fixture is a hardcoded literal, independent
+    // of hero.json. A reader must be told to edit both.
+    const sheet = renderReviewSheet(INPUT);
+    expect(sheet).toContain("hero.json");
+    expect(sheet).toContain("tools/sim/src/live/narrative.ts");
+    expect(sheet).toContain("both files together");
+  });
+
   // --- Fix round 1: Minor 5 — pin the document's own scaffolding ---------
 
   it("pins the four top-level headings in their required order", () => {
@@ -200,6 +227,17 @@ describe("renderReviewSheet", () => {
   it("states how many samples errored and were omitted, when erroredSampleCount is given", () => {
     const sheet = renderReviewSheet({ ...INPUT, erroredSampleCount: 3 });
     expect(sheet).toContain("3 samples errored and were omitted");
+  });
+
+  it("uses singular wording for exactly one errored sample", () => {
+    // Fix round 2, Minor 2: the realistic live shape (this test suite's
+    // own words, in narrative.test.ts) is one transient failure among
+    // otherwise-clean samples — not every call failing at once — so the
+    // singular case is the common one, not an edge case.
+    const sheet = renderReviewSheet({ ...INPUT, erroredSampleCount: 1 });
+    expect(sheet).toContain("1 sample errored and was omitted");
+    expect(sheet).not.toContain("1 samples");
+    expect(sheet).not.toContain("and were omitted");
   });
 
   it("says nothing about errored samples when erroredSampleCount is absent or zero", () => {

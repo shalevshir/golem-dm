@@ -61,8 +61,11 @@ against the `narrative` role in `DEFAULT_MODEL_ROUTING`, never an arm from
 `src/config.ts`. `--arms` is rejected in combination with it for the same
 reason it is rejected without `--live` above. `--live` still only swaps the
 port — `--mode narrative` alone runs the same benchmark against a scripted one.
-`--review-sheet` is rejected outside `--mode narrative` for the same reason
-`--arms` is rejected outside it: it prints `src/live/review-sheet.ts`'s
+`--review-sheet` is rejected outside `--mode narrative` — the mirror
+condition of how `--arms` is rejected above (in combination WITH
+`--mode narrative`, and separately without `--live`): all three checks
+reject a flag that would either no-op or mislabel a report rather than
+silently ignore it. `--review-sheet` itself prints `src/live/review-sheet.ts`'s
 `renderReviewSheet` output (the run's own narration samples plus the SRD
 name/glossary/condition tables) to stdout, separate from the `Wrote <path>`
 lines on stderr, so redirecting `pnpm --silent sim --live --mode narrative
