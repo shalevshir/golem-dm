@@ -17,7 +17,7 @@
 // anything on top of it.
 import { z } from "zod";
 import type { BuiltEncounter, CombatWorld } from "@ai-dm/rules-engine";
-import { fold } from "@ai-dm/schemas";
+import { fold, NarrativeEmittedPayload } from "@ai-dm/schemas";
 import type { GameEvent, SessionState } from "@ai-dm/schemas";
 import { buildEncounterById } from "../encounters/index.js";
 import type { EventStore } from "./event-store.js";
@@ -26,11 +26,28 @@ import type { EventStore } from "./event-store.js";
  * tells a reloaded session which encounter it is. */
 const GenesisPayload = z.object({ encounterId: z.string(), rootSeed: z.number().int() });
 
+/**
+ * How many past narrations the narrative agent is shown. Two: enough to stop
+ * it reusing a verb it just used, small enough that the uncached tier stays
+ * cheap. Not in `SessionState` — see the doc comment on `recentNarrations`.
+ */
+export const NARRATION_WINDOW = 2;
+
 export interface Session {
   state: SessionState;
   built: BuiltEncounter;
   /** The sequence the next appended event will take. */
   nextSequence: number;
+  /** The encounter's narrator-facing scene card. Static; resolved once here. */
+  sceneEnglish: string;
+  /**
+   * The last `NARRATION_WINDOW` narrations, oldest first. A projection of the
+   * `narrative_emitted` events in the log, held here rather than in
+   * `SessionState` because the client has no use for it and `reduce` keeps
+   * treating that event as a no-op. Rebuilt by `loadSession`, so a reconnect
+   * does not hand the narrator an empty memory.
+   */
+  recentNarrations: string[];
 }
 
 export interface CreateSessionInput {
@@ -91,7 +108,7 @@ export async function createSession(input: CreateSessionInput): Promise<Session>
   };
   await input.store.append(input.sessionId, [genesis]);
 
-  return { state, built, nextSequence: 1 };
+  return { state, built, nextSequence: 1, sceneEnglish: built.sceneEnglish, recentNarrations: [] };
 }
 
 export async function loadSession(input: {
@@ -120,8 +137,27 @@ export async function loadSession(input: {
     events.slice(1),
   );
 
+  // A projection of the `narrative_emitted` events in the log, not something
+  // `reduce` folds — see the doc comment on `Session.recentNarrations`.
+  const recentNarrations: string[] = [];
+  for (const event of events) {
+    if (event.type !== "narrative_emitted") continue;
+    const parsed = NarrativeEmittedPayload.safeParse(event.payload);
+    // Tolerant on purpose: this is a prompt-quality nicety, and a payload
+    // from before this convention existed must not stop a session from
+    // loading.
+    if (!parsed.success) continue;
+    recentNarrations.push(parsed.data.text);
+  }
+
   const last = events[events.length - 1];
-  return { state, built, nextSequence: (last?.sequence ?? 0) + 1 };
+  return {
+    state,
+    built,
+    nextSequence: (last?.sequence ?? 0) + 1,
+    sceneEnglish: built.sceneEnglish,
+    recentNarrations: recentNarrations.slice(-NARRATION_WINDOW),
+  };
 }
 
 /**

@@ -3,6 +3,7 @@ import { fold } from "@ai-dm/schemas";
 import type { GameEvent } from "@ai-dm/schemas";
 import { createInMemoryEventStore } from "./event-store.js";
 import { createSession, loadSession, worldFor } from "./session.js";
+import type { CreateSessionInput } from "./session.js";
 
 const clock = (): string => "2026-08-19T10:00:00.000Z";
 
@@ -11,6 +12,22 @@ function uuids(): () => string {
   return () => {
     n += 1;
     return `00000000-0000-4000-8000-${String(n).padStart(12, "0")}`;
+  };
+}
+
+const NARRATION_WINDOW = 2;
+
+/** The `CreateSessionInput` fields shared by every test below; a test spreads
+ * this and overrides only what it cares about. `store` and `uuid` are fresh
+ * per call so two tests never share state or collide on generated ids. */
+function baseInput(): CreateSessionInput {
+  return {
+    sessionId: "s1",
+    encounterId: "goblin-ambush",
+    rootSeed: 42,
+    store: createInMemoryEventStore(),
+    clock,
+    uuid: uuids(),
   };
 }
 
@@ -62,6 +79,12 @@ describe("createSession", () => {
     expect(session.state.grid.width).toBe(12);
     expect(session.state.grid.height).toBe(12);
     expect(session.state.turnOrder).toEqual(["hero", "goblin-a", "goblin-b"]);
+  });
+
+  it("resolves the encounter's scene card once at creation", async () => {
+    const session = await createSession({ ...baseInput(), encounterId: "goblin-ambush" });
+    expect(session.sceneEnglish).toContain("hillside");
+    expect(session.recentNarrations).toEqual([]);
   });
 });
 
@@ -135,6 +158,28 @@ describe("loadSession", () => {
     expect(goblinA?.position).toEqual([7, 3]);
     expect(loaded?.state.currentActorIndex).toBe(1);
     expect(loaded?.nextSequence).toBe(3);
+  });
+
+  it("rebuilds the narration window from the log tail on load", async () => {
+    const store = createInMemoryEventStore();
+    const session = await createSession({ ...baseInput(), store, encounterId: "goblin-ambush" });
+
+    for (const text of ["ראשון.", "שני.", "שלישי."]) {
+      await store.append(session.state.sessionId, [
+        {
+          eventId: `e-${text}`,
+          sessionId: session.state.sessionId,
+          sequence: session.nextSequence++,
+          timestamp: "2026-08-21T00:00:00.000Z",
+          type: "narrative_emitted",
+          payload: { actorId: "hero", streamId: "s", text, source: "model", promptVersion: "v" },
+        },
+      ]);
+    }
+
+    const loaded = await loadSession({ sessionId: session.state.sessionId, store });
+    expect(loaded?.recentNarrations).toEqual(["שני.", "שלישי."]);
+    expect(loaded?.recentNarrations).toHaveLength(NARRATION_WINDOW);
   });
 });
 
