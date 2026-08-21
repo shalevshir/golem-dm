@@ -187,7 +187,7 @@ describe("renderReviewSheet", () => {
     // another (אלדד is only the target there). Checked against the exact
     // retired phrase, not the bare substring "every sample": the fix's own
     // replacement text legitimately says a hero.json-only correction
-    // "leaves every sample above exactly as it was" — a true statement
+    // "leaves every sample below exactly as it was" — a true statement
     // using the same two words for an unrelated claim.
     const sheet = renderReviewSheet(INPUT);
     expect(sheet).not.toContain("printed in every sample");

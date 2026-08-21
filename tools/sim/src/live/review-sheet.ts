@@ -124,25 +124,26 @@ const SCOPE_NOTE =
   "Not covered on this sheet: `apps/web/src/i18n.ts`'s UI strings (the client's own Hebrew, " +
   "corrected by editing that file directly) and `data/characters/*.json`'s character names — " +
   "corrected the same way as a weapon or monster row: a data-only edit to that file (but see " +
-  "the note below for the one name that IS effectively on this sheet already).";
+  "the note below for the one name that is effectively on this sheet already).";
 
 /**
  * `hero.json`'s `nameHebrew` is the one character name that is effectively
- * on this sheet already: "אלדד" is the actor in most of the samples above
+ * on this sheet already: "אלדד" is the actor in most of the samples below
  * — 7 of 9 in `SCRIPTED_BRIEFS` (`tools/sim/src/live/narrative.ts`); the
  * goblin's target, not actor, in an 8th; absent from the 9th, where the
  * ranger acts alone. But the correction path `SCOPE_NOTE` above states for
  * every other character name is inert for this one specifically:
  * `hero.json` plays no part in producing these samples.
- * `tools/sim/src/live/narrative.ts:24` hardcodes `ELDAD` as its own
- * literal, read from nowhere — the exact "one name lives in two places"
- * defect `CONDITIONS_TEST_NOTE` below already warns about for `שרוע`.
+ * `tools/sim/src/live/narrative.ts` hardcodes `ELDAD` as its own literal,
+ * read from nowhere — no line cited, since it would go stale on any
+ * insertion above it — the exact "one name lives in two places" defect
+ * `CONDITIONS_TEST_NOTE` below already warns about for `שרוע`.
  */
 const HERO_NAME_NOTE =
-  'Note: `hero.json`\'s `nameHebrew`, "אלדד", is the actor in most of the samples above — ' +
+  'Note: `hero.json`\'s `nameHebrew`, "אלדד", is the actor in most of the samples below — ' +
   "but `hero.json` is not what produced them. `tools/sim/src/live/narrative.ts`'s own " +
   "`ELDAD` fixture is a hardcoded literal, independent of `hero.json`. A correction to " +
-  "`hero.json` alone changes the shipped game's hero and leaves every sample above exactly " +
+  "`hero.json` alone changes the shipped game's hero and leaves every sample below exactly " +
   "as it was — correcting אלדד's Hebrew name means editing both files together.";
 
 /**

@@ -62,7 +62,7 @@ against the `narrative` role in `DEFAULT_MODEL_ROUTING`, never an arm from
 reason it is rejected without `--live` above. `--live` still only swaps the
 port — `--mode narrative` alone runs the same benchmark against a scripted one.
 `--review-sheet` is rejected outside `--mode narrative` — the mirror
-condition of how `--arms` is rejected above (in combination WITH
+condition of how `--arms` is rejected above (in combination with
 `--mode narrative`, and separately without `--live`): all three checks
 reject a flag that would either no-op or mislabel a report rather than
 silently ignore it. `--review-sheet` itself prints `src/live/review-sheet.ts`'s
