@@ -60,19 +60,21 @@ describe("ActionBar", () => {
       />,
     );
 
-    await userEvent.click(screen.getByRole("button", { name: "Spear" }));
+    await userEvent.click(screen.getByRole("button", { name: "חנית" }));
     expect(onCommit).not.toHaveBeenCalled();
 
-    // The combatant name in the target picker is an English fragment inside
-    // the RTL document just like the action name is — pinned here the same
-    // way `Grid.tsx` pins its own combatant-name <bdi> (98857bd), since
+    // The combatant name in the target picker still needs <bdi>: it's
+    // Hebrew now, same direction as the surrounding document, but the
+    // `targetId` fallback used when the catalogue lookup misses is Latin
+    // (see the comment above `labelFor` in ActionBar.tsx). Pinned here the
+    // same way `Grid.tsx` pins its own combatant-name <bdi> (98857bd), since
     // swapping it for a <span> leaves every other assertion in this file
     // green.
     expect(Array.from(container.querySelectorAll("bdi"), (each) => each.textContent)).toContain(
-      "Goblin Warrior",
+      "גובלין לוחם",
     );
 
-    await userEvent.click(screen.getByRole("button", { name: "Goblin Warrior" }));
+    await userEvent.click(screen.getByRole("button", { name: "גובלין לוחם" }));
     expect(onCommit).toHaveBeenCalledWith(spear, "goblin-a");
   });
 
@@ -89,7 +91,7 @@ describe("ActionBar", () => {
         onCommit={() => undefined}
       />,
     );
-    expect(screen.getByRole("button", { name: "Spear" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "חנית" })).toBeDisabled();
   });
 
   it("disables the action list while a turn is resolving", () => {
@@ -119,8 +121,8 @@ describe("ActionBar", () => {
       />,
     );
 
-    await userEvent.click(screen.getByRole("button", { name: "Spear" }));
-    expect(screen.getByRole("button", { name: "Goblin Warrior" })).not.toBeDisabled();
+    await userEvent.click(screen.getByRole("button", { name: "חנית" }));
+    expect(screen.getByRole("button", { name: "גובלין לוחם" })).not.toBeDisabled();
 
     rerender(
       <ActionBar
@@ -131,7 +133,7 @@ describe("ActionBar", () => {
         onCommit={() => undefined}
       />,
     );
-    expect(screen.getByRole("button", { name: "Goblin Warrior" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "גובלין לוחם" })).toBeDisabled();
   });
 
   it("closes the target picker when a new affordance frame drops the pending action", async () => {
@@ -151,8 +153,8 @@ describe("ActionBar", () => {
       />,
     );
 
-    await userEvent.click(screen.getByRole("button", { name: "Spear" }));
-    expect(screen.getByRole("button", { name: "Goblin Warrior" })).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "חנית" }));
+    expect(screen.getByRole("button", { name: "גובלין לוחם" })).toBeInTheDocument();
 
     rerender(
       <ActionBar
@@ -164,11 +166,11 @@ describe("ActionBar", () => {
       />,
     );
 
-    expect(screen.queryByRole("button", { name: "Goblin Warrior" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "גובלין לוחם" })).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: he.actions.dodge })).toBeInTheDocument();
   });
 
-  it("wraps the English action name in <bdi>", () => {
+  it("wraps the Hebrew action name in <bdi>", () => {
     const { container } = render(
       <ActionBar
         actions={[spear]}
@@ -179,7 +181,21 @@ describe("ActionBar", () => {
       />,
     );
     expect(Array.from(container.querySelectorAll("bdi"), (each) => each.textContent)).toContain(
-      "Spear",
+      "חנית",
     );
+  });
+
+  it("renders the Hebrew action name, not the English one", () => {
+    render(
+      <ActionBar
+        actions={[spear]}
+        catalogue={catalogue}
+        combatants={combatants}
+        disabled={false}
+        onCommit={() => undefined}
+      />,
+    );
+    expect(screen.getByText("חנית")).toBeInTheDocument();
+    expect(screen.queryByText("Spear")).not.toBeInTheDocument();
   });
 });

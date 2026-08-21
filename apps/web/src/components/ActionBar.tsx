@@ -45,13 +45,16 @@ export function ActionBar(props: ActionBarProps): JSX.Element {
     const universal = action.actionId === undefined ? actionLabel(action.actionType) : undefined;
     if (universal !== undefined) return <span>{universal}</span>;
 
-    // English name inside an RTL document. Hebrew names now exist and are
-    // served as `nameHebrew` on this catalogue entry, but this component
-    // still renders `nameEnglish`, so <bdi> stays mandatory here, not
-    // optional — switching to Hebrew labels is a deliberate follow-up, not
-    // blocked by missing data (the SRD itself is still English, ADR 0001).
+    // <bdi> stays mandatory even though this renders `nameHebrew`, not
+    // `nameEnglish`: the wrapper was never only about the name being
+    // English. Elsewhere in the log it isolates numeric roll traces
+    // (CombatLog's AttackLine), and here it isolates the fallback below —
+    // `action.actionId` on this line, `targetId` on the target-picker
+    // button further down — which is still Latin text whenever the
+    // catalogue lookup misses. Dropping <bdi> would leave that fallback
+    // case unisolated inside the surrounding RTL prose.
     const named = props.catalogue.find((each) => each.actionId === action.actionId);
-    return <bdi>{named?.nameEnglish ?? action.actionId ?? action.actionType}</bdi>;
+    return <bdi>{named?.nameHebrew ?? action.actionId ?? action.actionType}</bdi>;
   }
 
   if (pending !== null) {
@@ -69,7 +72,7 @@ export function ActionBar(props: ActionBarProps): JSX.Element {
                 props.onCommit(pending, targetId);
               }}
             >
-              <bdi>{named?.nameEnglish ?? targetId}</bdi>
+              <bdi>{named?.nameHebrew ?? targetId}</bdi>
             </button>
           );
         })}

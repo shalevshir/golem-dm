@@ -211,7 +211,7 @@ describe("App", () => {
     // what makes the check exercise the whole component, not `applyFrame` in
     // isolation.
     await waitFor(() => {
-      expect(screen.getByRole("button", { name: "Goblin Warrior 4/11" })).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "גובלין לוחם 4/11" })).toBeInTheDocument();
     });
   });
 

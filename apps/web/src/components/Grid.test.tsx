@@ -107,17 +107,18 @@ describe("Grid", () => {
     expect(onTileClick).toHaveBeenCalledWith([1, 2]);
   });
 
-  it("wraps every English name in <bdi> inside the RTL document", () => {
-    // The mixed-direction rule from apps/web/CLAUDE.md: this component
-    // renders `nameEnglish`, not the `nameHebrew` the catalogue now also
-    // carries (switching is a deliberate follow-up, not blocked by missing
-    // data), so English names are rendered inside an RTL Hebrew UI and MUST
-    // be isolated or the punctuation around them reorders. Three distinct
+  it("wraps every isolated fragment in <bdi> inside the RTL document", () => {
+    // The mixed-direction rule from apps/web/CLAUDE.md: this component now
+    // renders `nameHebrew`, matching the surrounding RTL document, so the
+    // combatant name itself is no longer an LTR fragment -- but <bdi> stays
+    // load-bearing around it because the `combatantId` fallback used when
+    // the catalogue lookup misses (see "falls back to the combatant id"
+    // below) is still Latin. Tile coordinates and the HP ratio are LTR
+    // content regardless of catalogue data (digits with a "," / "/"
+    // separator), so they need isolating on their own terms. Three distinct
     // fragment kinds get isolated: combatant names, tile coordinates, and HP
-    // ratios — all three are LTR content (English text, or digits with a
-    // "," / "/" separator) sitting inside an RTL document, so all three must
-    // appear as their own <bdi> node, not merely somewhere in the rendered
-    // text.
+    // ratios — all three must appear as their own <bdi> node, not merely
+    // somewhere in the rendered text.
     const { container } = render(
       <Grid
         snapshot={snapshot}
@@ -130,8 +131,8 @@ describe("Grid", () => {
     );
 
     const isolated = Array.from(container.querySelectorAll("bdi"), (each) => each.textContent);
-    expect(isolated).toContain("Goblin Warrior");
-    expect(isolated).toContain("Guard");
+    expect(isolated).toContain("גובלין לוחם");
+    expect(isolated).toContain("שומר");
     // Tile-coordinate fragments, e.g. "(0,1)" from the reachable-tile list.
     expect(isolated).toContain("(0,1)");
     expect(isolated).toContain("(1,2)");
@@ -152,5 +153,20 @@ describe("Grid", () => {
     );
     const isolated = Array.from(container.querySelectorAll("bdi"), (each) => each.textContent);
     expect(isolated).toContain("hero");
+  });
+
+  it("renders the Hebrew name, not the English one", () => {
+    render(
+      <Grid
+        snapshot={snapshot}
+        affordances={affordances}
+        catalogue={catalogue}
+        selectedTile={null}
+        onTileClick={() => undefined}
+        onCombatantClick={() => undefined}
+      />,
+    );
+    expect(screen.getByText(/גובלין לוחם/)).toBeInTheDocument();
+    expect(screen.queryByText(/Goblin Warrior/)).not.toBeInTheDocument();
   });
 });

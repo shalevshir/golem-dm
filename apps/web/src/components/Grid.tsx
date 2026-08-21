@@ -100,7 +100,7 @@ export function Grid(props: GridProps): JSX.Element {
   }, [snapshot, affordances, selectedTile]);
 
   const nameOf = (combatantId: string): string =>
-    props.catalogue.find((each) => each.combatantId === combatantId)?.nameEnglish ?? combatantId;
+    props.catalogue.find((each) => each.combatantId === combatantId)?.nameHebrew ?? combatantId;
 
   return (
     <div className="grid">
