@@ -107,6 +107,25 @@ export interface TacticalTurnMetrics {
 }
 
 /**
+ * Per-turn narrative-agent metrics, mirroring `TacticalTurnMetrics` above for
+ * the other agent role. Deliberately NOT `NarrativeFinish` (`@ai-dm/agents`)
+ * plus an `actorId` — that type's `usage`/`error` fields come from the
+ * Hebrew agent's own `onFinish` callback (wired separately in `main.ts`),
+ * which the pipeline never sees, and neither field exists at all when a
+ * fallback rung produced the turn with no model call behind it. What the
+ * pipeline itself knows, for every narrated turn regardless of which rung
+ * produced it, is exactly these four fields.
+ */
+export interface NarrativeTurnMetrics {
+  actorId: string;
+  /** Which rung of the degradation ladder produced this narration. */
+  source: NarrationSource;
+  /** Wall time, via `ports.clock()`, around the narration for this turn. */
+  latencyMs: number;
+  promptVersion: string;
+}
+
+/**
  * Where the metrics go is a transport decision, not a core one: core calls
  * this port, the transport decides it writes a structured log line. Reading
  * `TimingPort.timings` from the transport instead was rejected — it is an
@@ -117,6 +136,16 @@ export interface TacticalTurnMetrics {
  */
 export interface MetricsPort {
   recordTacticalTurn(metrics: TacticalTurnMetrics): void;
+  /**
+   * One call per narrated turn, from `narrate()` below — the only place
+   * that knows both which actor is narrating and which rung produced the
+   * text. Without this, a narration that died mid-stream and fell back to
+   * the deterministic renderer is indistinguishable in the log from one
+   * that streamed cleanly from the model: `apps/server/CLAUDE.md` requires
+   * per-turn per-agent instrumentation, and `source` here is what makes
+   * that distinction visible.
+   */
+  recordNarrativeTurn(record: NarrativeTurnMetrics): void;
 }
 
 export interface TurnPorts {
@@ -311,6 +340,11 @@ export async function* handleCommand(
       recentNarrations: session.recentNarrations,
     });
 
+    // `ports.clock()`, never a bare `Date.now()`: this codebase injects its
+    // clock specifically so a test can hold time fixed (every other test in
+    // this file's `portsWith` does) or advance it on a known schedule, and a
+    // wall-clock read here would defeat that.
+    const startedAt = ports.clock();
     let text = "";
     for await (const chunk of untilDeadline(ports.narrative.stream(input), deadline)) {
       text += chunk;
@@ -346,6 +380,18 @@ export async function* handleCommand(
         yield { type: "narrative_token", streamId, text: chunk };
       }
     }
+
+    // One call per narrated turn, whichever rung produced it — the pipeline
+    // is the only place that knows `actorId` and `source`; the agent itself
+    // knows neither. `latencyMs` is the two `ports.clock()` reads above and
+    // here, not wall time, for the same determinism reason `startedAt` is.
+    const latencyMs = Date.parse(ports.clock()) - Date.parse(startedAt);
+    ports.metrics?.recordNarrativeTurn({
+      actorId,
+      source,
+      latencyMs,
+      promptVersion: NARRATIVE_PROMPT_VERSION,
+    });
 
     // No `.trim()`: this must carry exactly the concatenation of the
     // narrative_token chunks yielded above, so that a replay cannot diverge

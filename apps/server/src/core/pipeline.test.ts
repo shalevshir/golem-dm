@@ -1,10 +1,11 @@
 import { describe, expect, it } from "vitest";
 import { validateExecuteTurn } from "@ai-dm/rules-engine";
-import type { NarrativePort, TacticalAgent } from "@ai-dm/agents";
+import type { NarrativeFinish, NarrativePort, TacticalAgent } from "@ai-dm/agents";
 import {
   createAgentRuntime,
   createDeterministicNarrative,
   createFakePort,
+  createHebrewNarrative,
   createTacticalAgent,
   DEFAULT_MODEL_ROUTING,
   NARRATIVE_PROMPT_VERSION,
@@ -20,7 +21,7 @@ import type {
 import { createInMemoryEventStore } from "./event-store.js";
 import type { EventStore } from "./event-store.js";
 import { SNAPSHOT_EVERY, handleCommand } from "./pipeline.js";
-import type { TacticalTurnMetrics, TurnPorts } from "./pipeline.js";
+import type { NarrativeTurnMetrics, TacticalTurnMetrics, TurnPorts } from "./pipeline.js";
 import { createSession, loadSession } from "./session.js";
 import type { Session } from "./session.js";
 
@@ -962,6 +963,9 @@ describe("handleCommand — tactical metrics", () => {
         recordTacticalTurn(metrics) {
           recorded.push(metrics);
         },
+        // Not under test here — the narrative side has its own describe
+        // block below — but `MetricsPort` requires both methods.
+        recordNarrativeTurn: () => undefined,
       },
     };
 
@@ -1002,6 +1006,113 @@ describe("handleCommand — tactical metrics", () => {
     const session = await freshSession(store);
     const frames = await drain(handleCommand(session, dodge("hero"), portsWith(store)));
     expect(frames.some((each) => each.type === "error")).toBe(false);
+  });
+});
+
+// `onFinish` (the Hebrew agent's own instrumentation, `@ai-dm/agents`) and
+// `recordNarrativeTurn` (the pipeline's own, below) are two independent
+// sinks fed by two different callers. Collecting both into one shared array
+// and asserting with `.some(...)` would stay green even if
+// `recordNarrativeTurn` were never called, since `onFinish` firing alone
+// would already satisfy the `.some`. These tests keep the two sinks in
+// separate arrays and assert on the `recordNarrativeTurn` one specifically,
+// so a missing call is the only way to fail them.
+describe("handleCommand — narrative metrics", () => {
+  const USAGE = { promptTokens: 900, completionTokens: 40, totalTokens: 940 };
+
+  /**
+   * Drives one hero dodge with both hostiles already dead — the same
+   * fixture the degradation ladder's "feeds each narration into the next
+   * turn's window" test (below) uses. Without it, the post-turn enemy sweep
+   * would also call `narrative.stream(...)`, and a `createHebrewNarrative`
+   * backed by `createFakePort({ stream: [[...]] })` only scripts one such
+   * call — a second would throw "Fake port script exhausted" instead of
+   * letting the assertions below run. Killing the hostiles keeps every test
+   * here to exactly the one narrated turn its "one call" assertions
+   * describe, regardless of which `narrative`/`clock` port it is given.
+   */
+  async function narratedHeroTurn(overrides: Partial<TurnPorts>): Promise<ServerFrame[]> {
+    const store = createInMemoryEventStore();
+    const session = await freshSession(store);
+    session.state = {
+      ...session.state,
+      combatants: session.state.combatants.map((each) =>
+        each.faction === "hostile" ? { ...each, status: "dead" as const } : each,
+      ),
+    };
+    const ports: TurnPorts = { ...portsWith(store), ...overrides };
+    return drain(handleCommand(session, dodge("hero"), ports));
+  }
+
+  it("calls recordNarrativeTurn once per narrated turn, not just onFinish", async () => {
+    const finishes: NarrativeFinish[] = [];
+    const metricsRecords: NarrativeTurnMetrics[] = [];
+
+    await narratedHeroTurn({
+      narrative: createHebrewNarrative({
+        runtime: createAgentRuntime({
+          routing: DEFAULT_MODEL_ROUTING,
+          port: createFakePort({ stream: [[{ type: "finish", text: "", usage: USAGE }]] }),
+        }),
+        onFinish: (finish) => finishes.push(finish),
+      }),
+      metrics: {
+        recordTacticalTurn: () => undefined,
+        recordNarrativeTurn: (record) => metricsRecords.push(record),
+      },
+    });
+
+    // Proves the double actually ran — if this were 0, the assertion below
+    // would be vacuous for the wrong reason (no stream ran at all), rather
+    // than because `recordNarrativeTurn` specifically was skipped.
+    expect(finishes).toHaveLength(1);
+    // The claim that matters: the PIPELINE's own sink fired, once, for the
+    // hero's turn. The fake port's script has no text-delta chunks, so the
+    // stream yields nothing and `narrate()` (pipeline.ts) falls back to the
+    // deterministic rung — hence `source: "deterministic"` here.
+    expect(metricsRecords).toEqual([
+      {
+        actorId: "hero",
+        source: "deterministic",
+        latencyMs: 0,
+        promptVersion: NARRATIVE_PROMPT_VERSION,
+      },
+    ]);
+  });
+
+  it("measures latencyMs from the injected clock, not wall time", async () => {
+    // An ADVANCING clock, unlike the fixed one `portsWith` uses everywhere
+    // else in this file: every `ports.clock()` call across the whole turn
+    // returns a value STEP_MS later than the previous call, whoever makes
+    // it. `narrate()`'s own start/end reads (pipeline.ts) are always two
+    // CONSECUTIVE clock() calls — nothing else in `narrate()` reads the
+    // clock in between — so their difference is exactly STEP_MS no matter
+    // how many other emit() calls elsewhere in the turn drew from the same
+    // clock first. A fixed clock makes latencyMs 0 under every other test in
+    // this file — correct for those, since they hold time still on purpose —
+    // but it would also hide a hardcoded or inverted latency computation
+    // completely. This is the one test in the file that can catch that.
+    const STEP_MS = 250;
+    const startMs = Date.parse("2026-08-19T10:00:00.000Z");
+    let calls = 0;
+    const advancingClock = (): string => {
+      const value = new Date(startMs + calls * STEP_MS).toISOString();
+      calls += 1;
+      return value;
+    };
+
+    const metricsRecords: NarrativeTurnMetrics[] = [];
+    await narratedHeroTurn({
+      clock: advancingClock,
+      narrative: scriptedNarrative(["אלדד עומד במקומו."]),
+      metrics: {
+        recordTacticalTurn: () => undefined,
+        recordNarrativeTurn: (record) => metricsRecords.push(record),
+      },
+    });
+
+    expect(metricsRecords).toHaveLength(1);
+    expect(metricsRecords[0]?.latencyMs).toBe(STEP_MS);
   });
 });
 
