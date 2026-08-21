@@ -44,7 +44,10 @@ export type SpawnSpec = MonsterSpawn | CharacterSpawn;
 
 export interface EncounterDefinition {
   encounterId: string;
-  /** English. Says what this encounter is, for an operator. See sceneEnglish for the narrator's copy. */
+  /**
+   * English. Says what this encounter is, for an operator. See sceneEnglish
+   * for the narrator's copy.
+   */
   descriptionEnglish: string;
   /**
    * English atmosphere for the narrative agent: ground, light, sound. Held
