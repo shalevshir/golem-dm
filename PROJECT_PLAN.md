@@ -531,9 +531,35 @@ inside `EncounterCatalogue.characters`; and adds `nameHebrew` to every
 creature, action, weapon and armor row plus a required `grammaticalGender` on
 every character sheet.
 
-**Spec #2 — the narrative agent**, not yet designed. It can now assume
+Spec #1 **shipped on 2026-08-21**, merged to `main` as `7f99b38` (30 commits,
+suite 931/71 → 1042/76). Correction C-13 is closed.
+
+**Spec #2 — the narrative agent**, designed 2026-08-21:
+[`docs/superpowers/specs/2026-08-21-narrative-agent-design.md`](docs/superpowers/specs/2026-08-21-narrative-agent-design.md).
+It can now assume
 Hebrew names on every creature and action, and a real `grammaticalGender` to
-narrate by, rather than having to invent either at prompt time.
+narrate by, rather than having to invent either at prompt time. Three
+constraints it inherits from spec #1, none accidental: death saves are
+implemented (`rollDeathSave`) but not driven by the encounter pipeline, so
+`diesAtZeroHp` is pinned `true` and a hero dies at 0 HP rather than falling
+Unconscious (§8 of `RULES_REFERENCE.md`); `DerivedCharacter`'s `z.record`
+fields infer `Partial<Record<K, V>>` under zod 3, so a consumer reads
+`savingThrows.str` as `number | undefined` even though the derivation always
+fills every key; and the web client still renders `nameEnglish` inside
+`<bdi>`, which is a deliberate follow-up rather than missing data.
+
+The design keeps `NarrativePort` unchanged and puts a pure narration brief
+between the engine and both narrators: the rules engine bands damage into a
+severity rather than handing the model a number, the deterministic renderer
+is rewritten in Hebrew so a failed provider never prints English, and the
+pipeline owns one degradation ladder covering both a provider error and a
+spent turn budget. It folds in two of the three inherited constraints: the
+web client switches to `nameHebrew`, closing the §4.3 follow-up, and the
+`unconscious` beat is rendered but stays unreachable while `diesAtZeroHp`
+is pinned. It also closes §4.1's "Step 9" rules-digest task, for the
+narrative role only — wiring the digest into the tactical prompt would
+change the prompt the step 7b benchmark measured, which is the sole
+justification for `DEFAULT_MODEL_ROUTING.tactical`.
 
 The roadmap's step 9 row (§4 above) stays **⬜ not started**: spec #1 is
-prerequisite infrastructure, not the narrative agent itself.
+prerequisite infrastructure, and spec #2 is a design, not the agent.
