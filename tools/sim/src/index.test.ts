@@ -181,3 +181,104 @@ describe("main — --live", () => {
     expect(report.overLengthOutputs).toBe(0);
   }, 15_000);
 });
+
+describe("main — --mode narrative --review-sheet", () => {
+  const originalArgv = process.argv;
+  const originalExitCode = process.exitCode;
+  const KEY_VARS = ["ANTHROPIC_API_KEY", "GOOGLE_GENERATIVE_AI_API_KEY", "OPENAI_API_KEY"] as const;
+  const savedKeys = new Map<string, string | undefined>();
+  let writtenReportDir: string | undefined;
+
+  beforeEach(() => {
+    for (const name of KEY_VARS) {
+      savedKeys.set(name, process.env[name]);
+      Reflect.deleteProperty(process.env, name);
+    }
+  });
+
+  afterEach(() => {
+    process.argv = originalArgv;
+    process.exitCode = originalExitCode;
+    for (const [name, value] of savedKeys) {
+      if (value === undefined) Reflect.deleteProperty(process.env, name);
+      else process.env[name] = value;
+    }
+    savedKeys.clear();
+    if (writtenReportDir !== undefined) rmSync(writtenReportDir, { recursive: true, force: true });
+    writtenReportDir = undefined;
+    vi.restoreAllMocks();
+  });
+
+  it("prints the review sheet to stdout (process.stdout.write), separate from the Wrote-file lines on stderr", async () => {
+    // The scripted (non-live) path — the one this task must verify the
+    // renderer end to end through, per its own scope boundary: no network,
+    // no API key, the same NARRATIVE_SMOKE_TEXT every other smoke narrative
+    // test reads. `process.stdout.write`, not `console.log`: this repo's
+    // `no-console` lint rule only allows warn/error.
+    const writeSpy = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    process.argv = ["node", "index.js", "--mode", "narrative", "--review-sheet"];
+
+    await main();
+
+    expect(process.exitCode).toBeUndefined();
+    expect(writeSpy).toHaveBeenCalledTimes(1);
+    const sheet = String(writeSpy.mock.calls[0]?.[0]);
+    expect(sheet).toContain("# Hebrew review sheet");
+    // The smoke port's own fixed reply (index.ts's NARRATIVE_SMOKE_TEXT) —
+    // proof the sheet was built from this run's real samples, not a stub.
+    expect(sheet).toContain("אלדד עומד במקומו.");
+    expect(sheet).toContain("### Weapons");
+    expect(sheet).toContain("### Conditions");
+
+    const jsonLine = warnSpy.mock.calls
+      .map((call) => String(call[0]))
+      .find((line) => line.endsWith(".json"));
+    if (jsonLine === undefined) throw new Error("expected a 'Wrote ...report.json' line");
+    writtenReportDir = dirname(jsonLine.replace(/^Wrote /, ""));
+  });
+
+  it("does not print anything to stdout when --review-sheet is absent", async () => {
+    const writeSpy = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    process.argv = ["node", "index.js", "--mode", "narrative"];
+
+    await main();
+
+    expect(writeSpy).not.toHaveBeenCalled();
+
+    const jsonLine = warnSpy.mock.calls
+      .map((call) => String(call[0]))
+      .find((line) => line.endsWith(".json"));
+    if (jsonLine === undefined) throw new Error("expected a 'Wrote ...report.json' line");
+    writtenReportDir = dirname(jsonLine.replace(/^Wrote /, ""));
+  });
+
+  it("still prints a well-formed sheet under --live with no keys set, even with zero samples", async () => {
+    // Mirrors the "main — --live" describe block's no-keys tests above: every
+    // stream ends in-band on the missing key before any token arrives, so
+    // buildReviewSheetInput's every sample is dropped as errored — this
+    // proves the sheet degrades to "no samples" rather than throwing, and
+    // still carries the name/glossary/condition tables, which come from
+    // disk rather than the run.
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const writeSpy = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    process.argv = ["node", "index.js", "--live", "--mode", "narrative", "--review-sheet"];
+
+    await main();
+
+    expect(process.exitCode).toBeUndefined();
+    expect(writeSpy).toHaveBeenCalledTimes(1);
+    const sheet = String(writeSpy.mock.calls[0]?.[0]);
+    expect(sheet).toContain("# Hebrew review sheet");
+    expect(sheet).not.toContain("### Sample 1");
+    expect(sheet).toContain("### Weapons");
+
+    const jsonLine = warnSpy.mock.calls
+      .map((call) => String(call[0]))
+      .find((line) => line.endsWith(".json"));
+    if (jsonLine === undefined) throw new Error("expected a 'Wrote ...report.json' line");
+    writtenReportDir = dirname(jsonLine.replace(/^Wrote /, ""));
+  }, 15_000);
+});

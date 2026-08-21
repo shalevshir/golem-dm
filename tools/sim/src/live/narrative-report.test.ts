@@ -83,6 +83,34 @@ describe("renderNarrativeMarkdown", () => {
     expect(markdown).not.toContain("provider error");
   });
 
+  it("annotates p95 the same way it annotates p50 when samples errored", () => {
+    // Regression check: the annotation used to suffix only the p50 line,
+    // wrongly implying p95 was computed from every sample including the
+    // errored ones. Both are computed from the identical ttftValues array.
+    const markdown = renderNarrativeMarkdown(
+      report({ samples: samplesWithErrors(9, 2), erroredSamples: 2 }),
+    );
+    expect(markdown).toMatch(/p50: \d+ ms \(exit criterion: < 1500 ms\) — errored samples excluded/);
+    expect(markdown).toMatch(/p95: \d+ ms — errored samples excluded/);
+  });
+
+  it("annotates neither TTFT line when nothing errored", () => {
+    const markdown = renderNarrativeMarkdown(report({ erroredSamples: 0 }));
+    expect(markdown).not.toContain("errored samples excluded");
+  });
+
+  it("states the cost figure excludes cache-read tokens and is a lower bound, even on a healthy run", () => {
+    // Regression check for finding 4: this used to say nothing about
+    // cache-read exclusion at all, on a run where costIsUnderreported is
+    // false — exactly the run this benchmark's own cache-stable prompt
+    // produces in practice.
+    const markdown = renderNarrativeMarkdown(
+      report({ usage: { ...report().usage, costIsUnderreported: false } }),
+    );
+    expect(markdown).toContain("excludes cache-read tokens");
+    expect(markdown).toContain("REGARDLESS");
+  });
+
   it("calls out errored samples and excludes them from the discipline denominator", () => {
     // Regression check for finding 1's markdown-surfacing requirement: a
     // reader must never mistake an errored-stream count for a discipline

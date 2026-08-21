@@ -85,4 +85,21 @@ describe("parseArgs", () => {
     expect(() => parseArgs(["--scenario", "melee-brawl"])).toThrow("--scenario");
     expect(() => parseArgs(["--seed", "42"])).toThrow("--seed");
   });
+
+  it("defaults reviewSheet to false", () => {
+    expect(parseArgs([]).reviewSheet).toBe(false);
+  });
+
+  it("reads --review-sheet under --mode narrative", () => {
+    expect(parseArgs(["--mode", "narrative", "--review-sheet"]).reviewSheet).toBe(true);
+  });
+
+  it("reads --review-sheet under --mode narrative --live too", () => {
+    expect(parseArgs(["--mode", "narrative", "--live", "--review-sheet"]).reviewSheet).toBe(true);
+  });
+
+  it("rejects --review-sheet outside --mode narrative, including the default mode", () => {
+    expect(() => parseArgs(["--review-sheet"])).toThrow("--mode narrative");
+    expect(() => parseArgs(["--mode", "probe", "--review-sheet"])).toThrow("--mode narrative");
+  });
 });

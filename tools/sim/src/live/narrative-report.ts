@@ -57,13 +57,16 @@ export function renderNarrativeMarkdown(report: NarrativeRunReport): string {
     lines.push("");
   }
 
+  // Both lines get the same "— errored samples excluded" suffix, under the
+  // same condition: p50 and p95 are computed from the identical `ttftValues`
+  // array (narrative.ts), which already omits an errored sample's ttftMs
+  // entirely — annotating one percentile but not the other would wrongly
+  // imply only p50 is affected.
+  const ttftSuffix = report.erroredSamples > 0 ? " — errored samples excluded" : "";
   lines.push("## Time to first token");
   lines.push("");
-  lines.push(
-    `- p50: ${report.ttftMsP50.toFixed(0)} ms (exit criterion: < 1500 ms)` +
-      (report.erroredSamples > 0 ? " — errored samples excluded" : ""),
-  );
-  lines.push(`- p95: ${report.ttftMsP95.toFixed(0)} ms`);
+  lines.push(`- p50: ${report.ttftMsP50.toFixed(0)} ms (exit criterion: < 1500 ms)${ttftSuffix}`);
+  lines.push(`- p95: ${report.ttftMsP95.toFixed(0)} ms${ttftSuffix}`);
   lines.push("");
 
   const disciplineSampleCount = report.samples.length - report.erroredSamples;
@@ -86,10 +89,17 @@ export function renderNarrativeMarkdown(report: NarrativeRunReport): string {
   lines.push(
     `- Cost: ${money(report.usage.costUsd)} total, ${money(report.usage.costPerNarrationUsd)} per narration`,
   );
-  // Declared unconditionally — not only inside the costIsUnderreported branch
-  // below, which does not fire on a healthy run and would otherwise leave
-  // this gap undeclared for the common case.
+  // Both notes below are declared unconditionally — not only inside the
+  // costIsUnderreported branch that follows, which does not fire on a
+  // healthy run and would otherwise leave these two gaps undeclared for the
+  // common case.
   lines.push("- Cached-token share: not reported — no adapter in this repo surfaces a cache-read count.");
+  lines.push(
+    "- Note: the cost above excludes cache-read tokens and is a lower bound REGARDLESS of " +
+      "the under-reported flag below — `promptTokens` is the provider's `input_tokens`, which " +
+      "does not include `cache_read_input_tokens` (see `NarrativeUsageSummary.costIsUnderreported`'s " +
+      "doc comment in live/narrative.ts).",
+  );
   if (report.usage.costIsUnderreported) {
     lines.push("");
     lines.push(

@@ -2865,7 +2865,7 @@ Expected: PASS, exit 0.
 - [ ] **Step 6: Take the live measurement**
 
 ```bash
-pnpm sim -- --live --mode narrative
+pnpm --filter @ai-dm/sim start --live --mode narrative
 ```
 
 Record in the report, and in `PROJECT_PLAN.md` (Task 17):
@@ -2968,7 +2968,7 @@ Flag explicitly for review: the deterministic renderer's template wording, which
 - [ ] **Step 4: Generate and commit the sheet**
 
 ```bash
-pnpm sim -- --live --mode narrative --review-sheet > docs/prompts/hebrew-review-2026-08-21.md
+pnpm --filter @ai-dm/sim --silent start --live --mode narrative --review-sheet > docs/prompts/hebrew-review-2026-08-21.md
 ```
 
 Add `--review-sheet` to `KNOWN_FLAGS` in `tools/sim/src/cli.ts`.

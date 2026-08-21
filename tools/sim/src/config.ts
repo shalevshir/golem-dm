@@ -95,6 +95,14 @@ export interface BenchmarkConfig {
   arms: readonly Arm[];
   seeds: readonly number[];
   scenarioIds: readonly string[];
+  /**
+   * Only meaningful with `mode: "narrative"` — `cli.ts` rejects it otherwise
+   * (the same "reject rather than silently no-op" standard `--arms` outside
+   * `--live` already holds to). Prints `live/review-sheet.ts`'s
+   * `renderReviewSheet` output to stdout, built from this run's own
+   * narrative samples plus the SRD name/glossary/condition tables.
+   */
+  reviewSheet: boolean;
 }
 
 export const DEFAULT_CONFIG: BenchmarkConfig = {
@@ -103,4 +111,5 @@ export const DEFAULT_CONFIG: BenchmarkConfig = {
   arms: [SMOKE_ARM],
   seeds: DEFAULT_SEEDS,
   scenarioIds: ALL_SCENARIO_IDS,
+  reviewSheet: false,
 };

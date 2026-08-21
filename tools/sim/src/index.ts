@@ -19,6 +19,7 @@ import { parseArgs } from "./cli.js";
 import { runLive } from "./live/run.js";
 import { runNarrativeBenchmark, SCRIPTED_BRIEFS } from "./live/narrative.js";
 import { writeNarrativeReport } from "./live/narrative-report.js";
+import { buildReviewSheetInput, renderReviewSheet } from "./live/review-sheet.js";
 import { runSmoke } from "./smoke/run.js";
 import { writeReport } from "./run/report.js";
 
@@ -80,6 +81,7 @@ async function runNarrativeMode(options: {
   generatedAt: string;
   gitCommit: string;
   live: boolean;
+  reviewSheet: boolean;
 }): Promise<{ jsonPath: string; markdownPath: string }> {
   const runtime = createAgentRuntime({
     routing: DEFAULT_MODEL_ROUTING,
@@ -90,7 +92,7 @@ async function runNarrativeMode(options: {
     ? await runNarrativeBenchmark({ runtime })
     : await runNarrativeBenchmark({ runtime, now: narrativeSmokeClock() });
 
-  return writeNarrativeReport(
+  const written = writeNarrativeReport(
     {
       ...report,
       runId: options.runId,
@@ -101,6 +103,21 @@ async function runNarrativeMode(options: {
     },
     RUNS_DIR,
   );
+
+  // `process.stdout.write`, not `console.log`: this repo's `no-console`
+  // lint rule only allows `warn`/`error` (see apps/server/src/main.ts's own
+  // note on the same rule), and the sheet is the command's actual
+  // deliverable rather than a log line, so a logger would be the wrong tool
+  // even where one exists. Deliberately separate from the `Wrote ...` lines
+  // `main()` prints below (console.warn, i.e. stderr):
+  // `pnpm --filter @ai-dm/sim start --live --mode narrative --review-sheet >
+  // docs/prompts/hebrew-review-....md` redirects stdout only, so this is the
+  // one thing that command's redirect captures.
+  if (options.reviewSheet) {
+    process.stdout.write(`${renderReviewSheet(buildReviewSheetInput(report.samples))}\n`);
+  }
+
+  return written;
 }
 
 export async function main(): Promise<void> {
@@ -113,6 +130,7 @@ export async function main(): Promise<void> {
       generatedAt,
       gitCommit: gitCommit(),
       live: config.live,
+      reviewSheet: config.reviewSheet,
     });
     console.warn(`Wrote ${jsonPath}`);
     console.warn(`Wrote ${markdownPath}`);

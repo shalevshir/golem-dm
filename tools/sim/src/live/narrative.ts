@@ -276,6 +276,16 @@ export interface NarrativeUsageSummary {
   /**
    * Shaped like `run/report.ts`'s `costIsUnderreported`: true when a stream
    * finished without reporting usage, so the cost above is a lower bound.
+   *
+   * This detects only ABSENT usage — a finish with no usage object at all.
+   * It says nothing about usage that IS present but itself undercounts:
+   * `providers/vercel.ts` passes the AI SDK's `promptTokens` through
+   * verbatim, and for Anthropic that is `input_tokens`, which excludes
+   * `cache_read_input_tokens`. So `costUsd` above is a lower bound on a
+   * cache-stable prompt (this benchmark's prompt is exactly that — three
+   * static tiers, byte-identical across every sample) even when this flag
+   * reads `false`. `narrative-report.ts`'s Cost section says so
+   * unconditionally, not only inside this flag's own branch.
    */
   costIsUnderreported: boolean;
   /**
@@ -416,7 +426,16 @@ export async function runNarrativeBenchmark(
 
   const modelId = options.runtime.specFor("narrative").modelId;
   const cost = costUsd(modelId, { promptTokens, completionTokens });
-  const costPerNarrationUsd = cost === null || samples.length === 0 ? null : cost / samples.length;
+  // Divided by the samples that actually produced a narration, never by
+  // `samples.length`: an errored sample contributes nothing to `cost` (its
+  // usage, if any, is excluded from `promptTokens`/`completionTokens`
+  // above), so dividing by the full count would understate the true cost of
+  // a successful narration — undermining the markdown report's own claim
+  // that an errored sample "is excluded from every count and percentile
+  // below" it (narrative-report.ts).
+  const disciplineSampleCount = samples.length - erroredSamples;
+  const costPerNarrationUsd =
+    cost === null || disciplineSampleCount === 0 ? null : cost / disciplineSampleCount;
 
   return {
     samples,

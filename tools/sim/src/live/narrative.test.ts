@@ -216,6 +216,42 @@ describe("runNarrativeBenchmark", () => {
     expect(report.usage.costUsd).not.toBeNull();
   });
 
+  it("divides cost by the narrations that actually happened, not by the full errored+clean sample count", async () => {
+    // Regression check for the review's finding: dividing by samples.length
+    // (which includes the errored sample) would understate the cost of a
+    // narration that actually happened. One errored sample among otherwise-
+    // clean ones is the realistic shape — a single rate limit, not every
+    // call failing at once.
+    const report = await runNarrativeBenchmark({
+      runtime: createAgentRuntime({
+        routing: DEFAULT_MODEL_ROUTING,
+        port: createFakePort({
+          stream: [
+            [{ type: "error" as const, error: { code: "provider_error" as const, message: "boom" } }],
+            ...SCRIPTED_BRIEFS.slice(1).map(() => [
+              { type: "text-delta" as const, text: "אלדד עומד במקומו." },
+              { type: "finish" as const, text: "אלדד עומד במקומו.", usage: USAGE },
+            ]),
+          ],
+        }),
+      }),
+      now: (() => { let t = 0; return () => (t += 100); })(),
+    });
+
+    expect(report.erroredSamples).toBe(1);
+    const disciplineSampleCount = report.samples.length - report.erroredSamples;
+    expect(report.usage.costUsd).not.toBeNull();
+    const cost = report.usage.costUsd ?? 0;
+
+    expect(report.usage.costPerNarrationUsd).toBeCloseTo(cost / disciplineSampleCount, 10);
+    // The bug this guards against: dividing by the full sample count instead
+    // (including the one that errored) would produce a visibly different,
+    // smaller number — proven false here rather than merely proving the
+    // correct value true, so a regression to the old divisor is caught even
+    // if it happens to round to the same displayed figure at 4 decimals.
+    expect(report.usage.costPerNarrationUsd).not.toBeCloseTo(cost / report.samples.length, 10);
+  });
+
   it("excludes an errored stream from usage, every classification counter, and the TTFT percentiles", async () => {
     const report = await runNarrativeBenchmark({
       runtime: createAgentRuntime({

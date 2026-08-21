@@ -11,7 +11,14 @@ import { scenarioById } from "./scenarios/index.js";
 const MODES = ["probe", "encounter", "both", "narrative"] as const;
 type Mode = (typeof MODES)[number];
 
-const KNOWN_FLAGS = ["--live", "--mode", "--seeds", "--scenarios", "--arms"] as const;
+const KNOWN_FLAGS = [
+  "--live",
+  "--mode",
+  "--seeds",
+  "--scenarios",
+  "--arms",
+  "--review-sheet",
+] as const;
 
 function isMode(value: string): value is Mode {
   return (MODES as readonly string[]).includes(value);
@@ -95,6 +102,18 @@ export function parseArgs(argv: readonly string[]): BenchmarkConfig {
     );
   }
 
+  // `--review-sheet` renders live/review-sheet.ts's review sheet from this
+  // run's own narrative samples — meaningless outside `--mode narrative`,
+  // the same reasoning `--arms` is rejected under, below and above. Checked
+  // against `rawMode` (not the resolved mode) so the default ("both") is
+  // caught too, exactly like the `--arms` check already does.
+  if (argv.includes("--review-sheet") && rawMode !== "narrative") {
+    throw new Error(
+      `--review-sheet only applies to --mode narrative; it renders a review sheet from that ` +
+        `mode's own samples. Pass --mode narrative, or drop --review-sheet.`,
+    );
+  }
+
   // `runSmoke` always benchmarks `SMOKE_ARM` and never reads `config.arms` — a
   // scripted port answers identically regardless of which model id labels the
   // record, so honouring `--arms` outside `--live` would either be a no-op
@@ -117,5 +136,6 @@ export function parseArgs(argv: readonly string[]): BenchmarkConfig {
     seeds: rawSeeds === undefined ? DEFAULT_CONFIG.seeds : parseSeeds(rawSeeds),
     scenarioIds:
       rawScenarios === undefined ? DEFAULT_CONFIG.scenarioIds : parseScenarios(rawScenarios),
+    reviewSheet: argv.includes("--review-sheet"),
   };
 }
