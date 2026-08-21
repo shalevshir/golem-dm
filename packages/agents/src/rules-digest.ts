@@ -1,3 +1,5 @@
+// Content is CC-BY-4.0; see NOTICE.md.
+//
 // A curated English summary of the 5e rules a prompt tier needs, pinned into
 // the cache-stable prefix (PROJECT_PLAN.md section 4.1).
 //
@@ -24,18 +26,18 @@ export const RULES_DIGEST_VERSION = "2026-08-21.1";
 
 export const RULES_DIGEST = `RULES REFERENCE (D&D 5th edition, 2024 rules)
 
-Action economy. On its turn a creature may take one action, one bonus action,
-and movement up to its Speed, in any order. A reaction can be taken on any
-turn, including its own; once taken, it cannot be taken again until the start
-of its next turn.
+Action economy. On its turn a creature may take one action, one Bonus Action
+if a feature grants one, and movement up to its Speed, in any order. A
+reaction can be taken on any turn, including its own; once taken, it cannot
+be taken again until the start of its next turn.
 
 Conditions and what they mean:
-- Blinded: cannot see; attacks against it have Advantage, its own have Disadvantage.
+- Blinded: cannot see and automatically fails any ability check that requires sight; attacks against it have Advantage, its own have Disadvantage.
 - Charmed: cannot attack the charmer or target it with damaging abilities or magic; the charmer has Advantage on social checks against it.
-- Deafened: cannot hear.
+- Deafened: cannot hear and automatically fails any ability check that requires hearing.
 - Frightened: Disadvantage on ability checks and attack rolls while the source is in sight; cannot willingly move closer to it.
-- Grappled: Speed 0; Disadvantage on attacks against anyone but the grappler; ends by a successful Athletics or Acrobatics check to escape, if the grappler becomes Incapacitated, if the grappler releases it, or if the two are separated beyond the grapple's range.
-- Incapacitated: no action, bonus action or reaction; concentration ends.
+- Grappled: Speed 0; Disadvantage on attacks against anyone but the grappler; the grappler can drag or carry it when it moves; ends by a successful Athletics or Acrobatics check to escape, if the grappler becomes Incapacitated, if the grappler releases it, or if the two are separated beyond the grapple's range.
+- Incapacitated: no action, bonus action or reaction; concentration ends; cannot speak.
 - Invisible: cannot be seen unaided; attacks against it have Disadvantage, its own have Advantage.
 - Paralyzed: Incapacitated, Speed 0, fails Strength and Dexterity saves; attacks against it have Advantage and any hit from within 5 feet is a critical hit.
 - Petrified: turned to solid substance, Incapacitated, Speed 0, fails Strength and Dexterity saves, resistant to all damage and immune to the Poisoned condition; attacks against it have Advantage.
@@ -52,5 +54,5 @@ targeted directly. Only the single best source of cover applies — it never
 stacks.
 
 Distance. One tile is 5 feet. Melee reach is 5 feet unless the weapon or the
-creature's size says otherwise.
+creature's stat block says otherwise.
 `;

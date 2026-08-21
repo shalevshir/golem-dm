@@ -32,16 +32,20 @@ function readJson(path: string): unknown {
 /** Bump `RULES_DIGEST_VERSION` and re-pin this together, never separately. */
 const PINNED = {
   version: "2026-08-21.1",
-  sha256: "0902f189d74f8518a9f5ceb5ee2f3510ea020759602a4444d29d1fd8e8285cdb",
+  sha256: "8fe368d941b6b21740837b90acb8f51634135c7e0c7ddb9068cbfb6e2036f20b",
 };
 
 describe("RULES_DIGEST", () => {
-  it("names every condition the SRD data defines", () => {
+  it("names every condition the SRD data defines, each with its own dedicated line", () => {
     const path = repoFile(join("data", "srd", "conditions.json"));
     const rows = ConditionDefinition.array().parse(readJson(path));
     expect(rows.length).toBeGreaterThan(0);
     for (const row of rows) {
-      expect(RULES_DIGEST).toContain(row.nameEnglish);
+      // Anchored on `- Name:` rather than a bare substring so a condition
+      // demoted from its own bullet to a passing mention inside another
+      // condition's line (as happened with Prone, Incapacitated, and
+      // Poisoned here) still trips this guard.
+      expect(RULES_DIGEST).toContain(`- ${row.nameEnglish}:`);
     }
   });
 
