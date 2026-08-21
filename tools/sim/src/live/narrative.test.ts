@@ -1,5 +1,10 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { createAgentRuntime, createFakePort, DEFAULT_MODEL_ROUTING } from "@ai-dm/agents";
+import type { HebrewNarrativeOptions, NarrativePort } from "@ai-dm/agents";
+// Namespace type import, used only as `typeof AgentsModule` below — needed so
+// `vi.importActual`'s type argument does not spell an inline `import(...)`
+// type, which `@typescript-eslint/consistent-type-imports` forbids.
+import type * as AgentsModule from "@ai-dm/agents";
 import { runNarrativeBenchmark, SCRIPTED_BRIEFS } from "./narrative.js";
 
 // The brief's own fixture here named no field of the real `TokenUsage`
@@ -18,7 +23,9 @@ describe("runNarrativeBenchmark", () => {
 
     const severities = new Set(
       SCRIPTED_BRIEFS.flatMap((brief) =>
-        brief.beats.flatMap((beat) => (beat.kind === "attack" && beat.severity !== undefined ? [beat.severity] : [])),
+        brief.beats.flatMap((beat) =>
+          beat.kind === "attack" && beat.severity !== undefined ? [beat.severity] : [],
+        ),
       ),
     );
     expect(severities).toEqual(new Set(["graze", "solid", "severe", "felling"]));
@@ -41,7 +48,9 @@ describe("runNarrativeBenchmark", () => {
 
     const statusAftersBeyondAlive = new Set(
       SCRIPTED_BRIEFS.flatMap((brief) =>
-        brief.beats.flatMap((beat) => (beat.kind === "attack" && beat.statusAfter !== "alive" ? [beat.statusAfter] : [])),
+        brief.beats.flatMap((beat) =>
+          beat.kind === "attack" && beat.statusAfter !== "alive" ? [beat.statusAfter] : [],
+        ),
       ),
     );
     expect(statusAftersBeyondAlive).toEqual(new Set(["unconscious", "dead"]));
@@ -60,7 +69,10 @@ describe("runNarrativeBenchmark", () => {
           ]),
         }),
       }),
-      now: (() => { let t = 0; return () => (t += 100); })(),
+      now: (() => {
+        let t = 0;
+        return () => (t += 100);
+      })(),
     });
     expect(report.digitViolations).toBe(SCRIPTED_BRIEFS.length);
     expect(report.nonHebrewOutputs).toBe(0);
@@ -77,7 +89,10 @@ describe("runNarrativeBenchmark", () => {
           ]),
         }),
       }),
-      now: (() => { let t = 0; return () => (t += 100); })(),
+      now: (() => {
+        let t = 0;
+        return () => (t += 100);
+      })(),
     });
     expect(report.nonHebrewOutputs).toBe(SCRIPTED_BRIEFS.length);
     expect(report.digitViolations).toBe(0);
@@ -95,7 +110,10 @@ describe("runNarrativeBenchmark", () => {
           ]),
         }),
       }),
-      now: (() => { let t = 0; return () => (t += 100); })(),
+      now: (() => {
+        let t = 0;
+        return () => (t += 100);
+      })(),
     });
     expect(report.samples).toHaveLength(SCRIPTED_BRIEFS.length);
     expect(report.ttftMsP50).toBeLessThan(report.ttftMsP95 + 1);
@@ -151,7 +169,10 @@ describe("runNarrativeBenchmark", () => {
           ]),
         }),
       }),
-      now: (() => { let t = 0; return () => (t += 100); })(),
+      now: (() => {
+        let t = 0;
+        return () => (t += 100);
+      })(),
     });
     expect(report.overLengthOutputs).toBe(SCRIPTED_BRIEFS.length);
   });
@@ -169,7 +190,10 @@ describe("runNarrativeBenchmark", () => {
           ]),
         }),
       }),
-      now: (() => { let t = 0; return () => (t += 100); })(),
+      now: (() => {
+        let t = 0;
+        return () => (t += 100);
+      })(),
     });
     expect(report.overLengthOutputs).toBe(0);
   });
@@ -185,7 +209,10 @@ describe("runNarrativeBenchmark", () => {
           ]),
         }),
       }),
-      now: (() => { let t = 0; return () => (t += 100); })(),
+      now: (() => {
+        let t = 0;
+        return () => (t += 100);
+      })(),
     });
     expect(report.samples).toHaveLength(SCRIPTED_BRIEFS.length);
     report.samples.forEach((sample, index) => {
@@ -208,7 +235,10 @@ describe("runNarrativeBenchmark", () => {
           ]),
         }),
       }),
-      now: (() => { let t = 0; return () => (t += 100); })(),
+      now: (() => {
+        let t = 0;
+        return () => (t += 100);
+      })(),
     });
     expect(report.usage.promptTokens).toBe(USAGE.promptTokens * SCRIPTED_BRIEFS.length);
     expect(report.usage.completionTokens).toBe(USAGE.completionTokens * SCRIPTED_BRIEFS.length);
@@ -227,7 +257,12 @@ describe("runNarrativeBenchmark", () => {
         routing: DEFAULT_MODEL_ROUTING,
         port: createFakePort({
           stream: [
-            [{ type: "error" as const, error: { code: "provider_error" as const, message: "boom" } }],
+            [
+              {
+                type: "error" as const,
+                error: { code: "provider_error" as const, message: "boom" },
+              },
+            ],
             ...SCRIPTED_BRIEFS.slice(1).map(() => [
               { type: "text-delta" as const, text: "אלדד עומד במקומו." },
               { type: "finish" as const, text: "אלדד עומד במקומו.", usage: USAGE },
@@ -235,7 +270,10 @@ describe("runNarrativeBenchmark", () => {
           ],
         }),
       }),
-      now: (() => { let t = 0; return () => (t += 100); })(),
+      now: (() => {
+        let t = 0;
+        return () => (t += 100);
+      })(),
     });
 
     expect(report.erroredSamples).toBe(1);
@@ -265,9 +303,19 @@ describe("runNarrativeBenchmark", () => {
           ]),
         }),
       }),
-      now: (() => { let t = 0; return () => (t += 100); })(),
+      now: (() => {
+        let t = 0;
+        return () => (t += 100);
+      })(),
     });
-    expect(report.usage.costIsUnderreported).toBe(true);
+    // Fix round 1, finding 4: an errored attempt reporting no usage is the
+    // expected shape of a failure, not a shortfall the reader needs a
+    // separate "cost is under-reported" warning for — narrative-report.ts
+    // already states the erroredSamples count on its own, right above the
+    // Cost section. `costIsUnderreported` now stays false when every sample
+    // in the run errored, since there was no non-errored attempt whose
+    // usage could have gone missing.
+    expect(report.usage.costIsUnderreported).toBe(false);
     // The exact bug the review found: an errored stream's empty text must
     // not be scored as a Hebrew-discipline violation, and its ttftMs — which,
     // with no token ever arriving, measures the gap to the ERROR — must not
@@ -286,6 +334,73 @@ describe("runNarrativeBenchmark", () => {
     }
   });
 
+  it("excludes usage from a finish that carries both error and usage together, not just from an errored finish with no usage at all", async () => {
+    // Fix round 1, finding 2: `NarrativeFinish` declares `usage` and `error`
+    // as independent optional fields (hebrew.ts) — nothing in the type
+    // forbids a provider from reporting both on the same finish. This case
+    // cannot be constructed through the fake port used everywhere else in
+    // this file: `StreamChunk`'s "finish" and "error" variants
+    // (providers/port.ts) are mutually exclusive at the wire level, and
+    // hebrew.ts's own streamNarration returns on whichever one arrives
+    // first, so no sequence of fake-port chunks can make the real
+    // createHebrewNarrative call onFinish with both set. Substituting
+    // createHebrewNarrative itself, scoped to this one test via vi.doMock
+    // plus a scoped re-import, is what actually exercises the guard rather
+    // than arguing it would work.
+    vi.resetModules();
+    vi.doMock("@ai-dm/agents", async () => {
+      const actual = await vi.importActual<typeof AgentsModule>("@ai-dm/agents");
+      return {
+        ...actual,
+        createHebrewNarrative: (options: HebrewNarrativeOptions): NarrativePort => ({
+          stream(): AsyncIterable<string> {
+            // Replaying two precomputed values needs no await; the interface
+            // still has to be an async generator because a real stream is
+            // one (same reasoning as providers/testing/fake-port.ts's own
+            // streamText double).
+            // eslint-disable-next-line @typescript-eslint/require-await
+            return (async function* (): AsyncGenerator<string> {
+              yield "אלדד עומד במקומו.";
+              options.onFinish?.({
+                usage: USAGE,
+                error: { code: "provider_error", message: "usage alongside an in-band error" },
+                latencyMs: 5,
+                promptVersion: "test",
+              });
+            })();
+          },
+        }),
+      };
+    });
+
+    try {
+      const { runNarrativeBenchmark: mockedRunNarrativeBenchmark } = await import("./narrative.js");
+
+      const report = await mockedRunNarrativeBenchmark({
+        runtime: createAgentRuntime({
+          routing: DEFAULT_MODEL_ROUTING,
+          port: createFakePort({ stream: [] }),
+        }),
+        now: (() => {
+          let t = 0;
+          return () => (t += 100);
+        })(),
+      });
+
+      // Every sample carried BOTH an error and usage — none of it may enter
+      // the totals, and none of it may be treated as "usage went missing"
+      // either, since these are errored attempts, not clean ones with a
+      // shortfall.
+      expect(report.erroredSamples).toBe(report.samples.length);
+      expect(report.usage.promptTokens).toBe(0);
+      expect(report.usage.completionTokens).toBe(0);
+      expect(report.usage.costIsUnderreported).toBe(false);
+    } finally {
+      vi.doUnmock("@ai-dm/agents");
+      vi.resetModules();
+    }
+  });
+
   it("keeps a clean sample's own TTFT and classification when a different sample in the same run errored", async () => {
     // The more realistic live shape: one transient failure (a rate limit,
     // say) among otherwise-healthy streams, not every call failing at once.
@@ -294,7 +409,12 @@ describe("runNarrativeBenchmark", () => {
         routing: DEFAULT_MODEL_ROUTING,
         port: createFakePort({
           stream: [
-            [{ type: "error" as const, error: { code: "provider_error" as const, message: "boom" } }],
+            [
+              {
+                type: "error" as const,
+                error: { code: "provider_error" as const, message: "boom" },
+              },
+            ],
             ...SCRIPTED_BRIEFS.slice(1).map(() => [
               { type: "text-delta" as const, text: "אלדד עומד במקומו." },
               { type: "finish" as const, text: "אלדד עומד במקומו.", usage: USAGE },
@@ -302,7 +422,10 @@ describe("runNarrativeBenchmark", () => {
           ],
         }),
       }),
-      now: (() => { let t = 0; return () => (t += 100); })(),
+      now: (() => {
+        let t = 0;
+        return () => (t += 100);
+      })(),
     });
     expect(report.erroredSamples).toBe(1);
     expect(report.samples[0]?.errorCode).toBe("provider_error");

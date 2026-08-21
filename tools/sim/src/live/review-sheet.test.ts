@@ -21,6 +21,16 @@ const INPUT = {
 };
 
 describe("renderReviewSheet", () => {
+  // --- Fix round 1: Minor 7 — exactly one trailing newline, no more -----
+  // index.ts's `process.stdout.write` no longer appends its own "\n" on top
+  // of this — the committed artifact must not gain a trailing blank line.
+
+  it("ends in exactly one trailing newline, not two and not zero", () => {
+    const sheet = renderReviewSheet(INPUT);
+    expect(sheet.endsWith("\n")).toBe(true);
+    expect(sheet.endsWith("\n\n")).toBe(false);
+  });
+
   // --- The brief's own three tests, verbatim ---------------------------
 
   it("puts each Hebrew sample next to the English beats that produced it", () => {
@@ -152,11 +162,69 @@ describe("renderReviewSheet", () => {
     expect(sheet).toContain("בגובלין לוחם");
     expect(sheet).toContain("את גובלין לוחם");
   });
+
+  // --- Fix round 1: Important 1 — the sheet no longer claims completeness
+  // it does not have -------------------------------------------------------
+
+  it("no longer claims to cover every Hebrew string this change ships", () => {
+    const sheet = renderReviewSheet(INPUT);
+    expect(sheet).not.toContain("Every Hebrew string this change ships");
+  });
+
+  it("names apps/web/src/i18n.ts and data/characters/*.json as explicitly out of scope", () => {
+    const sheet = renderReviewSheet(INPUT);
+    expect(sheet).toContain("apps/web/src/i18n.ts");
+    expect(sheet).toContain("data/characters/*.json");
+  });
+
+  // --- Fix round 1: Minor 5 — pin the document's own scaffolding ---------
+
+  it("pins the four top-level headings in their required order", () => {
+    // Deleting `## Names` or moving `HOW_TO_REVIEW`'s section elsewhere
+    // leaves every other test above green — none of them assert order
+    // across sections, only substring presence within one.
+    const sheet = renderReviewSheet(INPUT);
+    const howToReview = sheet.indexOf("## How to review");
+    const narrationSamples = sheet.indexOf("## Narration samples");
+    const names = sheet.indexOf("## Names");
+    const glossaryAndConditions = sheet.indexOf("## Glossary and conditions");
+
+    expect(howToReview).toBeGreaterThanOrEqual(0);
+    expect(narrationSamples).toBeGreaterThan(howToReview);
+    expect(names).toBeGreaterThan(narrationSamples);
+    expect(glossaryAndConditions).toBeGreaterThan(names);
+  });
+
+  // --- Fix round 1: Minor 8 — say how many samples were dropped ----------
+
+  it("states how many samples errored and were omitted, when erroredSampleCount is given", () => {
+    const sheet = renderReviewSheet({ ...INPUT, erroredSampleCount: 3 });
+    expect(sheet).toContain("3 samples errored and were omitted");
+  });
+
+  it("says nothing about errored samples when erroredSampleCount is absent or zero", () => {
+    expect(renderReviewSheet(INPUT)).not.toContain("errored and were omitted");
+    expect(renderReviewSheet({ ...INPUT, erroredSampleCount: 0 })).not.toContain(
+      "errored and were omitted",
+    );
+  });
+
+  it("keeps the Narration samples heading non-empty when every sample errored, unlike an empty Names kind", () => {
+    // The opposite of how an empty Names kind is handled (omitted
+    // entirely) — Narration samples always keeps its heading, but must not
+    // print it with nothing at all underneath.
+    const sheet = renderReviewSheet({ ...INPUT, samples: [], erroredSampleCount: 9 });
+    const heading = sheet.indexOf("## Narration samples");
+    const nextHeading = sheet.indexOf("## Names");
+    expect(heading).toBeGreaterThanOrEqual(0);
+    const between = sheet.slice(heading, nextHeading);
+    expect(between).toContain("9 samples errored and were omitted");
+  });
 });
 
 describe("buildReviewSheetInput", () => {
   it("loads all 62 primary SRD names, grouped by kind, plus every distinct action name", () => {
-    const input = buildReviewSheetInput([]);
+    const input = buildReviewSheetInput([], true);
     const byKind = (kind: "weapon" | "armor" | "monster" | "action"): number =>
       input.names.filter((name) => name.kind === kind).length;
 
@@ -172,7 +240,7 @@ describe("buildReviewSheetInput", () => {
   });
 
   it("deduplicates an action name repeated identically across several monsters", () => {
-    const input = buildReviewSheetInput([]);
+    const input = buildReviewSheetInput([], true);
     // "Scimitar" also names an unrelated row in weapons.json (kind: "weapon")
     // — the SRD martial weapon, not any one monster's attack — so the dedup
     // claim is specifically about the "action" kind: three monsters
@@ -186,7 +254,7 @@ describe("buildReviewSheetInput", () => {
   });
 
   it("loads the glossary straight from hebrew-glossary.md, matching @ai-dm/agents' mirror", () => {
-    const input = buildReviewSheetInput([]);
+    const input = buildReviewSheetInput([], true);
     // Verified fact: 24 data rows. Cross-checked against GLOSSARY_TERMS
     // (packages/agents/src/narrative/prompt-text.ts), which its own parity
     // test already proves matches this same markdown file row for row — so
@@ -197,7 +265,7 @@ describe("buildReviewSheetInput", () => {
   });
 
   it("loads all 15 SRD conditions", () => {
-    const input = buildReviewSheetInput([]);
+    const input = buildReviewSheetInput([], true);
     expect(input.conditions).toHaveLength(15);
     expect(input.conditions.find((row) => row.english === "Prone")?.hebrew).toBe("שרוע");
   });
@@ -222,8 +290,8 @@ describe("buildReviewSheetInput", () => {
     };
   }
 
-  it("converts a clean sample to a model-sourced row, never NarrativeSample.source's NarrationInput", () => {
-    const input = buildReviewSheetInput([sample()]);
+  it("converts a clean sample to a model-sourced row on a live run, never NarrativeSample.source's NarrationInput", () => {
+    const input = buildReviewSheetInput([sample()], true);
     expect(input.samples).toHaveLength(1);
     expect(input.samples[0]).toEqual({
       beatsEnglish: "holds position",
@@ -232,12 +300,34 @@ describe("buildReviewSheetInput", () => {
     });
   });
 
+  it('labels a surviving sample "scripted", not "model", on a non-live (smoke) run', () => {
+    // A smoke run's text is index.ts's own NARRATIVE_SMOKE_TEXT placeholder
+    // — never real model output. Stamping it "model" would misrepresent
+    // that to a reviewer generating a sheet locally without --live.
+    const input = buildReviewSheetInput([sample()], false);
+    expect(input.samples[0]?.source).toBe("scripted");
+  });
+
   it("drops an errored sample instead of showing an empty row", () => {
-    const input = buildReviewSheetInput([
-      sample({ errorCode: "provider_error", hebrew: "" }),
-      sample(),
-    ]);
+    const input = buildReviewSheetInput(
+      [sample({ errorCode: "provider_error", hebrew: "" }), sample()],
+      true,
+    );
     expect(input.samples).toHaveLength(1);
     expect(input.samples[0]?.hebrew).toBe("אלדד עומד במקומו.");
+  });
+
+  it("counts errored samples separately from the ones that survive", () => {
+    const input = buildReviewSheetInput(
+      [sample({ errorCode: "provider_error", hebrew: "" }), sample(), sample()],
+      true,
+    );
+    expect(input.samples).toHaveLength(2);
+    expect(input.erroredSampleCount).toBe(1);
+  });
+
+  it("omits erroredSampleCount entirely when nothing errored", () => {
+    const input = buildReviewSheetInput([sample(), sample()], true);
+    expect(input.erroredSampleCount).toBeUndefined();
   });
 });

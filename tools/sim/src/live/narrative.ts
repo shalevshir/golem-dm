@@ -22,7 +22,11 @@ import { costUsd } from "../pricing.js";
 import { percentile } from "../run/metrics.js";
 
 const ELDAD: NarratedCreature = { nameHebrew: "אלדד", gender: "masculine", conditionsHebrew: [] };
-const GOBLIN: NarratedCreature = { nameHebrew: "גובלין לוחם", gender: "masculine", conditionsHebrew: [] };
+const GOBLIN: NarratedCreature = {
+  nameHebrew: "גובלין לוחם",
+  gender: "masculine",
+  conditionsHebrew: [],
+};
 
 /**
  * Every shipped creature (`data/srd/monsters/*.json`, `data/characters/*.json`)
@@ -277,8 +281,15 @@ export interface NarrativeUsageSummary {
    * Shaped like `run/report.ts`'s `costIsUnderreported`: true when a stream
    * finished without reporting usage, so the cost above is a lower bound.
    *
-   * This detects only ABSENT usage — a finish with no usage object at all.
-   * It says nothing about usage that IS present but itself undercounts:
+   * This detects only ABSENT usage on a NON-errored attempt — a clean
+   * finish with no usage object at all. An errored attempt is excluded from
+   * this check entirely, not counted as a shortfall: a provider error
+   * reporting no usage is the expected shape of a failure, not evidence the
+   * cost figure is incomplete, and narrative-report.ts already tells the
+   * reader separately, right above the Cost section, that N samples errored
+   * — this flag would otherwise repeat that fact under a misleading name.
+   *
+   * It also says nothing about usage that IS present but itself undercounts:
    * `providers/vercel.ts` passes the AI SDK's `promptTokens` through
    * verbatim, and for Anthropic that is `input_tokens`, which excludes
    * `cache_read_input_tokens`. So `costUsd` above is a lower bound on a
@@ -416,11 +427,26 @@ export async function runNarrativeBenchmark(
       ...(errorCode === undefined ? {} : { errorCode }),
     });
 
-    if (finish?.usage === undefined) {
-      attemptsMissingUsage += 1;
-    } else {
-      promptTokens += finish.usage.promptTokens;
-      completionTokens += finish.usage.completionTokens;
+    // Gated on errorCode, not just `finish?.usage`: `NarrativeFinish` declares
+    // `usage` and `error` as independent optional fields (hebrew.ts), so a
+    // provider could in principle report both on the same finish. If that
+    // ever happens, this sample's tokens must not enter the numerator above
+    // while `disciplineSampleCount` already excludes it from the
+    // denominator — and it must not flip costIsUnderreported either, since
+    // an errored attempt reporting no usage is expected, not a shortfall.
+    // Currently unreachable in practice (hebrew.test.ts / narrative.test.ts):
+    // `StreamChunk`'s "finish" and "error" variants are mutually exclusive at
+    // the wire level (providers/port.ts), so this file's own fake-port
+    // fixtures cannot construct the "both" case either — the guard is still
+    // correct defensively, not speculative, since nothing in the `NarrativeFinish`
+    // type itself forbids it.
+    if (errorCode === undefined) {
+      if (finish?.usage === undefined) {
+        attemptsMissingUsage += 1;
+      } else {
+        promptTokens += finish.usage.promptTokens;
+        completionTokens += finish.usage.completionTokens;
+      }
     }
   }
 

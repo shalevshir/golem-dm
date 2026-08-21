@@ -110,11 +110,14 @@ async function runNarrativeMode(options: {
   // deliverable rather than a log line, so a logger would be the wrong tool
   // even where one exists. Deliberately separate from the `Wrote ...` lines
   // `main()` prints below (console.warn, i.e. stderr):
-  // `pnpm --filter @ai-dm/sim start --live --mode narrative --review-sheet >
+  // `pnpm --silent sim --live --mode narrative --review-sheet >
   // docs/prompts/hebrew-review-....md` redirects stdout only, so this is the
-  // one thing that command's redirect captures.
+  // one thing that command's redirect captures. No extra `\n` appended:
+  // renderReviewSheet's own output already ends in exactly one (its last
+  // line is a pushed "" joined with "\n") — adding another left a trailing
+  // blank line in the committed artifact.
   if (options.reviewSheet) {
-    process.stdout.write(`${renderReviewSheet(buildReviewSheetInput(report.samples))}\n`);
+    process.stdout.write(renderReviewSheet(buildReviewSheetInput(report.samples, options.live)));
   }
 
   return written;

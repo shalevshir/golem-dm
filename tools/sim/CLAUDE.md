@@ -40,6 +40,7 @@ says nothing about any real model's tactical quality.
 | `--arms`      | comma-separated arm ids from `src/config.ts`, **requires `--live`** | every arm when `--live` |
 | `--seeds`     | comma-separated integers                                            | `1,2,3,4,5`             |
 | `--scenarios` | comma-separated scenario ids                                        | all four                |
+| `--review-sheet` | absent \| present, **requires `--mode narrative`**               | absent                  |
 
 An unrecognised `--flag` (including a singular typo like `--scenario` or `--seed`)
 is rejected with the list of known flags, rather than silently falling through to
@@ -60,6 +61,12 @@ against the `narrative` role in `DEFAULT_MODEL_ROUTING`, never an arm from
 `src/config.ts`. `--arms` is rejected in combination with it for the same
 reason it is rejected without `--live` above. `--live` still only swaps the
 port — `--mode narrative` alone runs the same benchmark against a scripted one.
+`--review-sheet` is rejected outside `--mode narrative` for the same reason
+`--arms` is rejected outside it: it prints `src/live/review-sheet.ts`'s
+`renderReviewSheet` output (the run's own narration samples plus the SRD
+name/glossary/condition tables) to stdout, separate from the `Wrote <path>`
+lines on stderr, so redirecting `pnpm --silent sim --live --mode narrative
+--review-sheet` to a file captures only the sheet.
 
 ## Live benchmarking
 

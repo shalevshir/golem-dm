@@ -18,7 +18,12 @@ import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { NarrationSource } from "@ai-dm/schemas";
-import { ArmorDefinition, ConditionDefinition, MonsterStatBlock, WeaponDefinition } from "@ai-dm/schemas";
+import {
+  ArmorDefinition,
+  ConditionDefinition,
+  MonsterStatBlock,
+  WeaponDefinition,
+} from "@ai-dm/schemas";
 import type { NarrativeSample } from "./narrative.js";
 
 export type ReviewSheetNameKind = "weapon" | "armor" | "monster" | "action";
@@ -29,15 +34,19 @@ export interface ReviewSheetSample {
   /**
    * `NarrationSource` (@ai-dm/schemas) has three values —
    * `"model" | "deterministic" | "completed"` — but `buildReviewSheetInput`
-   * below can only ever produce `"model"`: the narrative benchmark calls
-   * `createHebrewNarrative` directly rather than running the server
-   * pipeline (live/narrative.ts's header comment), so a `"deterministic"` or
-   * `"completed"` rung is never observed here. Kept as the full type,
-   * rather than the narrower literal, so a future non-benchmark input (a
-   * real session transcript, say) can carry those values without a type
-   * change to this interface.
+   * below can only ever produce `"model"` (a `--live` run) or the one extra
+   * literal `"scripted"` (a smoke run's fake-port placeholder text, e.g.
+   * `index.ts`'s `NARRATIVE_SMOKE_TEXT` — not model output, and mislabelling
+   * it `"model"` would misrepresent a scripted stand-in as a real narration
+   * to anyone generating a sheet locally without `--live`). None of
+   * `NarrationSource`'s three canonical values describes that case, hence
+   * the widened union rather than reusing the type unmodified. Never
+   * `"deterministic"` or `"completed"` either way: the narrative benchmark
+   * calls `createHebrewNarrative` directly rather than running the server
+   * pipeline (live/narrative.ts's header comment), so those two rungs are
+   * never observed here.
    */
-  source: NarrationSource;
+  source: NarrationSource | "scripted";
 }
 
 export interface ReviewSheetName {
@@ -61,6 +70,16 @@ export interface ReviewSheetInput {
   names: readonly ReviewSheetName[];
   glossary: readonly ReviewSheetGlossaryTerm[];
   conditions: readonly ReviewSheetCondition[];
+  /**
+   * How many of the run's samples errored and were dropped before reaching
+   * `samples` above (see `reviewSheetSamplesFrom`'s doc comment) — without
+   * this, a reviewer cannot tell "9 clean samples" from "9 of 11, with 2
+   * dropped silently." Optional and printed only when positive: the
+   * brief's own Step 1 fixture predates this field, so omitting it must
+   * stay valid input, and a healthy run stating "0 samples errored" on
+   * every read would be noise for the common case.
+   */
+  erroredSampleCount?: number;
 }
 
 const NAME_KIND_ORDER: readonly ReviewSheetNameKind[] = ["weapon", "armor", "monster", "action"];
@@ -91,6 +110,23 @@ const HOW_TO_REVIEW =
   "(`prompt-text.ts`, the model-driven narrator) or to `deterministic.ts` (the terse fallback " +
   "narrator) — either edit needs a version bump (`NARRATIVE_PROMPT_VERSION`) and a re-pinned " +
   "content hash, since both are versioned prompt text.";
+
+/**
+ * Required scope disclosure. Without this, the opening paragraph's claim
+ * to cover the change's Hebrew is not true: `apps/web/src/i18n.ts` carries
+ * 49 Hebrew string literals of its own, and `data/characters/*.json`
+ * carries character names — including `hero.json`'s `nameHebrew`, "אלדד",
+ * the exact actor every sample below renders — with no correction path
+ * named anywhere else on this sheet. Named here rather than added as a
+ * fifth and sixth table: the brief this sheet implements specifies exactly
+ * four sections, and growing the sheet's scope is redesigning the
+ * deliverable, not fixing this gap.
+ */
+const SCOPE_NOTE =
+  "Not covered on this sheet: `apps/web/src/i18n.ts`'s UI strings (the client's own Hebrew, " +
+  "corrected by editing that file directly) and `data/characters/*.json`'s character names — " +
+  'e.g. `hero.json`\'s `nameHebrew`, "אלדד", the actor printed in every sample below — ' +
+  "corrected the same way as a weapon or monster row: a data-only edit to that file.";
 
 /**
  * Required reading before touching `conditions.json`: `nameHebrew` is not
@@ -152,15 +188,19 @@ export function renderReviewSheet(input: ReviewSheetInput): string {
   lines.push("# Hebrew review sheet");
   lines.push("");
   lines.push(
-    "Every Hebrew string this change ships, in one place, for a native speaker to read and " +
-      'correct. Not a blocking gate — its only job is to give the roadmap\'s "Hebrew reviewed ' +
-      'by native speaker" criterion something concrete to be satisfied against.',
+    "The Hebrew this change ships — narration samples, SRD proper names, glossary terms and " +
+      'condition labels — in one place, for a native speaker to read and correct (see "Not ' +
+      'covered on this sheet" below for what is out of scope). Not a blocking gate — its only ' +
+      'job is to give the roadmap\'s "Hebrew reviewed by native speaker" criterion something ' +
+      "concrete to be satisfied against.",
   );
   lines.push("");
 
   lines.push("## How to review");
   lines.push("");
   lines.push(HOW_TO_REVIEW);
+  lines.push("");
+  lines.push(SCOPE_NOTE);
   lines.push("");
   lines.push(CONDITIONS_TEST_NOTE);
   lines.push("");
@@ -169,6 +209,12 @@ export function renderReviewSheet(input: ReviewSheetInput): string {
 
   lines.push("## Narration samples");
   lines.push("");
+  if (input.erroredSampleCount !== undefined && input.erroredSampleCount > 0) {
+    lines.push(
+      `${String(input.erroredSampleCount)} samples errored and were omitted from this section.`,
+    );
+    lines.push("");
+  }
   input.samples.forEach((sample, index) => {
     lines.push(...renderSample(sample, index));
   });
@@ -244,7 +290,11 @@ function loadWeaponNames(dir: string): ReviewSheetName[] {
 
 function loadArmorNames(dir: string): ReviewSheetName[] {
   const armor = ArmorDefinition.array().parse(readJson(join(dir, "armor.json")));
-  return armor.map((piece) => ({ english: piece.nameEnglish, hebrew: piece.nameHebrew, kind: "armor" }));
+  return armor.map((piece) => ({
+    english: piece.nameEnglish,
+    hebrew: piece.nameHebrew,
+    kind: "armor",
+  }));
 }
 
 /**
@@ -256,7 +306,10 @@ function loadArmorNames(dir: string): ReviewSheetName[] {
  * that disagreed on a name's Hebrew would still show as two distinct rows —
  * exactly the mistake a reviewer needs to see, not one dedup would hide.
  */
-function loadMonsterAndActionNames(dir: string): { monsters: ReviewSheetName[]; actions: ReviewSheetName[] } {
+function loadMonsterAndActionNames(dir: string): {
+  monsters: ReviewSheetName[];
+  actions: ReviewSheetName[];
+} {
   const monsterDir = join(dir, "monsters");
   // Sorted: `readdirSync`'s order is filesystem-dependent, and this sheet
   // becomes a committed file — an unsorted read would make its row order
@@ -275,7 +328,11 @@ function loadMonsterAndActionNames(dir: string): { monsters: ReviewSheetName[]; 
     for (const action of monster.actions) {
       const key = `${action.nameEnglish} ${action.nameHebrew}`;
       if (!actionsSeen.has(key)) {
-        actionsSeen.set(key, { english: action.nameEnglish, hebrew: action.nameHebrew, kind: "action" });
+        actionsSeen.set(key, {
+          english: action.nameEnglish,
+          hebrew: action.nameHebrew,
+          kind: "action",
+        });
       }
     }
   }
@@ -285,7 +342,10 @@ function loadMonsterAndActionNames(dir: string): { monsters: ReviewSheetName[]; 
 
 function loadConditionRows(dir: string): ReviewSheetCondition[] {
   const conditions = ConditionDefinition.array().parse(readJson(join(dir, "conditions.json")));
-  return conditions.map((condition) => ({ english: condition.nameEnglish, hebrew: condition.nameHebrew }));
+  return conditions.map((condition) => ({
+    english: condition.nameEnglish,
+    hebrew: condition.nameHebrew,
+  }));
 }
 
 /**
@@ -310,19 +370,24 @@ function loadGlossaryRows(): ReviewSheetGlossaryTerm[] {
 
 /**
  * The samples this benchmark can produce are narrower than
- * `ReviewSheetSample.source`'s full `NarrationSource` type allows — see that
- * field's doc comment. An errored sample (`NarrativeSample.errorCode` set)
- * carries no Hebrew worth a reviewer's time — `hebrew` is partial or empty,
- * per that field's own doc comment in `live/narrative.ts` — so it is left
- * out entirely rather than shown as a blank row.
+ * `ReviewSheetSample.source`'s type allows — see that field's doc comment.
+ * An errored sample (`NarrativeSample.errorCode` set) carries no Hebrew
+ * worth a reviewer's time — `hebrew` is partial or empty, per that field's
+ * own doc comment in `live/narrative.ts` — so it is left out entirely
+ * rather than shown as a blank row. `live` distinguishes the one thing the
+ * samples themselves cannot: whether the surviving text is real model
+ * output or a smoke run's scripted placeholder.
  */
-function reviewSheetSamplesFrom(samples: readonly NarrativeSample[]): ReviewSheetSample[] {
+function reviewSheetSamplesFrom(
+  samples: readonly NarrativeSample[],
+  live: boolean,
+): ReviewSheetSample[] {
   return samples
     .filter((sample) => sample.errorCode === undefined)
     .map((sample) => ({
       beatsEnglish: sample.beatsEnglish,
       hebrew: sample.hebrew,
-      source: "model",
+      source: live ? "model" : "scripted",
     }));
 }
 
@@ -330,16 +395,24 @@ function reviewSheetSamplesFrom(samples: readonly NarrativeSample[]): ReviewShee
  * Assembles a real `ReviewSheetInput`: the given benchmark samples, plus
  * every name/glossary/condition table read fresh off disk. Kept separate
  * from `renderReviewSheet` so the CLI's `--review-sheet` flag is the only
- * caller that ever touches a filesystem.
+ * caller that ever touches a filesystem. `live` must match whatever port
+ * produced `samples` — it decides both the surviving samples' `source`
+ * label and whether `erroredSampleCount` (below) is worth telling a
+ * reviewer about.
  */
-export function buildReviewSheetInput(samples: readonly NarrativeSample[]): ReviewSheetInput {
+export function buildReviewSheetInput(
+  samples: readonly NarrativeSample[],
+  live: boolean,
+): ReviewSheetInput {
   const dir = srdDir();
   const { monsters, actions } = loadMonsterAndActionNames(dir);
+  const erroredSampleCount = samples.filter((sample) => sample.errorCode !== undefined).length;
 
   return {
-    samples: reviewSheetSamplesFrom(samples),
+    samples: reviewSheetSamplesFrom(samples, live),
     names: [...loadWeaponNames(dir), ...loadArmorNames(dir), ...monsters, ...actions],
     glossary: loadGlossaryRows(),
     conditions: loadConditionRows(dir),
+    ...(erroredSampleCount > 0 ? { erroredSampleCount } : {}),
   };
 }

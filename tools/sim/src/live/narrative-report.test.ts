@@ -65,7 +65,9 @@ describe("renderNarrativeMarkdown", () => {
     // live only inside the costIsUnderreported branch, which does not fire
     // here (costIsUnderreported: false) — so the healthy-run markdown said
     // nothing about the gap at all.
-    const markdown = renderNarrativeMarkdown(report({ usage: { ...report().usage, costIsUnderreported: false } }));
+    const markdown = renderNarrativeMarkdown(
+      report({ usage: { ...report().usage, costIsUnderreported: false } }),
+    );
     expect(markdown).toContain("Cached-token share: not reported");
     expect(markdown).not.toContain("Cost is under-reported");
   });
@@ -90,7 +92,9 @@ describe("renderNarrativeMarkdown", () => {
     const markdown = renderNarrativeMarkdown(
       report({ samples: samplesWithErrors(9, 2), erroredSamples: 2 }),
     );
-    expect(markdown).toMatch(/p50: \d+ ms \(exit criterion: < 1500 ms\) — errored samples excluded/);
+    expect(markdown).toMatch(
+      /p50: \d+ ms \(exit criterion: < 1500 ms\) — errored samples excluded/,
+    );
     expect(markdown).toMatch(/p95: \d+ ms — errored samples excluded/);
   });
 
@@ -108,7 +112,26 @@ describe("renderNarrativeMarkdown", () => {
       report({ usage: { ...report().usage, costIsUnderreported: false } }),
     );
     expect(markdown).toContain("excludes cache-read tokens");
-    expect(markdown).toContain("REGARDLESS");
+    expect(markdown).toContain("lower bound whether or not");
+  });
+
+  it("prints the identical cache-read-exclusion sentence whether or not costIsUnderreported is set", () => {
+    // Asserts the substance (unconditional printing), not a stylistic
+    // marker: the same sentence must appear byte-for-byte in both renders,
+    // not merely contain some shared word, so a change that reworded only
+    // one branch's copy would fail this even if both still mentioned
+    // "cache-read" somewhere.
+    const healthy = renderNarrativeMarkdown(
+      report({ usage: { ...report().usage, costIsUnderreported: false } }),
+    );
+    const unhealthy = renderNarrativeMarkdown(
+      report({ usage: { ...report().usage, costIsUnderreported: true } }),
+    );
+    const sentence =
+      "the cost above excludes cache-read tokens and is a lower bound whether or not " +
+      "the under-reported flag below is set";
+    expect(healthy).toContain(sentence);
+    expect(unhealthy).toContain(sentence);
   });
 
   it("calls out errored samples and excludes them from the discipline denominator", () => {

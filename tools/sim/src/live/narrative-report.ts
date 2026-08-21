@@ -72,9 +72,15 @@ export function renderNarrativeMarkdown(report: NarrativeRunReport): string {
   const disciplineSampleCount = report.samples.length - report.erroredSamples;
   lines.push("## Output discipline");
   lines.push("");
-  lines.push(`- Digit violations: ${String(report.digitViolations)} / ${String(disciplineSampleCount)}`);
-  lines.push(`- Non-Hebrew outputs: ${String(report.nonHebrewOutputs)} / ${String(disciplineSampleCount)}`);
-  lines.push(`- Over-length outputs: ${String(report.overLengthOutputs)} / ${String(disciplineSampleCount)}`);
+  lines.push(
+    `- Digit violations: ${String(report.digitViolations)} / ${String(disciplineSampleCount)}`,
+  );
+  lines.push(
+    `- Non-Hebrew outputs: ${String(report.nonHebrewOutputs)} / ${String(disciplineSampleCount)}`,
+  );
+  lines.push(
+    `- Over-length outputs: ${String(report.overLengthOutputs)} / ${String(disciplineSampleCount)}`,
+  );
   lines.push("");
   lines.push(
     "Any non-zero count above is a prompt bug, not a tolerance: fix the prompt, bump " +
@@ -93,10 +99,12 @@ export function renderNarrativeMarkdown(report: NarrativeRunReport): string {
   // costIsUnderreported branch that follows, which does not fire on a
   // healthy run and would otherwise leave these two gaps undeclared for the
   // common case.
-  lines.push("- Cached-token share: not reported — no adapter in this repo surfaces a cache-read count.");
   lines.push(
-    "- Note: the cost above excludes cache-read tokens and is a lower bound REGARDLESS of " +
-      "the under-reported flag below — `promptTokens` is the provider's `input_tokens`, which " +
+    "- Cached-token share: not reported — no adapter in this repo surfaces a cache-read count.",
+  );
+  lines.push(
+    "- Note: the cost above excludes cache-read tokens and is a lower bound whether or not " +
+      "the under-reported flag below is set — `promptTokens` is the provider's `input_tokens`, which " +
       "does not include `cache_read_input_tokens` (see `NarrativeUsageSummary.costIsUnderreported`'s " +
       "doc comment in live/narrative.ts).",
   );

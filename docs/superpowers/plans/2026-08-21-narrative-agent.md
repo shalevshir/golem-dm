@@ -2968,7 +2968,7 @@ Flag explicitly for review: the deterministic renderer's template wording, which
 - [ ] **Step 4: Generate and commit the sheet**
 
 ```bash
-pnpm --filter @ai-dm/sim --silent start --live --mode narrative --review-sheet > docs/prompts/hebrew-review-2026-08-21.md
+pnpm --silent sim --live --mode narrative --review-sheet > docs/prompts/hebrew-review-2026-08-21.md
 ```
 
 Add `--review-sheet` to `KNOWN_FLAGS` in `tools/sim/src/cli.ts`.
