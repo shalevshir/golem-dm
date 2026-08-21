@@ -1114,6 +1114,41 @@ describe("handleCommand — narrative metrics", () => {
     expect(metricsRecords).toHaveLength(1);
     expect(metricsRecords[0]?.latencyMs).toBe(STEP_MS);
   });
+
+  it("stamps each narrated turn with its own actorId, across a full live sequence", async () => {
+    // A LIVE encounter — hostiles alive, unlike narratedHeroTurn's fixture
+    // above — is required here on purpose: every test above only ever
+    // narrates "hero", so `actorId: "hero"` in narrate() (pipeline.ts) is
+    // indistinguishable from a hardcoded literal in any of them.
+    // `scriptedNarrative` is stateless and re-iterable (each `.stream()`
+    // call gets a fresh iterator over the same chunks), unlike
+    // `createHebrewNarrative` over `createFakePort`'s single-use queue, so
+    // it has no exhaustion problem across the three narrations — hero, then
+    // both hostiles — a successful hero turn cascades into.
+    const store = createInMemoryEventStore();
+    const session = await freshSession(store);
+    const metricsRecords: NarrativeTurnMetrics[] = [];
+    const ports: TurnPorts = {
+      ...portsWith(store),
+      narrative: scriptedNarrative(["אלדד עומד במקומו."]),
+      metrics: {
+        recordTacticalTurn: () => undefined,
+        recordNarrativeTurn: (record) => metricsRecords.push(record),
+      },
+    };
+
+    await drain(handleCommand(session, dodge("hero"), ports));
+
+    // goblin-ambush's own turnOrder (encounters/index.ts) is exactly hero,
+    // goblin-a, goblin-b, and `defaultTactical` (this file) has both goblins
+    // dodge legally on the first try, so one hero dodge narrates all three
+    // in that order. Mirrors the tactical-metrics describe block's own
+    // `recorded.map((each) => each.actorId)` guard above — the narrative
+    // sink had no equivalent of it before this test, so a later refactor
+    // that stamped the session's active combatant instead of narrate()'s
+    // own `actorId` parameter would have shipped silently.
+    expect(metricsRecords.map((each) => each.actorId)).toEqual(["hero", "goblin-a", "goblin-b"]);
+  });
 });
 
 describe("handleCommand — turn timeout", () => {
