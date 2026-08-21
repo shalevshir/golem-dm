@@ -44,8 +44,16 @@ export type SpawnSpec = MonsterSpawn | CharacterSpawn;
 
 export interface EncounterDefinition {
   encounterId: string;
-  /** English. Says what this encounter is. */
+  /** English. Says what this encounter is, for an operator. See sceneEnglish for the narrator's copy. */
   descriptionEnglish: string;
+  /**
+   * English atmosphere for the narrative agent: ground, light, sound. Held
+   * apart from `descriptionEnglish`, which summarises the encounter for an
+   * operator ("two goblin warriors on an open 12x12 field") — folding the
+   * two would drag that summary toward prose. Required, so an encounter
+   * cannot narrate against an empty stage without someone noticing.
+   */
+  sceneEnglish: string;
   width: number;
   height: number;
   /** Sparse: every unlisted tile is "normal". */
@@ -58,6 +66,8 @@ export interface EncounterDefinition {
 
 export interface BuiltEncounter {
   encounterId: string;
+  /** Copied through from `EncounterDefinition.sceneEnglish`, for the narrative agent. */
+  sceneEnglish: string;
   world: CombatWorld;
   /** By `combatantId` — the resolver needs attack bonuses, which `Combatant` lacks. */
   statBlocks: ReadonlyMap<string, CreatureStatBlock>;
@@ -179,6 +189,7 @@ export function buildEncounter(input: BuildEncounterInput): BuiltEncounter {
 
   return {
     encounterId: definition.encounterId,
+    sceneEnglish: definition.sceneEnglish,
     world: {
       grid: buildGrid(definition),
       combatants,

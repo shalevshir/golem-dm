@@ -23,6 +23,7 @@ export const COVER_CORRIDOR: ScenarioDefinition = {
   descriptionEnglish:
     "Wolves and guards separated by a wall with a single gap and cover at its edges. " +
     "Discriminates line-of-sight and cover-aware target selection.",
+  sceneEnglish: "A featureless benchmark arena. No terrain features worth describing.",
   width: 16,
   height: 13,
   terrain: WALL,

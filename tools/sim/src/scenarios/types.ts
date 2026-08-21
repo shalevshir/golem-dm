@@ -10,6 +10,8 @@ export interface ScenarioDefinition {
   scenarioId: string;
   /** English. Says what this fixture is meant to discriminate. */
   descriptionEnglish: string;
+  /** English atmosphere for the narrative agent. See EncounterDefinition.sceneEnglish. */
+  sceneEnglish: string;
   width: number;
   height: number;
   /** Sparse: every unlisted tile is "normal". */

@@ -96,6 +96,7 @@ const DEFINITION: EncounterDefinition = {
   descriptionEnglish:
     "Two goblin warriors meet two guards at close quarters on an empty 12x12 field. " +
     "Baseline legality with no spatial reasoning required.",
+  sceneEnglish: "A featureless benchmark arena. No terrain features worth describing.",
   width: 12,
   height: 12,
   spawns: [

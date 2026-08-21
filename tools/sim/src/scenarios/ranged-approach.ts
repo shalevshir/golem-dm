@@ -9,6 +9,7 @@ export const RANGED_APPROACH: ScenarioDefinition = {
   descriptionEnglish:
     "Two goblin warriors face two guards across 60 feet of open ground, holding a " +
     "melee and a ranged option. Discriminates action-range selection.",
+  sceneEnglish: "A featureless benchmark arena. No terrain features worth describing.",
   width: 20,
   height: 12,
   spawns: [

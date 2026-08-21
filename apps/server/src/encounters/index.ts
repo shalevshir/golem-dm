@@ -24,6 +24,10 @@ const GOBLIN_AMBUSH: EncounterDefinition = {
   descriptionEnglish:
     "A lone adventurer is ambushed by two goblin warriors in melee range on an " +
     "open 12x12 field.",
+  sceneEnglish:
+    "Late afternoon on a rocky hillside track. The ground is dry, broken stone " +
+    "and loose scree; low thorn scrub crowds both sides of the path. The light " +
+    "is flat and orange, the air still, and sound carries.",
   width: 12,
   height: 12,
   spawns: [

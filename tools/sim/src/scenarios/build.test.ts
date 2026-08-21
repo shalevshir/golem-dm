@@ -50,6 +50,7 @@ describe("buildScenario spawn validation", () => {
   const base: ScenarioDefinition = {
     scenarioId: "spawn-validation",
     descriptionEnglish: "Fixtures for spawn validation tests, not a real scenario.",
+    sceneEnglish: "A bare test fixture. No atmosphere worth describing.",
     width: 12,
     height: 12,
     spawns: [
