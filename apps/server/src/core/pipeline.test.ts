@@ -7,8 +7,9 @@ import {
   createFakePort,
   createTacticalAgent,
   DEFAULT_MODEL_ROUTING,
+  NARRATIVE_PROMPT_VERSION,
 } from "@ai-dm/agents";
-import { DiceRolledPayload } from "@ai-dm/schemas";
+import { DiceRolledPayload, NarrativeEmittedPayload } from "@ai-dm/schemas";
 import type {
   ClientMessage,
   ExecuteTurn,
@@ -20,7 +21,7 @@ import { createInMemoryEventStore } from "./event-store.js";
 import type { EventStore } from "./event-store.js";
 import { SNAPSHOT_EVERY, handleCommand } from "./pipeline.js";
 import type { TacticalTurnMetrics, TurnPorts } from "./pipeline.js";
-import { createSession } from "./session.js";
+import { createSession, loadSession } from "./session.js";
 import type { Session } from "./session.js";
 
 function uuids(): () => string {
@@ -79,6 +80,7 @@ function portsWith(store: EventStore, tactical: TacticalAgent = defaultTactical(
     uuid: uuids(),
     seedFor: (rootSeed, sequence) => rootSeed * 1000 + sequence,
     turnTimeoutMs: 10_000,
+    conditionNamesHebrew: new Map([["prone", "שרוע"]]),
   };
 }
 
@@ -99,9 +101,13 @@ async function freshSession(store: EventStore): Promise<Session> {
   });
 }
 
-const dodge = (actorId: string): ClientMessage => ({
+// `clientMessageId` defaults to "c1" for every existing call site; the
+// degradation-ladder tests below pass distinct ids to send several dodges
+// from the same actor across a session without tripping the idempotency
+// guard (`appliedClientMessageIds`).
+const dodge = (actorId: string, clientMessageId = "c1"): ClientMessage => ({
   type: "structured_action",
-  clientMessageId: "c1",
+  clientMessageId,
   actorId,
   turn: {
     actorId,
@@ -208,6 +214,83 @@ function hangingNarrative(): NarrativePort {
       });
     },
   };
+}
+
+/**
+ * A port that yields exactly these chunks and then stops. Written as a plain
+ * (non-`async`) generator wrapped by hand, mirroring `deterministic.ts`'s own
+ * `toAsyncIterable` — an `async function*` here never actually awaits
+ * anything, which `@typescript-eslint/require-await` correctly flags.
+ */
+function scriptedNarrative(chunks: string[]): NarrativePort {
+  return {
+    stream(): AsyncIterable<string> {
+      return {
+        [Symbol.asyncIterator](): AsyncIterator<string> {
+          const iterator = chunks[Symbol.iterator]();
+          return {
+            next(): Promise<IteratorResult<string>> {
+              return Promise.resolve(iterator.next());
+            },
+          };
+        },
+      };
+    },
+  };
+}
+
+/**
+ * The turn's `narrative_emitted` event payload — parsed against the real
+ * schema rather than cast, so a payload missing `source`/`promptVersion`
+ * fails here rather than silently satisfying a narrower check — plus every
+ * `narrative_token` frame's text FOR THAT SAME STREAM, in the order
+ * streamed.
+ *
+ * Scoped by `streamId`, not every `narrative_token` frame in `frames`:
+ * `runOneTurn` drives a real `goblin-ambush` turn, so a successful hero dodge
+ * cascades into the hostile sweep (`pipeline.ts`'s `runEnemyTurns`), and
+ * every one of those also narrates through the same scripted port under test
+ * — with its own `streamId`. An unscoped collection would fold the
+ * goblins' tokens in too and never equal the hero's own `emitted.text`,
+ * exactly like the file's existing "narrative_emitted carries exactly the
+ * concatenation of its streamed tokens" test already has to guard against.
+ *
+ * The tokens are collected with a loop rather than `frames.filter(...).map(...)`:
+ * a bare `.filter` predicate does not narrow `ServerFrame`'s discriminated
+ * union through a following `.map` (see `e2e.test.ts`'s `eventFrames` for the
+ * same fix), so `.map((f) => f.text)` would not typecheck.
+ */
+function narrativeOf(frames: ServerFrame[]): {
+  tokens: string[];
+  emitted: NarrativeEmittedPayload;
+} {
+  const event = frames.find((f) => f.type === "event" && f.event.type === "narrative_emitted");
+  if (event?.type !== "event") throw new Error("no narrative_emitted frame");
+  const emitted = NarrativeEmittedPayload.parse(event.event.payload);
+
+  const tokens: string[] = [];
+  for (const frame of frames) {
+    if (frame.type === "narrative_token" && frame.streamId === emitted.streamId) {
+      tokens.push(frame.text);
+    }
+  }
+  return { tokens, emitted };
+}
+
+/**
+ * Drives one hero dodge turn through a fresh store/session on the real
+ * `goblin-ambush` build. Ruling P-4: the fixture must have real stat blocks
+ * — `buildNarrationBrief`'s `creatureFor` falls back to the Latin
+ * `combatantId` when one is missing, which would put Latin characters into a
+ * Hebrew-only assertion for the wrong reason. `overrides.narrative` replaces
+ * the default deterministic port; every other port is `portsWith`'s usual
+ * double.
+ */
+async function runOneTurn(overrides: { narrative: NarrativePort }): Promise<ServerFrame[]> {
+  const store = createInMemoryEventStore();
+  const session = await freshSession(store);
+  const ports: TurnPorts = { ...portsWith(store), ...overrides };
+  return drain(handleCommand(session, dodge("hero"), ports));
 }
 
 /**
@@ -951,11 +1034,14 @@ describe("handleCommand — turn timeout", () => {
       (each) => each.type === "narrative_emitted",
     );
     expect(emitted.length).toBeGreaterThan(0);
-    // "hero": the hero is a real CharacterSheet (C-13 is closed), and
-    // `characterStatBlock` uses the characterId as `nameEnglish` — a
-    // character sheet is authored in Hebrew and has no English name.
+    // The stream never yielded a single chunk before the 50ms cap fired, so
+    // this is the "nothing arrived at all" rung of the ladder: the full
+    // Hebrew deterministic renderer, keyed off `buildNarrationBrief`'s own
+    // output for the hero's turn (a Dodge -> the "other-action" beat) rather
+    // than the old English `actorName` shape this test used to pin.
     expect(emitted[0]?.payload).toMatchObject({
-      text: expect.stringContaining("hero") as string,
+      text: "אלדד נוקט פעולה.",
+      source: "deterministic",
     });
     expect(frames.some((each) => each.type === "event")).toBe(true);
   }, 10_000);
@@ -1098,6 +1184,132 @@ describe("handleCommand — turn timeout", () => {
     expect(elapsed).toBeLessThan(750);
     expect(session.state.round).toBe(2);
   }, 10_000);
+});
+
+// Task 12: `narrate` now builds its input via `buildNarrationBrief` and
+// applies the degradation ladder described in `pipeline.ts`'s own comment —
+// a complete model narration is stored as-is; a stream that yields nothing
+// falls back to the full Hebrew deterministic renderer; a stream that stops
+// mid-sentence is repaired by appending an ellipsis seam and then streaming
+// the deterministic completion.
+describe("handleCommand — narration degradation ladder", () => {
+  it("marks a complete model narration as source model and stores it verbatim", async () => {
+    const frames = await runOneTurn({
+      narrative: scriptedNarrative(["אלדד ", "פוגע בגובלין לוחם."]),
+    });
+    const { tokens, emitted } = narrativeOf(frames);
+    expect(emitted.source).toBe("model");
+    expect(emitted.text).toBe(tokens.join(""));
+    expect(emitted.text).toBe("אלדד פוגע בגובלין לוחם.");
+  });
+
+  it("falls back to full Hebrew when the model yields nothing at all", async () => {
+    const frames = await runOneTurn({ narrative: scriptedNarrative([]) });
+    const { tokens, emitted } = narrativeOf(frames);
+    expect(emitted.source).toBe("deterministic");
+    expect(emitted.text).toBe(tokens.join(""));
+    expect(emitted.text).toMatch(/[֐-׿]/);
+    expect(emitted.text).not.toMatch(/[a-zA-Z]/);
+  });
+
+  it("completes a truncated narration instead of storing a severed sentence", async () => {
+    const frames = await runOneTurn({
+      narrative: scriptedNarrative(["חרבו של אלדד מוצאת פתח מתח"]),
+    });
+    const { tokens, emitted } = narrativeOf(frames);
+    expect(emitted.source).toBe("completed");
+    expect(emitted.text).toBe(tokens.join(""));
+    expect(emitted.text).toContain("… ");
+    expect(emitted.text.trimEnd().endsWith(".")).toBe(true);
+  });
+
+  it("treats a stream that ends on a full stop as complete, not truncated", async () => {
+    const frames = await runOneTurn({
+      narrative: scriptedNarrative(["אלדד עומד במקומו."]),
+    });
+    expect(narrativeOf(frames).emitted.source).toBe("model");
+  });
+
+  it("stamps the prompt version on every narration whatever produced it", async () => {
+    const frames = await runOneTurn({ narrative: scriptedNarrative([]) });
+    expect(narrativeOf(frames).emitted.promptVersion).toBe(NARRATIVE_PROMPT_VERSION);
+  });
+
+  // Both hostiles are killed up front so a hero dodge advances straight back
+  // to the hero without the enemy sweep narrating too — otherwise a single
+  // `structured_action` would push THREE narrations per call (hero plus both
+  // goblins, all reading the same finite script), defeating a test that
+  // expects exactly one distinct narration per call.
+  it("feeds each narration into the next turn's window, newest last", async () => {
+    const store = createInMemoryEventStore();
+    const session = await freshSession(store);
+    session.state = {
+      ...session.state,
+      combatants: session.state.combatants.map((each) =>
+        each.faction === "hostile" ? { ...each, status: "dead" as const } : each,
+      ),
+    };
+
+    await drain(
+      handleCommand(session, dodge("hero", "c1"), {
+        ...portsWith(store),
+        narrative: scriptedNarrative(["ראשון."]),
+      }),
+    );
+    await drain(
+      handleCommand(session, dodge("hero", "c2"), {
+        ...portsWith(store),
+        narrative: scriptedNarrative(["שני."]),
+      }),
+    );
+    await drain(
+      handleCommand(session, dodge("hero", "c3"), {
+        ...portsWith(store),
+        narrative: scriptedNarrative(["שלישי."]),
+      }),
+    );
+
+    expect(session.recentNarrations).toEqual(["שני.", "שלישי."]);
+  });
+
+  // Closes the loop the test above does not: that one only proves the
+  // in-memory `session.recentNarrations` assignment inside `narrate`. Before
+  // this task, `narrative_emitted` payloads carried no `source`/
+  // `promptVersion`, so `NarrativeEmittedPayload.safeParse` in `loadSession`
+  // (session.ts) rejected every one of them and a reload always came back
+  // with an empty window regardless of what had actually been narrated —
+  // this test fails on that regression and only passes once a real payload
+  // round-trips through the store and back.
+  it("round-trips recentNarrations through loadSession once narrative_emitted actually parses", async () => {
+    const store = createInMemoryEventStore();
+    const session = await freshSession(store);
+    session.state = {
+      ...session.state,
+      combatants: session.state.combatants.map((each) =>
+        each.faction === "hostile" ? { ...each, status: "dead" as const } : each,
+      ),
+    };
+
+    await drain(
+      handleCommand(session, dodge("hero", "c1"), {
+        ...portsWith(store),
+        narrative: scriptedNarrative(["ראשון."]),
+      }),
+    );
+    await drain(
+      handleCommand(session, dodge("hero", "c2"), {
+        ...portsWith(store),
+        narrative: scriptedNarrative(["שני."]),
+      }),
+    );
+
+    const reloaded = await loadSession({ sessionId: "s1", store });
+    expect(reloaded?.recentNarrations).toEqual(["ראשון.", "שני."]);
+    // And the reload agrees with the live, in-memory session it was rebuilt
+    // from — the round trip reproduces the same window, not merely a
+    // non-empty one.
+    expect(reloaded?.recentNarrations).toEqual(session.recentNarrations);
+  });
 });
 
 describe("handleCommand — turn_affordances", () => {

@@ -17,7 +17,12 @@
 // turn.
 import { affordancesFor, applyTurn, seeded, validateExecuteTurn } from "@ai-dm/rules-engine";
 import type { TurnEffect } from "@ai-dm/rules-engine";
-import { availableActionsFor, createDeterministicNarrative } from "@ai-dm/agents";
+import {
+  availableActionsFor,
+  buildNarrationBrief,
+  createDeterministicNarrative,
+  NARRATIVE_PROMPT_VERSION,
+} from "@ai-dm/agents";
 import type {
   NarrativePort,
   TacticalAgent,
@@ -26,11 +31,17 @@ import type {
   TurnProposalSource,
 } from "@ai-dm/agents";
 import { reduce } from "@ai-dm/schemas";
-import type { ClientMessage, GameEvent, ServerFrame } from "@ai-dm/schemas";
+import type {
+  ClientMessage,
+  Condition,
+  GameEvent,
+  NarrationSource,
+  ServerFrame,
+} from "@ai-dm/schemas";
 import { SequenceConflictError, SessionMismatchError } from "./event-store.js";
 import type { EventStore } from "./event-store.js";
+import { NARRATION_WINDOW, worldFor } from "./session.js";
 import type { Session } from "./session.js";
-import { worldFor } from "./session.js";
 
 /** `apps/server/CLAUDE.md`: snapshot every 50 events. */
 export const SNAPSHOT_EVERY = 50;
@@ -119,14 +130,9 @@ export interface TurnPorts {
   turnTimeoutMs: number;
   /** Structured per-turn tactical metrics. Absent means no logging (tests). */
   metrics?: MetricsPort;
-}
-
-function namesFor(session: Session): Record<string, string | undefined> {
-  const names: Record<string, string | undefined> = {};
-  for (const [combatantId, statBlock] of session.built.statBlocks) {
-    names[combatantId] = statBlock.nameEnglish;
-  }
-  return names;
+  /** Hebrew condition labels, from `loadConditions()`. A port, not a file read:
+   *  the pipeline does no I/O of its own. */
+  conditionNamesHebrew: ReadonlyMap<Condition, string>;
 }
 
 /** `structured_action` and `free_text` carry one; `join` does not. */
@@ -214,6 +220,26 @@ async function* untilDeadline(
   }
 }
 
+/**
+ * Whether a narration ended on a sentence rather than mid-word.
+ *
+ * This is how the pipeline detects BOTH ways a narration comes up short — a
+ * provider that errored mid-stream, and a deadline that cut it — with one
+ * check. Neither cause is visible to the narrative port: the agent cannot see
+ * the deadline, and `untilDeadline` cannot see the provider. What both leave
+ * behind is the same artifact, an unterminated sentence, so that is what gets
+ * inspected.
+ *
+ * Inspects a trimmed copy and never a stored one: `narrative_emitted` must
+ * carry exactly the concatenation of the frames yielded for this turn.
+ */
+const NARRATION_TERMINATORS = [".", "!", "?", "…"] as const;
+
+function endsComplete(text: string): boolean {
+  const trimmed = text.trimEnd();
+  return trimmed !== "" && NARRATION_TERMINATORS.some((mark) => trimmed.endsWith(mark));
+}
+
 export async function* handleCommand(
   session: Session,
   command: ClientMessage,
@@ -275,34 +301,68 @@ export async function* handleCommand(
     deadline: number,
   ): AsyncIterable<ServerFrame> {
     const streamId = ports.uuid();
-    const actorName = session.built.statBlocks.get(actorId)?.nameEnglish ?? actorId;
-    const narrationInput = { actorName, effect, namesByCombatantId: namesFor(session) };
+    const input = buildNarrationBrief({
+      actorId,
+      effect,
+      combatants: session.state.combatants,
+      statBlocks: session.built.statBlocks,
+      conditionNamesHebrew: ports.conditionNamesHebrew,
+      sceneEnglish: session.sceneEnglish,
+      recentNarrations: session.recentNarrations,
+    });
+
     let text = "";
-    const primary = untilDeadline(ports.narrative.stream(narrationInput), deadline);
-    for await (const chunk of primary) {
+    for await (const chunk of untilDeadline(ports.narrative.stream(input), deadline)) {
       text += chunk;
       yield { type: "narrative_token", streamId, text: chunk };
     }
 
-    // The cap fired before a single token of `ports.narrative`'s own stream
-    // arrived. Render the rule outcome directly through the same terse,
-    // always-available port `apps/server/CLAUDE.md` names as the fallback —
-    // still streamed as narrative_token frames, just from a source that
-    // cannot itself hang.
+    // The ladder. Neither rung is deadline-bound: `untilDeadline` has already
+    // returned, template rendering cannot hang, and gating a fallback on a
+    // spent deadline would produce a silent turn — which reads to a player as
+    // a dropped connection.
+    let source: NarrationSource = "model";
+
     if (text.trim() === "") {
-      for await (const chunk of createDeterministicNarrative().stream(narrationInput)) {
+      // Nothing arrived at all. Render the rule outcome through the terse,
+      // always-available Hebrew port `apps/server/CLAUDE.md` names as the
+      // fallback — still streamed as narrative_token frames, just from a
+      // source that cannot itself hang.
+      source = "deterministic";
+    } else if (!endsComplete(text)) {
+      // Tokens arrived and then stopped mid-sentence. Those tokens are
+      // already on the player's screen and cannot be unsent, so the shortfall
+      // is repaired by streaming MORE rather than by rewriting less. The
+      // ellipsis marks the seam so a truncation reads as a truncation.
+      source = "completed";
+      const seam = "… ";
+      text += seam;
+      yield { type: "narrative_token", streamId, text: seam };
+    }
+
+    if (source !== "model") {
+      for await (const chunk of createDeterministicNarrative().stream(input)) {
         text += chunk;
         yield { type: "narrative_token", streamId, text: chunk };
       }
     }
-    // No further `.trim()`: this must carry exactly the concatenation of the
-    // narrative_token chunks yielded above (the other half of the guarantee
-    // Task 5's narrative port makes about its own streamed chunks). Both
-    // sources used here happen to need no trimming, but that is a property
-    // of those ports, not of this pipeline — a real LLM port with a
-    // leading/trailing space must not make replay diverge from what the
-    // client already rendered optimistically while streaming.
-    yield* emit("narrative_emitted", { actorId, streamId, text });
+
+    // No `.trim()`: this must carry exactly the concatenation of the
+    // narrative_token chunks yielded above, so that a replay cannot diverge
+    // from what the client already rendered optimistically while streaming.
+    //
+    // `promptVersion` is stamped even on a fallback turn: it records which
+    // prompt was in force when the turn ran, which is what a benchmark needs
+    // to avoid pooling runs across a prompt edit.
+    yield* emit("narrative_emitted", {
+      actorId,
+      streamId,
+      text,
+      source,
+      promptVersion: NARRATIVE_PROMPT_VERSION,
+    });
+
+    session.recentNarrations = [...session.recentNarrations, text].slice(-NARRATION_WINDOW);
   }
 
   /**

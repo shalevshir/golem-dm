@@ -61,6 +61,7 @@ async function startServer(overrides?: { narrative?: NarrativePort }) {
     uuid,
     seedFor: (rootSeed, sequence) => rootSeed * 1000 + sequence,
     turnTimeoutMs: 10_000,
+    conditionNamesHebrew: new Map([["prone", "שרוע"]]),
   };
   const registry = createSessionRegistry({
     store,

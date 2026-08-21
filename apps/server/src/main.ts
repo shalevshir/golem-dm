@@ -19,12 +19,23 @@ import { buildApp } from "./app.js";
 import { loadConfig } from "./config.js";
 import { createInMemoryEventStore } from "./core/event-store.js";
 import type { MetricsPort } from "./core/pipeline.js";
+import { loadConditions } from "./encounters/index.js";
 import { createSessionRegistry } from "./transport/http.js";
 
 const config = loadConfig(process.env);
 
 const store = createInMemoryEventStore();
 const clock = (): string => new Date().toISOString();
+
+// The pipeline does no file I/O of its own (`TurnPorts.conditionNamesHebrew`'s
+// doc comment) — this is where `loadConditions()`'s SRD data is turned into
+// the plain label lookup `buildNarrationBrief` reads from.
+const conditionNamesHebrew = new Map(
+  Array.from(
+    loadConditions(),
+    ([condition, definition]) => [condition, definition.nameHebrew] as const,
+  ),
+);
 
 // Per-turn latency, tokens and retries are recorded from day one
 // (apps/server/CLAUDE.md) through the pipeline's own `metrics` port (below),
@@ -81,6 +92,7 @@ const app = buildApp({
     seedFor: (rootSeed, sequence) => (rootSeed + sequence * 2_654_435_761) >>> 0,
     turnTimeoutMs: 10_000,
     metrics,
+    conditionNamesHebrew,
   },
 });
 logHolder.current = app.log;
