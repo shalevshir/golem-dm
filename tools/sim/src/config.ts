@@ -83,7 +83,14 @@ export function armById(armId: string): Arm {
 }
 
 export interface BenchmarkConfig {
-  mode: "probe" | "encounter" | "both";
+  /**
+   * `"narrative"` benchmarks the narrative agent alone (`live/narrative.ts`)
+   * and is handled by its own branch in `index.ts`, entirely separate from
+   * this file's 12-arm tactical matrix — `runLive`/`runSmoke` (`live/run.ts`,
+   * `smoke/run.ts`) never see it; their own `mode` parameter stays the
+   * narrower `"probe" | "encounter" | "both"` on purpose.
+   */
+  mode: "probe" | "encounter" | "both" | "narrative";
   live: boolean;
   arms: readonly Arm[];
   seeds: readonly number[];

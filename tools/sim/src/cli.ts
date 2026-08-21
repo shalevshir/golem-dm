@@ -8,7 +8,7 @@ import type { Arm, BenchmarkConfig } from "./config.js";
 import { ARMS, DEFAULT_CONFIG, SMOKE_ARM, armById } from "./config.js";
 import { scenarioById } from "./scenarios/index.js";
 
-const MODES = ["probe", "encounter", "both"] as const;
+const MODES = ["probe", "encounter", "both", "narrative"] as const;
 type Mode = (typeof MODES)[number];
 
 const KNOWN_FLAGS = ["--live", "--mode", "--seeds", "--scenarios", "--arms"] as const;
@@ -79,6 +79,21 @@ export function parseArgs(argv: readonly string[]): BenchmarkConfig {
   const rawSeeds = valueAfter(argv, "--seeds");
   const rawScenarios = valueAfter(argv, "--scenarios");
   const rawArms = valueAfter(argv, "--arms");
+
+  // `--mode narrative` always benchmarks the "narrative" role from
+  // `DEFAULT_MODEL_ROUTING`, never an arm from this file's tactical matrix —
+  // `runNarrativeBenchmark` takes a runtime, not an `Arm`. Honouring `--arms`
+  // here would suffer the same two dishonest outcomes the check below
+  // rejects it for outside `--live`: either a silent no-op or a report
+  // mislabelled with a model that was never called. Checked before the
+  // `--live` case so this more specific mistake gets the more specific
+  // message, whether or not `--live` was also passed.
+  if (rawArms !== undefined && rawMode === "narrative") {
+    throw new Error(
+      `--arms does not apply to --mode narrative; it always benchmarks the narrative role ` +
+        `from DEFAULT_MODEL_ROUTING, never the tactical arm matrix in config.ts. Drop --arms.`,
+    );
+  }
 
   // `runSmoke` always benchmarks `SMOKE_ARM` and never reads `config.arms` — a
   // scripted port answers identically regardless of which model id labels the

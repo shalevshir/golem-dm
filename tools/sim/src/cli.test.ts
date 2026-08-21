@@ -48,6 +48,29 @@ describe("parseArgs", () => {
     expect(() => parseArgs(["--arms", "gemini-3.1-flash-lite@low"])).toThrow("--live");
   });
 
+  it("reads the narrative mode", () => {
+    expect(parseArgs(["--mode", "narrative"]).mode).toBe("narrative");
+  });
+
+  it("accepts --mode narrative without --live", () => {
+    // narrative.ts's own philosophy, per tools/sim/CLAUDE.md: every mode runs
+    // against a scripted port without --live, and --live swaps the port only.
+    expect(parseArgs(["--mode", "narrative"]).live).toBe(false);
+  });
+
+  it("rejects --arms combined with --mode narrative, live or not", () => {
+    // Narrative mode always benchmarks the "narrative" role from
+    // DEFAULT_MODEL_ROUTING, never an arm from the tactical matrix — neither
+    // presence nor absence of --live changes that, unlike the plain --arms
+    // check above.
+    expect(() => parseArgs(["--mode", "narrative", "--arms", "gpt-5.4-nano@low"])).toThrow(
+      "--mode narrative",
+    );
+    expect(() =>
+      parseArgs(["--mode", "narrative", "--live", "--arms", "gpt-5.4-nano@low"]),
+    ).toThrow("--mode narrative");
+  });
+
   it("resolves the smoke arm's own id through --arms, when live", () => {
     // `SMOKE_ARM` is not in `ARMS` — `armById` special-cases its id so
     // `--arms scripted-fake@medium` behaves like any other known arm instead
