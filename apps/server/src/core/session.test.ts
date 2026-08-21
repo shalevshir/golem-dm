@@ -84,6 +84,7 @@ describe("createSession", () => {
   it("resolves the encounter's scene card once at creation", async () => {
     const session = await createSession({ ...baseInput(), encounterId: "goblin-ambush" });
     expect(session.sceneEnglish).toContain("hillside");
+    expect(session.sceneEnglish).toBe(session.built.sceneEnglish);
     expect(session.recentNarrations).toEqual([]);
   });
 });
@@ -180,6 +181,59 @@ describe("loadSession", () => {
     const loaded = await loadSession({ sessionId: session.state.sessionId, store });
     expect(loaded?.recentNarrations).toEqual(["שני.", "שלישי."]);
     expect(loaded?.recentNarrations).toHaveLength(NARRATION_WINDOW);
+    expect(loaded?.sceneEnglish).toBe(session.sceneEnglish);
+  });
+
+  it("tolerates a narrative_emitted payload missing source and promptVersion", async () => {
+    const store = createInMemoryEventStore();
+    const session = await createSession({ ...baseInput(), store, encounterId: "goblin-ambush" });
+
+    const events: GameEvent[] = [
+      {
+        eventId: "e-1",
+        sessionId: session.state.sessionId,
+        sequence: session.nextSequence++,
+        timestamp: "2026-08-21T00:00:00.000Z",
+        type: "narrative_emitted",
+        payload: {
+          actorId: "hero",
+          streamId: "s",
+          text: "ראשון.",
+          source: "model",
+          promptVersion: "v",
+        },
+      },
+      // Mirrors what `pipeline.ts`'s `emit("narrative_emitted", { actorId, streamId, text })`
+      // writes today — no `source`, no `promptVersion` (Task 12 is what adds them). A payload
+      // from before this convention existed must not stop the session from loading.
+      {
+        eventId: "e-2",
+        sessionId: session.state.sessionId,
+        sequence: session.nextSequence++,
+        timestamp: "2026-08-21T00:00:00.000Z",
+        type: "narrative_emitted",
+        payload: { actorId: "hero", streamId: "s", text: "רביעי." },
+      },
+      {
+        eventId: "e-3",
+        sessionId: session.state.sessionId,
+        sequence: session.nextSequence++,
+        timestamp: "2026-08-21T00:00:00.000Z",
+        type: "narrative_emitted",
+        payload: {
+          actorId: "hero",
+          streamId: "s",
+          text: "שני.",
+          source: "model",
+          promptVersion: "v",
+        },
+      },
+    ];
+    await store.append(session.state.sessionId, events);
+
+    const loaded = await loadSession({ sessionId: session.state.sessionId, store });
+    expect(loaded).not.toBeNull();
+    expect(loaded?.recentNarrations).toEqual(["ראשון.", "שני."]);
   });
 });
 
