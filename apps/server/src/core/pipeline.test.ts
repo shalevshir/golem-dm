@@ -1201,6 +1201,10 @@ describe("handleCommand — narration degradation ladder", () => {
     expect(emitted.source).toBe("model");
     expect(emitted.text).toBe(tokens.join(""));
     expect(emitted.text).toBe("אלדד פוגע בגובלין לוחם.");
+    // Fix round 1, Finding 2: this is the `model` rung's own promptVersion
+    // check — see the "stamps the prompt version" test's comment below for
+    // why it isn't checked only there.
+    expect(emitted.promptVersion).toBe(NARRATIVE_PROMPT_VERSION);
   });
 
   it("falls back to full Hebrew when the model yields nothing at all", async () => {
@@ -1212,6 +1216,17 @@ describe("handleCommand — narration degradation ladder", () => {
     expect(emitted.text).not.toMatch(/[a-zA-Z]/);
   });
 
+  // Fix round 1, Finding 3: whitespace is not the same as nothing —
+  // `narrate` (pipeline.ts) checks `text.trim() === ""`, not `text === ""`,
+  // specifically so a provider that emits only `" "`/`"\n"` still falls back
+  // rather than being treated as a (nonsensical) complete narration.
+  it("falls back to full Hebrew when the model yields only whitespace", async () => {
+    const frames = await runOneTurn({ narrative: scriptedNarrative([" "]) });
+    const { tokens, emitted } = narrativeOf(frames);
+    expect(emitted.source).toBe("deterministic");
+    expect(emitted.text).toBe(tokens.join(""));
+  });
+
   it("completes a truncated narration instead of storing a severed sentence", async () => {
     const frames = await runOneTurn({
       narrative: scriptedNarrative(["חרבו של אלדד מוצאת פתח מתח"]),
@@ -1221,15 +1236,30 @@ describe("handleCommand — narration degradation ladder", () => {
     expect(emitted.text).toBe(tokens.join(""));
     expect(emitted.text).toContain("… ");
     expect(emitted.text.trimEnd().endsWith(".")).toBe(true);
+    // Fix round 1, Finding 2: the `completed` rung's own promptVersion check.
+    expect(emitted.promptVersion).toBe(NARRATIVE_PROMPT_VERSION);
   });
 
-  it("treats a stream that ends on a full stop as complete, not truncated", async () => {
-    const frames = await runOneTurn({
-      narrative: scriptedNarrative(["אלדד עומד במקומו."]),
-    });
-    expect(narrativeOf(frames).emitted.source).toBe("model");
+  // Fix round 1, Finding 1: `NARRATION_TERMINATORS` (pipeline.ts) is
+  // `[".", "!", "?", "…"]`, and only "." had a test. A later "simplify" to
+  // e.g. `/[.!?]$/` would silently drop "…" and nothing here would notice —
+  // a model narration that legitimately trails off ("אלדד מהסס…") would then
+  // be misclassified `completed`, get a doubled ellipsis appended, and be
+  // permanently mislabelled in the event log. Every terminator gets its own
+  // case so none of the four can regress unnoticed.
+  it("treats a stream ending on any of the four terminators as complete, not truncated", async () => {
+    const endings = ["אלדד עומד במקומו.", "אלדד תוקף!", "מי הבא בתור?", "אלדד מהסס…"];
+    for (const text of endings) {
+      const frames = await runOneTurn({ narrative: scriptedNarrative([text]) });
+      expect(narrativeOf(frames).emitted.source).toBe("model");
+    }
   });
 
+  // This covers the `deterministic` rung; the `model` and `completed` rungs
+  // are covered by their own promptVersion assertions above (Fix round 1,
+  // Finding 2) rather than re-running a turn here — every payload every
+  // rung can produce is checked, split across the tests that already build
+  // each one, instead of duplicating three `runOneTurn` calls in one test.
   it("stamps the prompt version on every narration whatever produced it", async () => {
     const frames = await runOneTurn({ narrative: scriptedNarrative([]) });
     expect(narrativeOf(frames).emitted.promptVersion).toBe(NARRATIVE_PROMPT_VERSION);
