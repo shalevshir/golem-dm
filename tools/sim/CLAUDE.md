@@ -35,7 +35,7 @@ says nothing about any real model's tactical quality.
 
 | Flag          | Values                                                              | Default                 |
 | ------------- | ------------------------------------------------------------------- | ----------------------- |
-| `--mode`      | `probe` \| `encounter` \| `both`                                    | `both`                  |
+| `--mode`      | `probe` \| `encounter` \| `both` \| `narrative`                     | `both`                  |
 | `--live`      | absent \| present                                                   | absent                  |
 | `--arms`      | comma-separated arm ids from `src/config.ts`, **requires `--live`** | every arm when `--live` |
 | `--seeds`     | comma-separated integers                                            | `1,2,3,4,5`             |
@@ -51,6 +51,15 @@ that was never called.
 Probe mode is the paired comparison that picks the model: every arm sees
 byte-identical boards, derived from the scripted control encounter. Encounter
 mode plays the fight out and is the only source of win rate.
+
+`--mode narrative` is its own thing, not a third value on the tactical matrix
+above: it measures the narrative agent alone (time-to-first-token, output
+discipline, cost — see `src/live/narrative.ts`'s header comment for why it is
+scored separately from the tactical call that precedes a hostile turn), always
+against the `narrative` role in `DEFAULT_MODEL_ROUTING`, never an arm from
+`src/config.ts`. `--arms` is rejected in combination with it for the same
+reason it is rejected without `--live` above. `--live` still only swaps the
+port — `--mode narrative` alone runs the same benchmark against a scripted one.
 
 ## Live benchmarking
 
