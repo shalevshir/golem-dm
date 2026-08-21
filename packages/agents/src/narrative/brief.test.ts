@@ -60,11 +60,16 @@ describe("severityFor", () => {
   it("bands by status before it bands by damage", () => {
     expect(severityFor(1, 100, "dead")).toBe("felling");
     expect(severityFor(1, 100, "unconscious")).toBe("felling");
+    // "fled" is a legal member of the full status union `severityFor` takes,
+    // even though no attack beat actually produces it (see `narrowStatus`).
+    // It must NOT be read as a takedown the way "dead"/"unconscious" are.
+    expect(severityFor(1, 100, "fled")).toBe("graze");
   });
 
   it("bands a surviving target at the quarter and half thresholds", () => {
     expect(severityFor(1, 8, "alive")).toBe("graze");
     expect(severityFor(2, 8, "alive")).toBe("solid");
+    expect(severityFor(3, 8, "alive")).toBe("solid");
     expect(severityFor(4, 8, "alive")).toBe("severe");
   });
 
@@ -76,7 +81,9 @@ describe("severityFor", () => {
 describe("healthBandFor", () => {
   it("calls half bloodied and a quarter critical", () => {
     expect(healthBandFor(28, 28)).toBe("healthy");
+    expect(healthBandFor(15, 28)).toBe("healthy");
     expect(healthBandFor(14, 28)).toBe("bloodied");
+    expect(healthBandFor(8, 28)).toBe("bloodied");
     expect(healthBandFor(7, 28)).toBe("critical");
   });
 });
@@ -127,6 +134,40 @@ describe("buildNarrationBrief", () => {
       combatant({ combatantId: "goblin-a" }),
     ])).beats;
     expect(beat).not.toHaveProperty("severity");
+  });
+
+  it("keeps severity on a hit that dealt zero damage — landed is by outcome, not by damage", () => {
+    const effect: TurnEffect = {
+      ...EMPTY_EFFECT,
+      attacks: [{
+        attackerId: "hero", targetId: "goblin-a", actionId: "scimitar", outcome: "hit",
+        damage: 0, targetStatusAfter: "alive",
+        attackRoll: { naturalRoll: 15, rolls: [15], total: 20, targetArmorClass: 13 },
+        damageRolls: [],
+      }],
+    };
+    const [beat] = buildNarrationBrief(briefInput(effect, [
+      combatant({ combatantId: "hero", faction: "party" }),
+      combatant({ combatantId: "goblin-a" }),
+    ])).beats;
+    expect(beat).toMatchObject({ kind: "attack", outcome: "hit", severity: "graze" });
+  });
+
+  it("keeps severity and the outcome label on a critical hit", () => {
+    const effect: TurnEffect = {
+      ...EMPTY_EFFECT,
+      attacks: [{
+        attackerId: "hero", targetId: "goblin-a", actionId: "scimitar", outcome: "critical_hit",
+        damage: 6, targetStatusAfter: "alive",
+        attackRoll: { naturalRoll: 20, rolls: [20], total: 25, targetArmorClass: 13 },
+        damageRolls: [],
+      }],
+    };
+    const [beat] = buildNarrationBrief(briefInput(effect, [
+      combatant({ combatantId: "hero", faction: "party" }),
+      combatant({ combatantId: "goblin-a" }),
+    ])).beats;
+    expect(beat).toMatchObject({ kind: "attack", outcome: "critical_hit", severity: "severe" });
   });
 
   it("labels a target's conditions in Hebrew from the supplied map", () => {

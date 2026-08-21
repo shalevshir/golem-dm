@@ -29,29 +29,6 @@ const BLOODIED_FRACTION = 0.5;
 const CRITICAL_FRACTION = 0.25;
 
 /**
- * Status first, damage second. A creature the engine put down is `felling`
- * however little damage did it, and a creature still standing is never
- * `felling` however much did — which is what makes this band incapable of
- * contradicting the engine.
- */
-export function severityFor(
-  damage: number,
-  targetMaxHp: number,
-  statusAfter: AttackRecord["targetStatusAfter"],
-): Severity {
-  if (statusAfter !== "alive") return "felling";
-  if (damage >= targetMaxHp * SEVERE_FRACTION) return "severe";
-  if (damage >= targetMaxHp * SOLID_FRACTION) return "solid";
-  return "graze";
-}
-
-export function healthBandFor(currentHp: number, maxHp: number): HealthBand {
-  if (currentHp <= maxHp * CRITICAL_FRACTION) return "critical";
-  if (currentHp <= maxHp * BLOODIED_FRACTION) return "bloodied";
-  return "healthy";
-}
-
-/**
  * `"fled"` cannot reach an attack beat — `applyDamage` never derives it — but
  * the type must still be total. Mapping it to `"alive"` is the least-wrong
  * choice of the three: a creature that fled is emphatically not down, and
@@ -61,6 +38,33 @@ function narrowStatus(status: AttackRecord["targetStatusAfter"]): "alive" | "unc
   if (status === "dead") return "dead";
   if (status === "unconscious") return "unconscious";
   return "alive";
+}
+
+/**
+ * Status first, damage second. A creature the engine put down is `felling`
+ * however little damage did it, and a creature still standing is never
+ * `felling` however much did — which is what makes this band incapable of
+ * contradicting the engine. Routed through `narrowStatus` rather than a bare
+ * `!== "alive"` check so `"fled"` — a legal member of `targetStatusAfter`'s
+ * full union, even though no attack beat actually produces it — reads as
+ * still-standing here exactly as it does there, instead of the two functions
+ * silently disagreeing about the same status.
+ */
+export function severityFor(
+  damage: number,
+  targetMaxHp: number,
+  statusAfter: AttackRecord["targetStatusAfter"],
+): Severity {
+  if (narrowStatus(statusAfter) !== "alive") return "felling";
+  if (damage >= targetMaxHp * SEVERE_FRACTION) return "severe";
+  if (damage >= targetMaxHp * SOLID_FRACTION) return "solid";
+  return "graze";
+}
+
+export function healthBandFor(currentHp: number, maxHp: number): HealthBand {
+  if (currentHp <= maxHp * CRITICAL_FRACTION) return "critical";
+  if (currentHp <= maxHp * BLOODIED_FRACTION) return "bloodied";
+  return "healthy";
 }
 
 function creatureFor(input: NarrationBriefInput, combatantId: string): NarratedCreature {
@@ -82,8 +86,8 @@ function creatureFor(input: NarrationBriefInput, combatantId: string): NarratedC
 }
 
 function maxHpOf(input: NarrationBriefInput, combatantId: string): number {
-  // 1 rather than 0: this is a divisor for the severity band, and a stray 0
-  // would band every graze as `severe`.
+  // 1 rather than 0: this is a multiplicand for the severity band's fraction
+  // thresholds, and a stray 0 would band every graze as `severe`.
   return input.combatants.find((each) => each.combatantId === combatantId)?.maxHp ?? 1;
 }
 
@@ -146,6 +150,11 @@ export function buildNarrationBrief(input: NarrationBriefInput): NarrationInput 
 
   return {
     actor: creatureFor(input, input.actorId),
+    // Folds `neutral` (and an actor missing from `combatants`) into
+    // `"hostile"`. Nothing constructs a neutral combatant today, so this is
+    // deliberately unexercised — but be aware it is a narrower call than
+    // `pulseFor`'s `hostilesStanding`, which filters strictly on
+    // `faction === "hostile"` and would not count that same combatant.
     actorSide: actor?.faction === "party" ? "party" : "hostile",
     beats,
     pulse: pulseFor(input),
