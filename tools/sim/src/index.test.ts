@@ -17,7 +17,11 @@ interface LiveReportShape {
 interface NarrativeReportShape {
   live: boolean;
   promptVersion: string;
-  samples: readonly { hebrew: string }[];
+  samples: readonly { hebrew: string; errorCode?: string }[];
+  digitViolations: number;
+  nonHebrewOutputs: number;
+  overLengthOutputs: number;
+  erroredSamples: number;
   usage: { costIsUnderreported: boolean };
 }
 
@@ -163,7 +167,17 @@ describe("main — --live", () => {
     // same tell the probe test above reads off `adapterErrorCodes`.
     for (const sample of report.samples) {
       expect(sample.hebrew).toBe("");
+      expect(sample.errorCode).toBe("provider_error");
     }
     expect(report.usage.costIsUnderreported).toBe(true);
+    // The exact scenario the review found: with every one of these 9 streams
+    // failing on a missing key, a harness that folded errored samples into
+    // the discipline counters would report `nonHebrewOutputs` equal to the
+    // sample count here — indistinguishable from a prompt that answered in
+    // English every time. It must not.
+    expect(report.erroredSamples).toBe(report.samples.length);
+    expect(report.nonHebrewOutputs).toBe(0);
+    expect(report.digitViolations).toBe(0);
+    expect(report.overLengthOutputs).toBe(0);
   }, 15_000);
 });

@@ -6,7 +6,6 @@
 // under `runs/`. Add `--live` to benchmark real models, which requires the
 // provider credentials in the environment and is the operator's call to make.
 import { execFileSync } from "node:child_process";
-import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
@@ -19,7 +18,7 @@ import {
 import { parseArgs } from "./cli.js";
 import { runLive } from "./live/run.js";
 import { runNarrativeBenchmark, SCRIPTED_BRIEFS } from "./live/narrative.js";
-import type { NarrativeReport } from "./live/narrative.js";
+import { writeNarrativeReport } from "./live/narrative-report.js";
 import { runSmoke } from "./smoke/run.js";
 import { writeReport } from "./run/report.js";
 
@@ -64,98 +63,6 @@ function narrativeSmokeClock(): () => number {
     ticks += 1;
     return ticks * NARRATIVE_TICK_MS;
   };
-}
-
-interface NarrativeRunReport extends NarrativeReport {
-  runId: string;
-  generatedAt: string;
-  gitCommit: string;
-  promptVersion: string;
-  live: boolean;
-}
-
-function money(value: number | null): string {
-  return value === null ? "unpriced" : `$${value.toFixed(4)}`;
-}
-
-/**
- * Minimal by design: aggregate stats a human can read at a glance. The
- * per-sample review — English beats next to Hebrew text, for a native
- * speaker — is task 16's `renderReviewSheet`, built from this same report's
- * `samples`, not duplicated here.
- */
-function renderNarrativeMarkdown(report: NarrativeRunReport): string {
-  const lines: string[] = [];
-
-  lines.push(`# Narrative benchmark — ${report.runId}`);
-  lines.push("");
-  lines.push(`- Mode: **${report.live ? "live" : "smoke (scripted port, no network)"}**`);
-  lines.push(`- Prompt version: \`${report.promptVersion}\``);
-  lines.push(`- Commit: \`${report.gitCommit}\``);
-  lines.push(`- Generated at: ${report.generatedAt} (not part of the determinism claim)`);
-  lines.push(`- Samples: ${String(report.samples.length)}`);
-  lines.push("");
-
-  if (!report.live) {
-    lines.push(
-      "> **Smoke run.** The output above is a scripted placeholder, not a real model " +
-        "response. These numbers verify the pipeline and the metric arithmetic; they say " +
-        "nothing about the real narrative agent's latency or Hebrew quality.",
-    );
-    lines.push("");
-  }
-
-  lines.push("## Time to first token");
-  lines.push("");
-  lines.push(`- p50: ${report.ttftMsP50.toFixed(0)} ms (exit criterion: < 1500 ms)`);
-  lines.push(`- p95: ${report.ttftMsP95.toFixed(0)} ms`);
-  lines.push("");
-
-  lines.push("## Output discipline");
-  lines.push("");
-  lines.push(`- Digit violations: ${String(report.digitViolations)} / ${String(report.samples.length)}`);
-  lines.push(`- Non-Hebrew outputs: ${String(report.nonHebrewOutputs)} / ${String(report.samples.length)}`);
-  lines.push(`- Over-length outputs: ${String(report.overLengthOutputs)} / ${String(report.samples.length)}`);
-  lines.push("");
-  lines.push(
-    "Any non-zero count above is a prompt bug, not a tolerance: fix the prompt, bump " +
-      "`NARRATIVE_PROMPT_VERSION`, re-pin the hash, and re-measure.",
-  );
-  lines.push("");
-
-  lines.push("## Cost");
-  lines.push("");
-  lines.push(`- Prompt tokens: ${String(report.usage.promptTokens)}`);
-  lines.push(`- Completion tokens: ${String(report.usage.completionTokens)}`);
-  lines.push(
-    `- Cost: ${money(report.usage.costUsd)} total, ${money(report.usage.costPerNarrationUsd)} per narration`,
-  );
-  if (report.usage.costIsUnderreported) {
-    lines.push("");
-    lines.push(
-      "> **Cost is under-reported.** At least one narration was billed but reported no " +
-        "token usage, so the figures above are a lower bound. Cached-token share is not " +
-        "reported at all: no adapter in this repo surfaces a cache-read count.",
-    );
-  }
-  lines.push("");
-
-  return lines.join("\n");
-}
-
-function writeNarrativeReport(
-  report: NarrativeRunReport,
-  runsDir: string,
-): { jsonPath: string; markdownPath: string } {
-  const directory = join(runsDir, report.runId);
-  mkdirSync(directory, { recursive: true });
-
-  const jsonPath = join(directory, "report.json");
-  const markdownPath = join(directory, "report.md");
-  writeFileSync(jsonPath, `${JSON.stringify(report, null, 2)}\n`, "utf8");
-  writeFileSync(markdownPath, renderNarrativeMarkdown(report), "utf8");
-
-  return { jsonPath, markdownPath };
 }
 
 /**

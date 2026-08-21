@@ -12,7 +12,7 @@ import { runNarrativeBenchmark, SCRIPTED_BRIEFS } from "./narrative.js";
 const USAGE = { promptTokens: 900, completionTokens: 40, totalTokens: 940 };
 
 describe("runNarrativeBenchmark", () => {
-  it("covers every beat kind and severity band in its corpus", () => {
+  it("covers every beat kind, severity band, non-alive status, gender, and prior narration in its corpus", () => {
     const kinds = new Set(SCRIPTED_BRIEFS.flatMap((brief) => brief.beats.map((beat) => beat.kind)));
     expect(kinds).toEqual(new Set(["move", "attack", "other-action", "unresolved", "hold"]));
 
@@ -22,6 +22,31 @@ describe("runNarrativeBenchmark", () => {
       ),
     );
     expect(severities).toEqual(new Set(["graze", "solid", "severe", "felling"]));
+
+    // A masculine-only fixture would still pass every test above — the spec
+    // singles this dimension out by name for exactly that reason. Checked
+    // separately for actors and for attack targets: `deterministic.ts`
+    // agrees the actor's OWN verb with the actor's gender and a falling
+    // target's verb with the TARGET's gender, two distinct agreement points
+    // a renderer could get right for one role and wrong for the other.
+    const actorGenders = new Set(SCRIPTED_BRIEFS.map((brief) => brief.actor.gender));
+    expect(actorGenders).toEqual(new Set(["masculine", "feminine"]));
+
+    const targetGenders = new Set(
+      SCRIPTED_BRIEFS.flatMap((brief) =>
+        brief.beats.flatMap((beat) => (beat.kind === "attack" ? [beat.target.gender] : [])),
+      ),
+    );
+    expect(targetGenders).toEqual(new Set(["masculine", "feminine"]));
+
+    const statusAftersBeyondAlive = new Set(
+      SCRIPTED_BRIEFS.flatMap((brief) =>
+        brief.beats.flatMap((beat) => (beat.kind === "attack" && beat.statusAfter !== "alive" ? [beat.statusAfter] : [])),
+      ),
+    );
+    expect(statusAftersBeyondAlive).toEqual(new Set(["unconscious", "dead"]));
+
+    expect(SCRIPTED_BRIEFS.some((brief) => brief.recentNarrations.length > 0)).toBe(true);
   });
 
   it("counts a digit in the output as a violation", async () => {
@@ -55,6 +80,7 @@ describe("runNarrativeBenchmark", () => {
       now: (() => { let t = 0; return () => (t += 100); })(),
     });
     expect(report.nonHebrewOutputs).toBe(SCRIPTED_BRIEFS.length);
+    expect(report.digitViolations).toBe(0);
   });
 
   it("reports the median time to the first token, not to the last", async () => {
@@ -190,7 +216,7 @@ describe("runNarrativeBenchmark", () => {
     expect(report.usage.costUsd).not.toBeNull();
   });
 
-  it("marks usage as under-reported when a stream ends in a provider error", async () => {
+  it("excludes an errored stream from usage, every classification counter, and the TTFT percentiles", async () => {
     const report = await runNarrativeBenchmark({
       runtime: createAgentRuntime({
         routing: DEFAULT_MODEL_ROUTING,
@@ -206,5 +232,46 @@ describe("runNarrativeBenchmark", () => {
       now: (() => { let t = 0; return () => (t += 100); })(),
     });
     expect(report.usage.costIsUnderreported).toBe(true);
+    // The exact bug the review found: an errored stream's empty text must
+    // not be scored as a Hebrew-discipline violation, and its ttftMs — which,
+    // with no token ever arriving, measures the gap to the ERROR — must not
+    // be pooled into the latency percentiles.
+    expect(report.erroredSamples).toBe(SCRIPTED_BRIEFS.length);
+    expect(report.nonHebrewOutputs).toBe(0);
+    expect(report.digitViolations).toBe(0);
+    expect(report.overLengthOutputs).toBe(0);
+    expect(report.ttftMsP50).toBe(0);
+    expect(report.ttftMsP95).toBe(0);
+    for (const sample of report.samples) {
+      expect(sample.errorCode).toBe("provider_error");
+      expect(sample.digitViolation).toBe(false);
+      expect(sample.nonHebrew).toBe(false);
+      expect(sample.overLength).toBe(false);
+    }
+  });
+
+  it("keeps a clean sample's own TTFT and classification when a different sample in the same run errored", async () => {
+    // The more realistic live shape: one transient failure (a rate limit,
+    // say) among otherwise-healthy streams, not every call failing at once.
+    const report = await runNarrativeBenchmark({
+      runtime: createAgentRuntime({
+        routing: DEFAULT_MODEL_ROUTING,
+        port: createFakePort({
+          stream: [
+            [{ type: "error" as const, error: { code: "provider_error" as const, message: "boom" } }],
+            ...SCRIPTED_BRIEFS.slice(1).map(() => [
+              { type: "text-delta" as const, text: "אלדד עומד במקומו." },
+              { type: "finish" as const, text: "אלדד עומד במקומו.", usage: USAGE },
+            ]),
+          ],
+        }),
+      }),
+      now: (() => { let t = 0; return () => (t += 100); })(),
+    });
+    expect(report.erroredSamples).toBe(1);
+    expect(report.samples[0]?.errorCode).toBe("provider_error");
+    expect(report.samples.slice(1).every((sample) => sample.errorCode === undefined)).toBe(true);
+    expect(report.nonHebrewOutputs).toBe(0);
+    expect(report.ttftMsP50).toBeGreaterThan(0);
   });
 });

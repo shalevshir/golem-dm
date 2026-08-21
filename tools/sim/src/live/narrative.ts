@@ -9,7 +9,14 @@
 // what should be a property of a different agent. Fallback rate is a
 // session property for the same reason — computed separately from
 // `narrative_emitted.source` in a played session's log, not here.
-import type { AgentRuntime, NarratedCreature, NarrationBeat, NarrationInput, NarrativeFinish } from "@ai-dm/agents";
+import type {
+  AdapterErrorCode,
+  AgentRuntime,
+  NarratedCreature,
+  NarrationBeat,
+  NarrationInput,
+  NarrativeFinish,
+} from "@ai-dm/agents";
 import { createHebrewNarrative } from "@ai-dm/agents";
 import { costUsd } from "../pricing.js";
 import { percentile } from "../run/metrics.js";
@@ -191,7 +198,7 @@ export const SCRIPTED_BRIEFS: readonly NarrationInput[] = [
 // `HEBREW` is the Hebrew Unicode block (U+0590-U+05FF) spelled as an escape
 // rather than the literal glyphs, so the source stays unambiguous in a plain
 // diff — same range, same rule.
-const HEBREW = /[֐-׿]/;
+const HEBREW = /[\u0590-\u05FF]/;
 const DIGIT = /[0-9]/;
 const SENTENCE_LIMIT = 3;
 
@@ -244,6 +251,20 @@ export interface NarrativeSample {
   digitViolation: boolean;
   nonHebrew: boolean;
   overLength: boolean;
+  /**
+   * Present when `createHebrewNarrative` ended this stream on a provider
+   * error (`NarrativeFinish.error`) rather than a clean finish. `hebrew` is
+   * then whatever partial (often empty) text arrived before the failure —
+   * not evidence about the prompt's Hebrew discipline, and `ttftMs` is not
+   * evidence about first-token latency either (an empty stream measures
+   * time-to-error, not time-to-first-token). Every sample here is still
+   * excluded from `digitViolations`/`nonHebrewOutputs`/`overLengthOutputs`/
+   * `ttftMsP50`/`ttftMsP95` on the report, and its own three violation
+   * booleans are forced `false` rather than computed from that partial text
+   * — so summing the per-sample booleans directly, instead of reading the
+   * report's own aggregates, cannot silently reintroduce this bug either.
+   */
+  errorCode?: AdapterErrorCode;
 }
 
 export interface NarrativeUsageSummary {
@@ -255,13 +276,21 @@ export interface NarrativeUsageSummary {
   /**
    * Shaped like `run/report.ts`'s `costIsUnderreported`: true when a stream
    * finished without reporting usage, so the cost above is a lower bound.
-   * Cached-token share is deliberately not represented anywhere in this
-   * type — no `TokenUsage` field and no adapter in this repo surfaces a
-   * cache-read count (verified by grep across `packages/agents`), so it
-   * cannot be measured, and fabricating a field for it would be worse than
-   * omitting it.
    */
   costIsUnderreported: boolean;
+  /**
+   * Always `null`: no `TokenUsage` field and no adapter in this repo
+   * surfaces a cache-read count (verified by grep across `packages/agents`),
+   * so the share cannot be measured. Typed as the literal `null` rather than
+   * `number | null` on purpose — an actual implementation would have to
+   * change this field's type, not just its value, which is a stronger
+   * signal than a comment that this is still unmeasured. Declared as a
+   * field, not just a comment, so `report.json` states the gap too, and
+   * printed unconditionally in the markdown Cost section rather than only
+   * inside the `costIsUnderreported` branch, which does not fire on a
+   * healthy run.
+   */
+  cachedTokenShare: null;
 }
 
 export interface NarrativeReport {
@@ -271,6 +300,15 @@ export interface NarrativeReport {
   digitViolations: number;
   nonHebrewOutputs: number;
   overLengthOutputs: number;
+  /**
+   * Streams that ended in a provider error rather than a clean finish.
+   * Excluded from every count and percentile above — see
+   * `NarrativeSample.errorCode`. A live run finding this non-zero is a
+   * transient provider issue (rate limit, transport failure), not a prompt
+   * bug — "any non-zero count is a prompt bug" applies to the three
+   * discipline counters above, never to this one.
+   */
+  erroredSamples: number;
   usage: NarrativeUsageSummary;
 }
 
@@ -288,12 +326,18 @@ export async function runNarrativeBenchmark(
   // Instrumentation is off the token stream by design (`hebrew.ts`), so
   // usage/error for the brief just consumed is read back out of this after
   // its `for await` loop below has run to completion — the `finally` inside
-  // `createHebrewNarrative` has already fired by then.
-  let finish: NarrativeFinish | undefined;
+  // `createHebrewNarrative` has already fired by then. Pushed to by
+  // `onFinish` and read by index, rather than one shared `let` reassigned by
+  // the closure and reset every iteration: a reset needed a type-narrowing
+  // workaround (TypeScript cannot see that the loop below indirectly
+  // triggers the closure, so a bare `finish = undefined` narrowed every
+  // later read in the same iteration to the literal type `undefined`).
+  // Indexing a plain array carries no such narrowing to fight.
+  const finishes: NarrativeFinish[] = [];
   const narrator = createHebrewNarrative({
     runtime: options.runtime,
     onFinish: (result) => {
-      finish = result;
+      finishes.push(result);
     },
   });
 
@@ -302,19 +346,12 @@ export async function runNarrativeBenchmark(
   let digitViolations = 0;
   let nonHebrewOutputs = 0;
   let overLengthOutputs = 0;
+  let erroredSamples = 0;
   let promptTokens = 0;
   let completionTokens = 0;
   let attemptsMissingUsage = 0;
 
-  for (const brief of SCRIPTED_BRIEFS) {
-    // Cast, not a plain `finish = undefined`: TypeScript cannot see that the
-    // `for await` loop below indirectly invokes `onFinish` (buried inside
-    // `createHebrewNarrative`'s async generator), so a bare reset narrows
-    // `finish` to the literal type `undefined` for the rest of the loop
-    // body — including after the loop — making the "usage present" branch
-    // below look unreachable (`never`, TS2339). The cast keeps the runtime
-    // reset but tells the checker the variable's type stays the full union.
-    finish = undefined as NarrativeFinish | undefined;
+  for (const [index, brief] of SCRIPTED_BRIEFS.entries()) {
     const startedAt = now();
     let firstTokenAt: number | undefined;
     let text = "";
@@ -331,14 +368,32 @@ export async function runNarrativeBenchmark(
     }
 
     const ttftMs = (firstTokenAt ?? now()) - startedAt;
-    ttftValues.push(ttftMs);
+    const finish = finishes[index];
+    const errorCode = finish?.error?.code;
 
-    const digitViolation = DIGIT.test(text);
-    const nonHebrew = !HEBREW.test(text);
-    const overLength = sentenceCount(text) > SENTENCE_LIMIT;
-    if (digitViolation) digitViolations += 1;
-    if (nonHebrew) nonHebrewOutputs += 1;
-    if (overLength) overLengthOutputs += 1;
+    // A stream that ended in a provider error is not evidence about either
+    // measurement: an empty or truncated `text` is a transient failure, not
+    // the model failing Hebrew discipline, and `ttftMs` on a stream with no
+    // token at all measures the gap to the ERROR, not to a first token.
+    // Neither is folded into the aggregates below, and the sample's own
+    // three booleans are forced `false` — not computed from that partial
+    // text — so summing them directly instead of reading the report's own
+    // counters cannot silently reintroduce this bug either.
+    let digitViolation = false;
+    let nonHebrew = false;
+    let overLength = false;
+
+    if (errorCode === undefined) {
+      ttftValues.push(ttftMs);
+      digitViolation = DIGIT.test(text);
+      nonHebrew = !HEBREW.test(text);
+      overLength = sentenceCount(text) > SENTENCE_LIMIT;
+      if (digitViolation) digitViolations += 1;
+      if (nonHebrew) nonHebrewOutputs += 1;
+      if (overLength) overLengthOutputs += 1;
+    } else {
+      erroredSamples += 1;
+    }
 
     samples.push({
       source: brief,
@@ -348,6 +403,7 @@ export async function runNarrativeBenchmark(
       digitViolation,
       nonHebrew,
       overLength,
+      ...(errorCode === undefined ? {} : { errorCode }),
     });
 
     if (finish?.usage === undefined) {
@@ -369,12 +425,14 @@ export async function runNarrativeBenchmark(
     digitViolations,
     nonHebrewOutputs,
     overLengthOutputs,
+    erroredSamples,
     usage: {
       promptTokens,
       completionTokens,
       costUsd: cost,
       costPerNarrationUsd,
       costIsUnderreported: attemptsMissingUsage > 0,
+      cachedTokenShare: null,
     },
   };
 }

@@ -350,9 +350,18 @@ export function renderMarkdown(report: RunReport): string {
   return lines.join("\n");
 }
 
-export function writeReport(
-  report: RunReport,
+/**
+ * The on-disk shape every mode's report shares: one JSON (the artefact) and
+ * one markdown (for a human) under `runsDir/<report.runId>/`. Generic over
+ * the report type and its own renderer so a second mode never has to
+ * re-implement this — narrative mode's `live/narrative-report.ts` calls this
+ * too, rather than duplicating it the way an earlier version of that file
+ * did.
+ */
+export function writeRunArtifacts<T extends { runId: string }>(
+  report: T,
   runsDir: string,
+  renderMarkdownFn: (report: T) => string,
 ): { jsonPath: string; markdownPath: string } {
   const directory = join(runsDir, report.runId);
   mkdirSync(directory, { recursive: true });
@@ -360,7 +369,14 @@ export function writeReport(
   const jsonPath = join(directory, "report.json");
   const markdownPath = join(directory, "report.md");
   writeFileSync(jsonPath, `${JSON.stringify(report, null, 2)}\n`, "utf8");
-  writeFileSync(markdownPath, renderMarkdown(report), "utf8");
+  writeFileSync(markdownPath, renderMarkdownFn(report), "utf8");
 
   return { jsonPath, markdownPath };
+}
+
+export function writeReport(
+  report: RunReport,
+  runsDir: string,
+): { jsonPath: string; markdownPath: string } {
+  return writeRunArtifacts(report, runsDir, renderMarkdown);
 }
