@@ -9,7 +9,7 @@
 import { randomUUID } from "node:crypto";
 import {
   createAgentRuntime,
-  createDeterministicNarrative,
+  createHebrewNarrative,
   createTacticalAgent,
   createVercelPort,
   DEFAULT_MODEL_ROUTING,
@@ -19,12 +19,23 @@ import { buildApp } from "./app.js";
 import { loadConfig } from "./config.js";
 import { createInMemoryEventStore } from "./core/event-store.js";
 import type { MetricsPort } from "./core/pipeline.js";
+import { loadConditions } from "./encounters/index.js";
 import { createSessionRegistry } from "./transport/http.js";
 
 const config = loadConfig(process.env);
 
 const store = createInMemoryEventStore();
 const clock = (): string => new Date().toISOString();
+
+// The pipeline does no file I/O of its own (`TurnPorts.conditionNamesHebrew`'s
+// doc comment) — this is where `loadConditions()`'s SRD data is turned into
+// the plain label lookup `buildNarrationBrief` reads from.
+const conditionNamesHebrew = new Map(
+  Array.from(
+    loadConditions(),
+    ([condition, definition]) => [condition, definition.nameHebrew] as const,
+  ),
+);
 
 // Per-turn latency, tokens and retries are recorded from day one
 // (apps/server/CLAUDE.md) through the pipeline's own `metrics` port (below),
@@ -53,9 +64,22 @@ const clock = (): string => new Date().toISOString();
 // allows `warn`/`error` — but is moot now that there's a real logger to
 // use instead.
 const logHolder: { current?: FastifyBaseLogger } = {};
+
+// A runtime of its own, separate from the tactical one above (each wraps its
+// own `createVercelPort({})`): the two agents call different roles and are
+// instrumented independently, so nothing is gained by sharing one instance
+// and it would tie their lifecycles together for no reason.
+const narrativeRuntime = createAgentRuntime({
+  routing: DEFAULT_MODEL_ROUTING,
+  port: createVercelPort({}),
+});
+
 const metrics: MetricsPort = {
   recordTacticalTurn(turn) {
     logHolder.current?.info(turn, "tactical_turn_metrics");
+  },
+  recordNarrativeTurn(record) {
+    logHolder.current?.info(record, "narrative_turn_metrics");
   },
 };
 
@@ -72,7 +96,21 @@ const app = buildApp({
     tactical: createTacticalAgent({
       runtime: createAgentRuntime({ routing: DEFAULT_MODEL_ROUTING, port: createVercelPort({}) }),
     }),
-    narrative: createDeterministicNarrative(),
+    // Wired unconditionally — `loadConfig`'s own comment is that it proves
+    // only that *some* provider key is set, not the one
+    // `DEFAULT_MODEL_ROUTING.narrative` names. A missing Anthropic key
+    // degrades through `narrate()`'s ladder (pipeline.ts) instead: one failed
+    // call per turn, logged via `onFinish` below and `narrative_turn_metrics`
+    // above. A silently English game would be worse than a logged,
+    // Hebrew-fallback one.
+    narrative: createHebrewNarrative({
+      runtime: narrativeRuntime,
+      onFinish: (finish) => {
+        // `actorId` is stamped by the pipeline, which knows whose turn it
+        // is; the agent does not.
+        logHolder.current?.info({ ...finish, agent: "narrative" }, "narrative_stream_finished");
+      },
+    }),
     clock,
     uuid: randomUUID,
     // Derived, not random: the same root seed and the same commands must
@@ -81,8 +119,21 @@ const app = buildApp({
     seedFor: (rootSeed, sequence) => (rootSeed + sequence * 2_654_435_761) >>> 0,
     turnTimeoutMs: 10_000,
     metrics,
+    conditionNamesHebrew,
   },
 });
 logHolder.current = app.log;
+
+// Named at boot, not just per-turn: a missing/invalid key for this exact
+// provider is otherwise only diagnosable from a turn that quietly fell back,
+// which could be minutes into the first session. This line makes the
+// configured provider/model the first thing an operator checks.
+app.log.info(
+  {
+    provider: DEFAULT_MODEL_ROUTING.narrative.provider,
+    model: DEFAULT_MODEL_ROUTING.narrative.modelId,
+  },
+  "narrative_model_configured",
+);
 
 await app.listen({ port: config.port, host: "0.0.0.0" });

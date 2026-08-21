@@ -34,6 +34,11 @@ describe("encounter catalogue", () => {
     expect(factions).toEqual(new Set(["party", "hostile"]));
   });
 
+  it("carries the scene card onto the built encounter", () => {
+    const built = buildEncounterById("goblin-ambush");
+    expect(built.sceneEnglish).toContain("hillside");
+  });
+
   // C-14: the brief's original geometry (hero and goblins ~45 ft apart) makes
   // every melee proposal illegal forever. Prove the corrected geometry does
   // not have that problem by actually running a scripted melee attack through

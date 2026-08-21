@@ -2,13 +2,24 @@
   "monsterId": "wolf",
   "nameEnglish": "Wolf",
   "nameHebrew": "זאב",
+  "grammaticalGender": "masculine",
   "size": "medium",
   "creatureType": "Beast",
   "alignment": "Unaligned",
   "armorClass": 12,
-  "hitPoints": { "average": 11, "diceNotation": "2d8+2" },
+  "hitPoints": {
+    "average": 11,
+    "diceNotation": "2d8+2"
+  },
   "speedFeet": 40,
-  "abilities": { "str": 14, "dex": 15, "con": 12, "int": 3, "wis": 12, "cha": 6 },
+  "abilities": {
+    "str": 14,
+    "dex": 15,
+    "con": 12,
+    "int": 3,
+    "wis": 12,
+    "cha": 6
+  },
   "challengeRating": "1/4",
   "proficiencyBonus": 2,
   "attacksPerAction": 1,
@@ -19,7 +30,11 @@
       "nameHebrew": "נשיכה",
       "attackBonus": 4,
       "reachFeet": 5,
-      "damage": { "diceNotation": "1d6+2", "averageDamage": 5, "damageType": "piercing" }
+      "damage": {
+        "diceNotation": "1d6+2",
+        "averageDamage": 5,
+        "damageType": "piercing"
+      }
     }
   ]
 }

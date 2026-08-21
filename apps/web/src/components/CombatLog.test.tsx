@@ -27,7 +27,7 @@ describe("CombatLog", () => {
       { actorId: "hero", actionType: "dodge", movedFeet: 0, attacks: [], forfeited: false },
     ];
     render(<CombatLog turns={turns} catalogue={catalogue} />);
-    expect(screen.getByText(/Guard/)).toBeInTheDocument();
+    expect(screen.getByText(/שומר/)).toBeInTheDocument();
     expect(screen.getByText(new RegExp(he.log.turnOf))).toBeInTheDocument();
   });
 
@@ -45,8 +45,8 @@ describe("CombatLog", () => {
       (each) => each.textContent,
     );
     expect(headers).toHaveLength(2);
-    expect(headers[0]).toContain("Goblin Warrior");
-    expect(headers[1]).toContain("Guard");
+    expect(headers[0]).toContain("גובלין לוחם");
+    expect(headers[1]).toContain("שומר");
   });
 
   it("renders a non-attack action's label", () => {
@@ -180,13 +180,16 @@ describe("CombatLog", () => {
     expect(screen.getByText(/unknown-id/)).toBeInTheDocument();
   });
 
-  it("wraps every English name in <bdi> inside the RTL document", () => {
-    // Pins the mixed-direction convention (apps/web/CLAUDE.md) the same way
-    // Grid.test.tsx and ActionBar.test.tsx pin it for their own English
-    // fragments: not merely that an English name appears somewhere in the
-    // rendered text, but that it appears as its own <bdi> node. A turn with
-    // an attack exercises both the turn header's actor name and the attack
-    // line's attacker/target names.
+  it("wraps every Hebrew name in <bdi> inside the RTL document", () => {
+    // Pins the mixed-direction convention (apps/web/CLAUDE.md): the rendered
+    // name is Hebrew now, same direction as the surrounding document, but
+    // <bdi> still isolates it because the fallback used when the catalogue
+    // lookup misses (see "falls back to the raw actorId" above) is a Latin
+    // id -- not merely that a Hebrew name appears somewhere in the rendered
+    // text, but that it appears as its own <bdi> node, the same way
+    // Grid.test.tsx and ActionBar.test.tsx pin it for their own name
+    // fragments. A turn with an attack exercises both the turn header's
+    // actor name and the attack line's attacker/target names.
     const turns: CombatLogTurn[] = [
       {
         actorId: "goblin-a",
@@ -210,7 +213,16 @@ describe("CombatLog", () => {
     const { container } = render(<CombatLog turns={turns} catalogue={catalogue} />);
 
     const isolated = Array.from(container.querySelectorAll("bdi"), (each) => each.textContent);
-    expect(isolated).toContain("Goblin Warrior");
-    expect(isolated).toContain("Guard");
+    expect(isolated).toContain("גובלין לוחם");
+    expect(isolated).toContain("שומר");
+  });
+
+  it("renders the Hebrew name, not the English one", () => {
+    const turns: CombatLogTurn[] = [
+      { actorId: "goblin-a", actionType: "dodge", movedFeet: 0, attacks: [], forfeited: false },
+    ];
+    render(<CombatLog turns={turns} catalogue={catalogue} />);
+    expect(screen.getByText(/גובלין לוחם/)).toBeInTheDocument();
+    expect(screen.queryByText(/Goblin Warrior/)).not.toBeInTheDocument();
   });
 });

@@ -2,13 +2,24 @@
   "monsterId": "cultist",
   "nameEnglish": "Cultist",
   "nameHebrew": "חבר כת",
+  "grammaticalGender": "masculine",
   "size": "medium",
   "creatureType": "Humanoid",
   "alignment": "Neutral",
   "armorClass": 12,
-  "hitPoints": { "average": 9, "diceNotation": "2d8" },
+  "hitPoints": {
+    "average": 9,
+    "diceNotation": "2d8"
+  },
   "speedFeet": 30,
-  "abilities": { "str": 11, "dex": 12, "con": 10, "int": 10, "wis": 11, "cha": 10 },
+  "abilities": {
+    "str": 11,
+    "dex": 12,
+    "con": 10,
+    "int": 10,
+    "wis": 11,
+    "cha": 10
+  },
   "challengeRating": "1/8",
   "proficiencyBonus": 2,
   "attacksPerAction": 1,
@@ -19,8 +30,17 @@
       "nameHebrew": "מגל פולחן",
       "attackBonus": 3,
       "reachFeet": 5,
-      "damage": { "diceNotation": "1d4+1", "averageDamage": 3, "damageType": "slashing" },
-      "extraDamage": [{ "averageDamage": 1, "damageType": "necrotic" }]
+      "damage": {
+        "diceNotation": "1d4+1",
+        "averageDamage": 3,
+        "damageType": "slashing"
+      },
+      "extraDamage": [
+        {
+          "averageDamage": 1,
+          "damageType": "necrotic"
+        }
+      ]
     }
   ]
 }

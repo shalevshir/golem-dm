@@ -91,7 +91,7 @@ function AttackLine(props: { attack: AttackTrace; nameOf: (id: string) => string
 
 export function CombatLog(props: CombatLogProps): JSX.Element {
   const nameOf = (id: string): string =>
-    props.catalogue.find((each) => each.combatantId === id)?.nameEnglish ?? id;
+    props.catalogue.find((each) => each.combatantId === id)?.nameHebrew ?? id;
 
   // `props.turns` stays oldest-first — that's what the store's `foldCombatLog`
   // depends on (`log.at(-1)` is "the group currently being filled") and what

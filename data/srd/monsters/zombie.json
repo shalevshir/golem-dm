@@ -2,13 +2,24 @@
   "monsterId": "zombie",
   "nameEnglish": "Zombie",
   "nameHebrew": "זומבי",
+  "grammaticalGender": "masculine",
   "size": "medium",
   "creatureType": "Undead",
   "alignment": "Neutral Evil",
   "armorClass": 8,
-  "hitPoints": { "average": 15, "diceNotation": "2d8+6" },
+  "hitPoints": {
+    "average": 15,
+    "diceNotation": "2d8+6"
+  },
   "speedFeet": 20,
-  "abilities": { "str": 13, "dex": 6, "con": 16, "int": 3, "wis": 6, "cha": 5 },
+  "abilities": {
+    "str": 13,
+    "dex": 6,
+    "con": 16,
+    "int": 3,
+    "wis": 6,
+    "cha": 5
+  },
   "challengeRating": "1/4",
   "proficiencyBonus": 2,
   "attacksPerAction": 1,
@@ -19,7 +30,11 @@
       "nameHebrew": "מהלומה",
       "attackBonus": 3,
       "reachFeet": 5,
-      "damage": { "diceNotation": "1d8+1", "averageDamage": 5, "damageType": "bludgeoning" }
+      "damage": {
+        "diceNotation": "1d8+1",
+        "averageDamage": 5,
+        "damageType": "bludgeoning"
+      }
     }
   ]
 }

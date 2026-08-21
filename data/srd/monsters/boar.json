@@ -2,13 +2,24 @@
   "monsterId": "boar",
   "nameEnglish": "Boar",
   "nameHebrew": "חזיר בר",
+  "grammaticalGender": "masculine",
   "size": "medium",
   "creatureType": "Beast",
   "alignment": "Unaligned",
   "armorClass": 11,
-  "hitPoints": { "average": 13, "diceNotation": "2d8+4" },
+  "hitPoints": {
+    "average": 13,
+    "diceNotation": "2d8+4"
+  },
   "speedFeet": 40,
-  "abilities": { "str": 13, "dex": 11, "con": 14, "int": 2, "wis": 9, "cha": 5 },
+  "abilities": {
+    "str": 13,
+    "dex": 11,
+    "con": 14,
+    "int": 2,
+    "wis": 9,
+    "cha": 5
+  },
   "challengeRating": "1/4",
   "proficiencyBonus": 2,
   "attacksPerAction": 1,
@@ -19,7 +30,11 @@
       "nameHebrew": "נגיחה",
       "attackBonus": 3,
       "reachFeet": 5,
-      "damage": { "diceNotation": "1d6+1", "averageDamage": 4, "damageType": "piercing" }
+      "damage": {
+        "diceNotation": "1d6+1",
+        "averageDamage": 4,
+        "damageType": "piercing"
+      }
     }
   ]
 }

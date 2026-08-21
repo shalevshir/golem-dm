@@ -5,9 +5,10 @@ import { buildEncounter } from "@ai-dm/rules-engine";
 import type { BuiltEncounter, EncounterDefinition } from "@ai-dm/rules-engine";
 import type { DerivedCharacter, EncounterCatalogue, MonsterStatBlock } from "@ai-dm/schemas";
 import { loadCharacter } from "./characters.js";
+import { loadConditions } from "./conditions.js";
 import { loadMonster } from "./srd.js";
 
-export { loadCharacter, loadMonster };
+export { loadCharacter, loadConditions, loadMonster };
 
 // Geometry per task-corrections.md C-14: the brief's original spawns (hero
 // [1,4], goblins [10,3]/[10,5], ~45 ft apart) put every combatant beyond the
@@ -23,6 +24,10 @@ const GOBLIN_AMBUSH: EncounterDefinition = {
   descriptionEnglish:
     "A lone adventurer is ambushed by two goblin warriors in melee range on an " +
     "open 12x12 field.",
+  sceneEnglish:
+    "Late afternoon on a rocky hillside track. The ground is dry, broken stone " +
+    "and loose scree. The light is flat and orange, the air still, and sound " +
+    "carries.",
   width: 12,
   height: 12,
   spawns: [

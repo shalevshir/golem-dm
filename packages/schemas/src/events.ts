@@ -59,6 +59,34 @@ export const ActionRejectedPayload = z.object({
 
 export type ActionRejectedPayload = z.infer<typeof ActionRejectedPayload>;
 
+/** Where a turn's narration actually came from. Metrics only, never correctness. */
+export const NarrationSource = z.enum(["model", "deterministic", "completed"]);
+export type NarrationSource = z.infer<typeof NarrationSource>;
+
+/**
+ * Payload convention for the `narrative_emitted` event, in the same spirit as
+ * `ActionRejectedPayload`: the server stamps the envelope, this documents the
+ * body.
+ *
+ * `text` is the ONLY place Hebrew is allowed in the event log.
+ *
+ * `source` exists because a narrated turn and a fallback turn are
+ * indistinguishable from the text alone once the fallback is Hebrew too, and
+ * the ratio between them is the single most useful number the step 9
+ * benchmark produces. `promptVersion` does for narration what it already does
+ * for `action_rejected`: keeps runs taken either side of a prompt edit from
+ * being pooled.
+ */
+export const NarrativeEmittedPayload = z.object({
+  actorId: z.string(),
+  streamId: z.string(),
+  text: z.string().min(1),
+  source: NarrationSource,
+  promptVersion: z.string().min(1),
+});
+
+export type NarrativeEmittedPayload = z.infer<typeof NarrativeEmittedPayload>;
+
 export const AttackOutcome = z.enum(["hit", "miss", "critical_hit", "critical_miss"]);
 export type AttackOutcome = z.infer<typeof AttackOutcome>;
 

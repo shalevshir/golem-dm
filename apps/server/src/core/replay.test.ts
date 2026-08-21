@@ -85,6 +85,7 @@ function portsWith(store: EventStore): TurnPorts {
     uuid: uuids(),
     seedFor: (rootSeed, sequence) => rootSeed * 1000 + sequence,
     turnTimeoutMs: 10_000,
+    conditionNamesHebrew: new Map([["prone", "שרוע"]]),
   };
 }
 

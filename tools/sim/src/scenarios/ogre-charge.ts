@@ -14,6 +14,7 @@ export const OGRE_CHARGE: ScenarioDefinition = {
   descriptionEnglish:
     "One ogre crosses a band of difficult terrain to reach three guards. " +
     "Discriminates movement budgeting and large-creature footprint handling.",
+  sceneEnglish: "A benchmark arena, crossed by a band of churned mud.",
   width: 16,
   height: 12,
   terrain: MUD,

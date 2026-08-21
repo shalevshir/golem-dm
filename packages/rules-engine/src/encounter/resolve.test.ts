@@ -27,6 +27,7 @@ const GOBLIN_WARRIOR: MonsterStatBlock = {
   monsterId: "goblin_warrior",
   nameEnglish: "Goblin Warrior",
   nameHebrew: "גובלין לוחם",
+  grammaticalGender: "masculine",
   size: "small",
   creatureType: "Fey (Goblinoid)",
   alignment: "Chaotic Neutral",
@@ -64,6 +65,7 @@ const GUARD: MonsterStatBlock = {
   monsterId: "guard",
   nameEnglish: "Guard",
   nameHebrew: "שומר",
+  grammaticalGender: "masculine",
   size: "medium",
   creatureType: "Humanoid",
   alignment: "Neutral",
@@ -94,6 +96,7 @@ const DEFINITION: EncounterDefinition = {
   descriptionEnglish:
     "Two goblin warriors meet two guards at close quarters on an empty 12x12 field. " +
     "Baseline legality with no spatial reasoning required.",
+  sceneEnglish: "A featureless benchmark arena. No terrain features worth describing.",
   width: 12,
   height: 12,
   spawns: [

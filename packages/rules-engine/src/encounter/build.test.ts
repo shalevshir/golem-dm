@@ -9,6 +9,7 @@ const goblin: MonsterStatBlock = {
   monsterId: "goblin_warrior",
   nameEnglish: "Goblin Warrior",
   nameHebrew: "גובלין לוחם",
+  grammaticalGender: "masculine",
   size: "small",
   creatureType: "Fey (Goblinoid)",
   alignment: "Chaotic Neutral",
@@ -35,6 +36,7 @@ const goblin: MonsterStatBlock = {
 const definition: EncounterDefinition = {
   encounterId: "test-duel",
   descriptionEnglish: "Two goblins, open floor.",
+  sceneEnglish: "A bare test fixture. No atmosphere worth describing.",
   width: 5,
   height: 5,
   spawns: [
@@ -62,6 +64,17 @@ describe("buildEncounter", () => {
     expect(built.world.combatants[0]?.size).toBe("small");
     expect([...built.statBlocks.keys()]).toEqual(["hero", "villain"]);
     expect(built.turnOrder).toEqual(["hero", "villain"]);
+  });
+
+  it("carries the scene card onto the built encounter", () => {
+    const built = buildEncounter({
+      definition: {
+        ...definition,
+        sceneEnglish: "A damp stone cellar lit by one guttering torch.",
+      },
+      statBlocks,
+    });
+    expect(built.sceneEnglish).toBe("A damp stone cellar lit by one guttering torch.");
   });
 
   it("defaults every unlisted tile to normal and applies overrides", () => {
@@ -146,6 +159,7 @@ describe("character spawns", () => {
       definition: {
         encounterId: "one-hero",
         descriptionEnglish: "A hero alone.",
+        sceneEnglish: "A bare test fixture. No atmosphere worth describing.",
         width: 5,
         height: 5,
         spawns: [{ combatantId: "hero", characterId: "hero", faction: "party", position: [1, 1] }],
@@ -169,6 +183,7 @@ describe("character spawns", () => {
       definition: {
         encounterId: "one-hero",
         descriptionEnglish: "A hero alone.",
+        sceneEnglish: "A bare test fixture. No atmosphere worth describing.",
         width: 5,
         height: 5,
         spawns: [{ combatantId: "hero", characterId: "hero", faction: "party", position: [1, 1] }],
@@ -192,6 +207,7 @@ describe("character spawns", () => {
       definition: {
         encounterId: "one-hero",
         descriptionEnglish: "A wounded hero alone.",
+        sceneEnglish: "A bare test fixture. No atmosphere worth describing.",
         width: 5,
         height: 5,
         spawns: [{ combatantId: "hero", characterId: "hero", faction: "party", position: [1, 1] }],
@@ -213,6 +229,7 @@ describe("character spawns", () => {
         definition: {
           encounterId: "one-hero",
           descriptionEnglish: "A hero alone.",
+          sceneEnglish: "A bare test fixture. No atmosphere worth describing.",
           width: 5,
           height: 5,
           spawns: [

@@ -160,6 +160,7 @@ export function characterStatBlock(derived: DerivedCharacter): CreatureStatBlock
   return {
     nameEnglish: derived.characterId,
     nameHebrew: derived.nameHebrew,
+    grammaticalGender: derived.grammaticalGender,
     size: derived.size,
     armorClass: derived.armorClass,
     hitPoints: { average: derived.maxHp, diceNotation: derived.hitDice },
