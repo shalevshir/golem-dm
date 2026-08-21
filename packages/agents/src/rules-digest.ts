@@ -13,11 +13,11 @@
 // Every effect described below is checked against `RULES_REFERENCE.md`
 // (§3 Cover, §5 Grid/movement/range, §6 Conditions, §7 recall traps) and,
 // where those did not settle it, against the SRD 5.2.1 notebook directly —
-// not against `conditions.json` alone. That file's own `effects` are missing
-// two of Petrified's real ones (Resistance to all damage, Immunity to the
-// Poisoned condition); this digest states them anyway because the notebook
-// confirms them as SRD text, and only condition *names*, not effect prose,
-// are what the drift test below checks against that file.
+// not against `conditions.json` alone. Checking the notebook is what caught
+// that file's Petrified row missing two real effects (Resistance to all
+// damage, Immunity to the Poisoned condition), since the drift test below
+// compares only condition *names* against it, never effect prose. The data
+// has since been corrected; the verification order has not changed.
 //
 // English only (invariant 2).
 

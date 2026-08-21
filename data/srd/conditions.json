@@ -190,6 +190,14 @@
       {
         "nameEnglish": "Saving Throws Affected",
         "ruleEnglish": "You automatically fail Strength and Dexterity saving throws."
+      },
+      {
+        "nameEnglish": "Resist Damage",
+        "ruleEnglish": "You have Resistance to all damage."
+      },
+      {
+        "nameEnglish": "Poison Immunity",
+        "ruleEnglish": "You have Immunity to the Poisoned condition."
       }
     ]
   },
