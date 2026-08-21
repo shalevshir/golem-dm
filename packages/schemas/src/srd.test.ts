@@ -267,6 +267,26 @@ describe("SRD armor", () => {
   });
 });
 
+const MINIMAL_STAT_BLOCK = {
+  nameEnglish: "Test Creature",
+  nameHebrew: "יצור בדיקה",
+  grammaticalGender: "masculine",
+  size: "medium",
+  armorClass: 10,
+  hitPoints: { average: 4, diceNotation: "1d8" },
+  speedFeet: 30,
+  actions: [
+    {
+      actionId: "test_attack",
+      nameEnglish: "Test Attack",
+      nameHebrew: "התקפת בדיקה",
+      attackBonus: 2,
+      reachFeet: 5,
+      damage: { averageDamage: 3, damageType: "bludgeoning" },
+    },
+  ],
+};
+
 describe("CreatureStatBlock", () => {
   it("names every monster and every attack in Hebrew", () => {
     for (const file of monsterFiles) {
@@ -290,5 +310,17 @@ describe("CreatureStatBlock", () => {
   it("keeps monster-only fields off the creature supertype", () => {
     const creature = CreatureStatBlock.parse(readJson(join(MONSTER_DIR, "guard.json")));
     expect("challengeRating" in creature).toBe(false);
+  });
+
+  it("requires a grammaticalGender on every creature stat block", () => {
+    const { grammaticalGender, ...withoutGender } = MINIMAL_STAT_BLOCK;
+    expect(grammaticalGender).toBe("masculine");
+    expect(() => CreatureStatBlock.parse(withoutGender)).toThrow();
+  });
+
+  it("rejects a grammatical gender outside the enum", () => {
+    expect(() =>
+      CreatureStatBlock.parse({ ...MINIMAL_STAT_BLOCK, grammaticalGender: "neuter" }),
+    ).toThrow();
   });
 });

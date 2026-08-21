@@ -9,6 +9,7 @@ const goblin: MonsterStatBlock = {
   monsterId: "goblin_warrior",
   nameEnglish: "Goblin Warrior",
   nameHebrew: "גובלין לוחם",
+  grammaticalGender: "masculine",
   size: "small",
   creatureType: "Fey (Goblinoid)",
   alignment: "Chaotic Neutral",

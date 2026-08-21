@@ -2,13 +2,24 @@
   "monsterId": "skeleton",
   "nameEnglish": "Skeleton",
   "nameHebrew": "שלד",
+  "grammaticalGender": "masculine",
   "size": "medium",
   "creatureType": "Undead",
   "alignment": "Lawful Evil",
   "armorClass": 14,
-  "hitPoints": { "average": 13, "diceNotation": "2d8+4" },
+  "hitPoints": {
+    "average": 13,
+    "diceNotation": "2d8+4"
+  },
   "speedFeet": 30,
-  "abilities": { "str": 10, "dex": 16, "con": 15, "int": 6, "wis": 8, "cha": 5 },
+  "abilities": {
+    "str": 10,
+    "dex": 16,
+    "con": 15,
+    "int": 6,
+    "wis": 8,
+    "cha": 5
+  },
   "challengeRating": "1/4",
   "proficiencyBonus": 2,
   "attacksPerAction": 1,
@@ -19,7 +30,11 @@
       "nameHebrew": "חרב קצרה",
       "attackBonus": 5,
       "reachFeet": 5,
-      "damage": { "diceNotation": "1d6+3", "averageDamage": 6, "damageType": "piercing" }
+      "damage": {
+        "diceNotation": "1d6+3",
+        "averageDamage": 6,
+        "damageType": "piercing"
+      }
     },
     {
       "actionId": "shortbow",
@@ -28,7 +43,11 @@
       "attackBonus": 5,
       "rangeFeet": 80,
       "longRangeFeet": 320,
-      "damage": { "diceNotation": "1d6+3", "averageDamage": 6, "damageType": "piercing" }
+      "damage": {
+        "diceNotation": "1d6+3",
+        "averageDamage": 6,
+        "damageType": "piercing"
+      }
     }
   ]
 }

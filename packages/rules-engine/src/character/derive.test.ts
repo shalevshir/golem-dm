@@ -154,4 +154,9 @@ describe("characterStatBlock", () => {
     const wizard = deriveCharacter(sheet({ class: "wizard", inventory: [] }), GEAR);
     expect(() => CreatureStatBlock.parse(characterStatBlock(wizard))).not.toThrow();
   });
+
+  it("carries the sheet's grammatical gender onto the projected stat block", () => {
+    const derived = deriveCharacter(sheet(), GEAR);
+    expect(characterStatBlock(derived).grammaticalGender).toBe(derived.grammaticalGender);
+  });
 });

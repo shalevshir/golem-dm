@@ -1,7 +1,14 @@
 // Shapes for the SRD 5.2.1 game data in `data/srd/`. Content licensed
 // CC-BY-4.0; see NOTICE.md for the required attribution.
 import { z } from "zod";
-import { Abilities, AbilityKey, CharacterClass, Condition, Skill } from "./character.js";
+import {
+  Abilities,
+  AbilityKey,
+  CharacterClass,
+  Condition,
+  GrammaticalGender,
+  Skill,
+} from "./character.js";
 import { ArmorCategory, WeaponProperty } from "./gear.js";
 import { CreatureSize, DamageType, DiceNotation } from "./primitives.js";
 
@@ -50,6 +57,14 @@ export const CreatureAttack = z.object({
 export const CreatureStatBlock = z.object({
   nameEnglish: z.string(),
   nameHebrew: z.string().min(1),
+  /**
+   * Hebrew verbs agree with their subject, so a narrator cannot write a
+   * sentence about a creature without knowing this. Required rather than
+   * defaulted: a default would let a new monster ship silently ungendered
+   * and narrate wrong, which is exactly the failure `nameHebrew` being
+   * required already rules out.
+   */
+  grammaticalGender: GrammaticalGender,
   size: CreatureSize,
   armorClass: z.number().int().min(1),
   hitPoints: z.object({ average: z.number().int().min(1), diceNotation: DiceNotation }),

@@ -2,13 +2,24 @@
   "monsterId": "goblin_warrior",
   "nameEnglish": "Goblin Warrior",
   "nameHebrew": "גובלין לוחם",
+  "grammaticalGender": "masculine",
   "size": "small",
   "creatureType": "Fey (Goblinoid)",
   "alignment": "Chaotic Neutral",
   "armorClass": 15,
-  "hitPoints": { "average": 10, "diceNotation": "3d6" },
+  "hitPoints": {
+    "average": 10,
+    "diceNotation": "3d6"
+  },
   "speedFeet": 30,
-  "abilities": { "str": 8, "dex": 15, "con": 10, "int": 10, "wis": 8, "cha": 8 },
+  "abilities": {
+    "str": 8,
+    "dex": 15,
+    "con": 10,
+    "int": 10,
+    "wis": 8,
+    "cha": 8
+  },
   "challengeRating": "1/4",
   "proficiencyBonus": 2,
   "attacksPerAction": 1,
@@ -19,7 +30,11 @@
       "nameHebrew": "חרב מעוקלת",
       "attackBonus": 4,
       "reachFeet": 5,
-      "damage": { "diceNotation": "1d6+2", "averageDamage": 5, "damageType": "slashing" }
+      "damage": {
+        "diceNotation": "1d6+2",
+        "averageDamage": 5,
+        "damageType": "slashing"
+      }
     },
     {
       "actionId": "shortbow",
@@ -28,7 +43,11 @@
       "attackBonus": 4,
       "rangeFeet": 80,
       "longRangeFeet": 320,
-      "damage": { "diceNotation": "1d6+2", "averageDamage": 5, "damageType": "piercing" }
+      "damage": {
+        "diceNotation": "1d6+2",
+        "averageDamage": 5,
+        "damageType": "piercing"
+      }
     }
   ]
 }
