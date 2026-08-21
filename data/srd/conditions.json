@@ -2,6 +2,7 @@
   {
     "condition": "blinded",
     "nameEnglish": "Blinded",
+    "nameHebrew": "עיוור",
     "effects": [
       {
         "nameEnglish": "Can't See",
@@ -16,6 +17,7 @@
   {
     "condition": "charmed",
     "nameEnglish": "Charmed",
+    "nameHebrew": "מוקסם",
     "effects": [
       {
         "nameEnglish": "Can't Harm the Charmer",
@@ -30,6 +32,7 @@
   {
     "condition": "deafened",
     "nameEnglish": "Deafened",
+    "nameHebrew": "חירש",
     "effects": [
       {
         "nameEnglish": "Can't Hear",
@@ -40,6 +43,7 @@
   {
     "condition": "exhaustion",
     "nameEnglish": "Exhaustion",
+    "nameHebrew": "תשישות",
     "effects": [
       {
         "nameEnglish": "Exhaustion Levels",
@@ -62,6 +66,7 @@
   {
     "condition": "frightened",
     "nameEnglish": "Frightened",
+    "nameHebrew": "מבועת",
     "effects": [
       {
         "nameEnglish": "Ability Checks and Attacks Affected",
@@ -76,8 +81,12 @@
   {
     "condition": "grappled",
     "nameEnglish": "Grappled",
+    "nameHebrew": "אחוז",
     "effects": [
-      { "nameEnglish": "Speed 0", "ruleEnglish": "Your Speed is 0 and can't increase." },
+      {
+        "nameEnglish": "Speed 0",
+        "ruleEnglish": "Your Speed is 0 and can't increase."
+      },
       {
         "nameEnglish": "Attacks Affected",
         "ruleEnglish": "You have Disadvantage on attack rolls against any target other than the grappler."
@@ -91,13 +100,20 @@
   {
     "condition": "incapacitated",
     "nameEnglish": "Incapacitated",
+    "nameHebrew": "נטול יכולת",
     "effects": [
       {
         "nameEnglish": "Inactive",
         "ruleEnglish": "You can't take any action, Bonus Action, or Reaction."
       },
-      { "nameEnglish": "No Concentration", "ruleEnglish": "Your Concentration is broken." },
-      { "nameEnglish": "Speechless", "ruleEnglish": "You can't speak." },
+      {
+        "nameEnglish": "No Concentration",
+        "ruleEnglish": "Your Concentration is broken."
+      },
+      {
+        "nameEnglish": "Speechless",
+        "ruleEnglish": "You can't speak."
+      },
       {
         "nameEnglish": "Surprised",
         "ruleEnglish": "If you're Incapacitated when you roll Initiative, you have Disadvantage on the roll."
@@ -107,6 +123,7 @@
   {
     "condition": "invisible",
     "nameEnglish": "Invisible",
+    "nameHebrew": "בלתי נראה",
     "effects": [
       {
         "nameEnglish": "Surprise",
@@ -125,9 +142,16 @@
   {
     "condition": "paralyzed",
     "nameEnglish": "Paralyzed",
+    "nameHebrew": "משותק",
     "effects": [
-      { "nameEnglish": "Incapacitated", "ruleEnglish": "You have the Incapacitated condition." },
-      { "nameEnglish": "Speed 0", "ruleEnglish": "Your Speed is 0 and can't increase." },
+      {
+        "nameEnglish": "Incapacitated",
+        "ruleEnglish": "You have the Incapacitated condition."
+      },
+      {
+        "nameEnglish": "Speed 0",
+        "ruleEnglish": "Your Speed is 0 and can't increase."
+      },
       {
         "nameEnglish": "Saving Throws Affected",
         "ruleEnglish": "You automatically fail Strength and Dexterity saving throws."
@@ -145,13 +169,20 @@
   {
     "condition": "petrified",
     "nameEnglish": "Petrified",
+    "nameHebrew": "מאובן",
     "effects": [
       {
         "nameEnglish": "Turned to Inanimate Substance",
         "ruleEnglish": "You are transformed, along with any nonmagical objects you are wearing and carrying, into a solid inanimate substance (usually stone). Your weight increases by a factor of ten, and you cease aging."
       },
-      { "nameEnglish": "Incapacitated", "ruleEnglish": "You have the Incapacitated condition." },
-      { "nameEnglish": "Speed 0", "ruleEnglish": "Your Speed is 0 and can't increase." },
+      {
+        "nameEnglish": "Incapacitated",
+        "ruleEnglish": "You have the Incapacitated condition."
+      },
+      {
+        "nameEnglish": "Speed 0",
+        "ruleEnglish": "Your Speed is 0 and can't increase."
+      },
       {
         "nameEnglish": "Attacks Affected",
         "ruleEnglish": "Attack rolls against you have Advantage."
@@ -165,6 +196,7 @@
   {
     "condition": "poisoned",
     "nameEnglish": "Poisoned",
+    "nameHebrew": "מורעל",
     "effects": [
       {
         "nameEnglish": "Ability Checks and Attacks Affected",
@@ -175,6 +207,7 @@
   {
     "condition": "prone",
     "nameEnglish": "Prone",
+    "nameHebrew": "שרוע",
     "effects": [
       {
         "nameEnglish": "Restricted Movement",
@@ -189,8 +222,12 @@
   {
     "condition": "restrained",
     "nameEnglish": "Restrained",
+    "nameHebrew": "כבול",
     "effects": [
-      { "nameEnglish": "Speed 0", "ruleEnglish": "Your Speed is 0 and can't increase." },
+      {
+        "nameEnglish": "Speed 0",
+        "ruleEnglish": "Your Speed is 0 and can't increase."
+      },
       {
         "nameEnglish": "Attacks Affected",
         "ruleEnglish": "Attack rolls against you have Advantage, and your attack rolls have Disadvantage."
@@ -204,8 +241,12 @@
   {
     "condition": "stunned",
     "nameEnglish": "Stunned",
+    "nameHebrew": "המום",
     "effects": [
-      { "nameEnglish": "Incapacitated", "ruleEnglish": "You have the Incapacitated condition." },
+      {
+        "nameEnglish": "Incapacitated",
+        "ruleEnglish": "You have the Incapacitated condition."
+      },
       {
         "nameEnglish": "Saving Throws Affected",
         "ruleEnglish": "You automatically fail Strength and Dexterity saving throws."
@@ -219,12 +260,16 @@
   {
     "condition": "unconscious",
     "nameEnglish": "Unconscious",
+    "nameHebrew": "מחוסר הכרה",
     "effects": [
       {
         "nameEnglish": "Inert",
         "ruleEnglish": "You have the Incapacitated and Prone conditions, and you drop whatever you're holding. When this condition ends, you remain Prone."
       },
-      { "nameEnglish": "Speed 0", "ruleEnglish": "Your Speed is 0 and can't increase." },
+      {
+        "nameEnglish": "Speed 0",
+        "ruleEnglish": "Your Speed is 0 and can't increase."
+      },
       {
         "nameEnglish": "Attacks Affected",
         "ruleEnglish": "Attack rolls against you have Advantage."
@@ -237,7 +282,10 @@
         "nameEnglish": "Automatic Critical Hits",
         "ruleEnglish": "Any attack roll that hits you is a Critical Hit if the attacker is within 5 feet of you."
       },
-      { "nameEnglish": "Unaware", "ruleEnglish": "You're unaware of your surroundings." }
+      {
+        "nameEnglish": "Unaware",
+        "ruleEnglish": "You're unaware of your surroundings."
+      }
     ]
   }
 ]

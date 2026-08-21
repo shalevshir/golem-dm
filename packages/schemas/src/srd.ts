@@ -89,6 +89,12 @@ export const MonsterStatBlock = CreatureStatBlock.extend({
 export const ConditionDefinition = z.object({
   condition: Condition,
   nameEnglish: z.string(),
+  /**
+   * The one place a condition's Hebrew name lives. Deliberately not
+   * duplicated into `docs/prompts/hebrew-glossary.md`, which covers rules
+   * vocabulary rather than anything that has a data row of its own.
+   */
+  nameHebrew: z.string().min(1),
   effects: z.array(z.object({ nameEnglish: z.string(), ruleEnglish: z.string() })).min(1),
 });
 

@@ -76,6 +76,14 @@ describe("SRD conditions", () => {
       "unconscious",
     ]);
   });
+
+  it("gives every SRD condition a Hebrew name", () => {
+    const parsed = ConditionDefinition.array().parse(readJson(join(SRD_DIR, "conditions.json")));
+    expect(parsed).toHaveLength(15);
+    for (const definition of parsed) {
+      expect(definition.nameHebrew.trim()).not.toBe("");
+    }
+  });
 });
 
 describe("SRD classes", () => {
