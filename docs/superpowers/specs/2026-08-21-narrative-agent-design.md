@@ -298,11 +298,26 @@ version. `narrative_emitted` stamps `promptVersion`, so a benchmark run can
 be attributed to the prompt that produced it rather than pooled across an
 edit.
 
-The Hebrew glossary moves from `docs/prompts/hebrew-glossary.md` into the
-same versioned module, and the markdown becomes a pointer. The current
-glossary is eight terms, none of them combat vocabulary; it gains the terms
-the narrator can actually reach for, and the condition labels come from
-`conditions.json` rather than being duplicated into it.
+The Hebrew glossary is the one asset that cannot simply move into the
+module. `docs/prompts/README.md` draws a deliberate line — prompt *text*
+lives in TypeScript, but "`hebrew-glossary.md` stays a data file: it is a
+table for non-programmers to edit, not prompt text" — while the same README
+rules out loading markdown at runtime, because that is I/O in a package that
+must stay pure. Spec #2 is the first thing to need the glossary in a prompt,
+and so the first to hit that tension.
+
+Resolution, and it is the same shape as the digest's: **the markdown stays
+the editable source of record, `prompt-text.ts` holds the runtime copy, and
+a test parses the markdown table and asserts the two agree.** A
+non-programmer keeps editing a table; the package keeps its purity; and the
+twin cannot drift, because drift fails the suite rather than reaching a
+player. `docs/prompts/README.md` gains a row for the narrative module and a
+note recording why the glossary is the exception to its own rule.
+
+The current glossary is eight terms, none of them combat vocabulary; it
+gains the terms the narrator can actually reach for. Condition labels are
+**not** copied into it — they come from `conditions.json`, so that a
+condition has exactly one Hebrew name in the repo.
 
 ## The Hebrew agent
 
