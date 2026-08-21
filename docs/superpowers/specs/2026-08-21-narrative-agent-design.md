@@ -235,7 +235,7 @@ has no use for it, and without losing the window across a reconnect.
 | Change | Where | Why |
 |---|---|---|
 | `grammaticalGender` on `CreatureStatBlock` | `@ai-dm/schemas` + 11 monster files | Hebrew verbs agree with their subject. Mirrors spec #1's decision for characters. Required, not optional: an optional field would let a new monster ship ungendered and narrate wrong. |
-| `nameHebrew` on `ConditionDefinition` and its effects | `@ai-dm/schemas` + `conditions.json` | The narrator cannot name a condition in Hebrew otherwise. |
+| `nameHebrew` on `ConditionDefinition` | `@ai-dm/schemas` + `conditions.json` | The narrator cannot name a condition in Hebrew otherwise. On the condition only, not on each effect: effects carry `ruleEnglish`, which feeds the English digest, so Hebrew there would be ~40 strings nothing reads. |
 | `sceneEnglish` on `EncounterDefinition` | `@ai-dm/rules-engine` | The scene card. Held separate from `descriptionEnglish`, whose doc comment gains the distinction: `descriptionEnglish` summarises the encounter for an operator, `sceneEnglish` gives the narrator ground, light and sound. Folding them would drag the operator summary toward prose. |
 | `NarrativeEmittedPayload` convention | `@ai-dm/schemas` | Documents the payload the way `ActionRejectedPayload` already does, and adds `promptVersion` and `source: "model" \| "deterministic" \| "completed"`. Without `source` the benchmark cannot tell a narrated turn from a fallback turn, and that ratio is the single most useful number the harness produces. |
 
