@@ -63,6 +63,12 @@ export function createSessionRegistry(input: SessionRegistryInput): SessionRegis
   // session id is a member exactly while some socket's `handleCommand` call
   // for it is running, from `tryBegin` to the matching `end`.
   const inFlight = new Set<string>();
+  // In-flight `loadSession` calls, keyed the same way. `live` alone was
+  // enough while the store was synchronous; a durable store puts a real
+  // await between the miss and the set, and `join` is outside the session
+  // lock by design, so without this two concurrent joins fold two Sessions
+  // and the loser keeps appending from its own nextSequence.
+  const loading = new Map<string, Promise<Session | null>>();
 
   return {
     async create(encounterId) {
@@ -79,15 +85,28 @@ export function createSessionRegistry(input: SessionRegistryInput): SessionRegis
       return session;
     },
 
-    async get(sessionId) {
+    get(sessionId) {
       const cached = live.get(sessionId);
-      if (cached !== undefined) return cached;
+      if (cached !== undefined) return Promise.resolve(cached);
+
+      const inFlightLoad = loading.get(sessionId);
+      if (inFlightLoad !== undefined) return inFlightLoad;
 
       // Not in memory: fold it back from the log. This is what makes a
-      // reconnect after a process restart possible once the store is durable.
-      const loaded = await loadSession({ sessionId, store: input.store });
-      if (loaded !== null) live.set(sessionId, loaded);
-      return loaded;
+      // reconnect after a process restart possible now that the store is
+      // durable.
+      const load = loadSession({ sessionId, store: input.store })
+        .then((loaded) => {
+          if (loaded !== null) live.set(sessionId, loaded);
+          return loaded;
+        })
+        .finally(() => {
+          // Cleared on both paths: a failed load must not be cached as a
+          // permanently pending promise.
+          loading.delete(sessionId);
+        });
+      loading.set(sessionId, load);
+      return load;
     },
 
     tryBegin(sessionId) {
