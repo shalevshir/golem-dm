@@ -14,7 +14,8 @@ import {
   createVercelPort,
   DEFAULT_MODEL_ROUTING,
 } from "@ai-dm/agents";
-import { createInMemoryEventStore } from "@ai-dm/memory";
+import { connectPostgresEventStore, createInMemoryEventStore } from "@ai-dm/memory";
+import type { EventStore, PostgresEventStoreHandle } from "@ai-dm/memory";
 import type { FastifyBaseLogger } from "fastify";
 import { buildApp } from "./app.js";
 import { loadConfig } from "./config.js";
@@ -24,7 +25,17 @@ import { createSessionRegistry } from "./transport/http.js";
 
 const config = loadConfig(process.env);
 
-const store = createInMemoryEventStore();
+// Chosen before `buildApp`, because both `createSessionRegistry` and `ports`
+// need it — which is also why the boot log below goes through `logHolder`
+// rather than `app.log`, which does not exist yet.
+const postgresHandle: PostgresEventStoreHandle | null =
+  config.databaseUrl === undefined ? null : connectPostgresEventStore(config.databaseUrl);
+if (postgresHandle !== null) {
+  // Fails at boot rather than on the first player's first turn — the same
+  // reasoning `loadConfig` applies to provider keys.
+  await postgresHandle.probe();
+}
+const store: EventStore = postgresHandle?.store ?? createInMemoryEventStore();
 const clock = (): string => new Date().toISOString();
 
 // The pipeline does no file I/O of its own (`TurnPorts.conditionNamesHebrew`'s
@@ -124,6 +135,14 @@ const app = buildApp({
 });
 logHolder.current = app.log;
 
+if (postgresHandle === null) {
+  // A valid configuration, and a lossy one. The only thing distinguishing a
+  // deliberate dev run from a misconfigured deploy is this line.
+  app.log.warn("event log: in-memory — sessions are lost on restart");
+} else {
+  app.log.info("event log: postgres");
+}
+
 // Named at boot, not just per-turn: a missing/invalid key for this exact
 // provider is otherwise only diagnosable from a turn that quietly fell back,
 // which could be minutes into the first session. This line makes the
@@ -137,3 +156,15 @@ app.log.info(
 );
 
 await app.listen({ port: config.port, host: "0.0.0.0" });
+
+// The process had no shutdown path before there was a connection to close.
+// Both signals, because a container stop sends SIGTERM and a terminal sends
+// SIGINT, and a half-closed pool keeps the process alive in either case.
+for (const signal of ["SIGTERM", "SIGINT"] as const) {
+  process.once(signal, () => {
+    void (async () => {
+      await app.close();
+      await postgresHandle?.close();
+    })();
+  });
+}

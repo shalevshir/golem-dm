@@ -26,6 +26,9 @@ const RawEnv = z.object({
     .pipe(z.number().int().min(1).max(65_535))
     .optional(),
   LOG_LEVEL: LogLevel.optional(),
+  // Absent means the in-memory event store: sessions do not survive a
+  // restart. It carries a password, so it is never logged.
+  DATABASE_URL: optionalSecret,
   ANTHROPIC_API_KEY: optionalSecret,
   OPENAI_API_KEY: optionalSecret,
   GOOGLE_GENERATIVE_AI_API_KEY: optionalSecret,
@@ -34,6 +37,10 @@ const RawEnv = z.object({
 export interface ServerConfig {
   port: number;
   logLevel: z.infer<typeof LogLevel>;
+  // `| undefined` is explicit because `tsconfig.base.json` sets
+  // `exactOptionalPropertyTypes`, under which a plain `databaseUrl?: string`
+  // would not accept the transform's output.
+  databaseUrl?: string | undefined;
 }
 
 export function loadConfig(env: NodeJS.ProcessEnv): ServerConfig {
@@ -56,5 +63,9 @@ export function loadConfig(env: NodeJS.ProcessEnv): ServerConfig {
     );
   }
 
-  return { port: parsed.PORT ?? 3000, logLevel: parsed.LOG_LEVEL ?? "info" };
+  return {
+    port: parsed.PORT ?? 3000,
+    logLevel: parsed.LOG_LEVEL ?? "info",
+    databaseUrl: parsed.DATABASE_URL,
+  };
 }
