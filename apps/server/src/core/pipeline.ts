@@ -30,7 +30,11 @@ import type {
   TurnProposalResult,
   TurnProposalSource,
 } from "@ai-dm/agents";
-import { SequenceConflictError, SessionMismatchError } from "@ai-dm/memory";
+import {
+  EventStoreUnavailableError,
+  SequenceConflictError,
+  SessionMismatchError,
+} from "@ai-dm/memory";
 import type { EventStore } from "@ai-dm/memory";
 import { reduce } from "@ai-dm/schemas";
 import type {
@@ -806,13 +810,20 @@ export async function* handleCommand(
       }
     }
   } catch (error) {
-    // C-29: the store throws two error classes on a bad append
-    // (SequenceConflictError, SessionMismatchError). Neither has a
-    // dedicated ServerErrorCode, so both fold onto internal_error. Because
-    // this sits outside `emit`, a failed append never bumps `nextSequence`
-    // or mutates `session.state` — the append-and-yield invariant holds by
-    // never letting either half happen without the other.
-    if (error instanceof SequenceConflictError || error instanceof SessionMismatchError) {
+    // C-29: the store throws three error classes on a failed append or read
+    // (SequenceConflictError, SessionMismatchError, EventStoreUnavailableError).
+    // None has a dedicated ServerErrorCode, so all fold onto internal_error.
+    // Because this sits outside `emit`, a failed append never bumps
+    // `nextSequence` or mutates `session.state` — the append-and-yield
+    // invariant holds by never letting either half happen without the other.
+    // Anything else still rethrows: a programmer error must not be swallowed
+    // into a frame, which is why the store wraps its own failures in a class
+    // rather than this catching everything.
+    if (
+      error instanceof SequenceConflictError ||
+      error instanceof SessionMismatchError ||
+      error instanceof EventStoreUnavailableError
+    ) {
       const clientMessageId = clientMessageIdOf(command);
       yield {
         type: "error",
