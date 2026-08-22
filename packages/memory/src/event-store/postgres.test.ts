@@ -24,8 +24,12 @@ function eventFor(sessionId: string, sequence: number): GameEvent {
 // Skipped without a database so `pnpm test` stays green on a machine with no
 // Postgres. Task 9 adds the Postgres service and DATABASE_URL to
 // .github/workflows/ci.yml; until that lands these skip in CI too, so a green
-// CI run says nothing about the Postgres store.
-describe.skipIf(url === undefined)("postgres EventStore", () => {
+// CI run says nothing about the Postgres store. A blank `DATABASE_URL=` must
+// skip exactly like an absent one — `postgres("")` does not reject, it falls
+// back to localhost:5432 (postgres-js's `parseOptions`), which would trade a
+// clean skip for a confusing `FATAL 3D000` against whatever is listening
+// there.
+describe.skipIf(url === undefined || url === "")("postgres EventStore", () => {
   // Non-null narrowing rather than `!`: ESLint bans the assertion, and
   // skipIf does not narrow the type for the compiler.
   const connectionString = url ?? "";

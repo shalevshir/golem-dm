@@ -16,6 +16,7 @@ The orchestrator: Fastify + `@fastify/websocket`. Owns the turn pipeline, sessio
 
 - Time-to-first-narrative-token < 1.5s p50; hard turn timeout 10s with a fallback terse narration from the rule outcome.
 - WS reconnect: client sends last seen `sequence`; server replays events since — full session restore from log + snapshot. Snapshot every 50 events.
+- The event store is selected in `main.ts` from `DATABASE_URL`: set means Postgres (probed at boot), absent means in-memory with a warning. Both implementations live in `@ai-dm/memory`; `apps/server` never imports a database driver.
 - Instrument per turn per agent: tokens in/out, cached tokens, latency, retries, cost. Emit as structured logs from day one (replaces guessed cost tables with data).
 - Player free text is untrusted: length-cap, strip prompt-injection patterns before it reaches any prompt; never interpolate it into system prompts.
 

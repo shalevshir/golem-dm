@@ -740,8 +740,9 @@ describe("handleCommand — snapshot cadence", () => {
   // session's own sequence counter so the hero's dodge turn's six events
   // land on 45..50 and the last one crosses the boundary.
   // `EventStore.append`'s only invariant is "no duplicate sequence for this
-  // session" (event-store.ts) — it does not require a contiguous log — so
-  // this is a legitimate way to reach the boundary without a 44-turn setup.
+  // session" (`@ai-dm/memory`'s conformance suite, `event-store/contract.ts`)
+  // — it does not require a contiguous log — so this is a legitimate way to
+  // reach the boundary without a 44-turn setup.
   //
   // C-18: the hero's turn is immediately followed by the hostile sweep
   // (Task 10), which keeps advancing `session.state` past sequence 50

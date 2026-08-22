@@ -7,7 +7,11 @@ import { createPostgresEventStore } from "./postgres.js";
 
 const url = process.env.DATABASE_URL;
 
-describe.skipIf(url === undefined)("replay round-trip over Postgres", () => {
+// A blank `DATABASE_URL=` must skip exactly like an absent one — `postgres("")`
+// does not reject, it falls back to localhost:5432 (postgres-js's
+// `parseOptions`), which would trade a clean skip for a confusing
+// `FATAL 3D000` against whatever is listening there.
+describe.skipIf(url === undefined || url === "")("replay round-trip over Postgres", () => {
   const sql = postgres(url ?? "");
   const store = createPostgresEventStore(drizzle(sql));
 

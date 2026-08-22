@@ -293,9 +293,11 @@ describe("snapshots", () => {
     // At 5 rounds (81 events total), sequence SNAPSHOT_EVERY (50) is the
     // ONLY boundary crossed, so `latestSnapshot` and "every snapshot point"
     // coincide today — but `latestSnapshot` only ever returns the newest
-    // one (`event-store.ts`), so nothing else pins that coincidence. Pin it
-    // explicitly rather than let a later round-count change silently narrow
-    // this test to whatever the last boundary happens to be, unnoticed.
+    // one (guaranteed by `@ai-dm/memory`'s conformance suite,
+    // `event-store/contract.ts`), so nothing else pins that coincidence.
+    // Pin it explicitly rather than let a later round-count change silently
+    // narrow this test to whatever the last boundary happens to be,
+    // unnoticed.
     expect(snapshot.sequence).toBe(SNAPSHOT_EVERY);
 
     // C-22 / C-35: get the fold's starting state from the session API, not
