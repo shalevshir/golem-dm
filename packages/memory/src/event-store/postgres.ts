@@ -75,15 +75,26 @@ export function createPostgresEventStore(db: PostgresJsDatabase): EventStore {
     events: readonly GameEvent[],
     cause: unknown,
   ): Promise<Error> {
-    const taken = await takenSequences(
-      db,
-      sessionId,
-      events.map((each) => each.sequence),
-    );
-    return (
-      findAppendConflict(sessionId, events, taken) ??
-      new EventStoreUnavailableError("append", cause)
-    );
+    try {
+      const taken = await takenSequences(
+        db,
+        sessionId,
+        events.map((each) => each.sequence),
+      );
+      return (
+        findAppendConflict(sessionId, events, taken) ??
+        new EventStoreUnavailableError("append", cause)
+      );
+    } catch {
+      // The re-read is a second round trip on the outer pool, and the
+      // conditions that make a writer lose a race — a dropped connection, an
+      // exhausted pool, a restarting database — are the same ones that make
+      // that round trip fail. Unguarded, the raw driver error would escape
+      // `append` and break the store's closed three-class failure surface.
+      // The binding is dropped deliberately: the original 23505 is the more
+      // informative `cause`.
+      return new EventStoreUnavailableError("append", cause);
+    }
   }
 
   return {
