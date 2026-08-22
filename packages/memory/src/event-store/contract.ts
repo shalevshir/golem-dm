@@ -199,5 +199,47 @@ export function describeEventStoreContract(label: string, makeStore: () => Event
       await store.putSnapshot(s, 50, stateFor(s));
       expect(await store.latestSnapshot(freshSessionId())).toBeNull();
     });
+
+    it("does not expose the stored snapshot state to a caller's mutation", async () => {
+      const store = makeStore();
+      const s = freshSessionId();
+      await store.putSnapshot(s, 50, stateFor(s));
+
+      const first = await store.latestSnapshot(s);
+      expect(first).not.toBeNull();
+      if (first === null) return;
+      first.state.round = 99;
+
+      const second = await store.latestSnapshot(s);
+      expect(second?.state.round).toBe(1);
+    });
+
+    it("does not let a caller mutate the state it handed to putSnapshot", async () => {
+      const store = makeStore();
+      const s = freshSessionId();
+      const state = stateFor(s);
+      await store.putSnapshot(s, 50, state);
+      // `pipeline.ts` passes its live `session.state` here and keeps
+      // mutating it afterwards, so a store holding that object by reference
+      // would silently rewrite a snapshot that was already taken.
+      state.round = 99;
+
+      expect((await store.latestSnapshot(s))?.state.round).toBe(1);
+    });
+
+    it("does not expose stored events to a caller's mutation", async () => {
+      const store = makeStore();
+      const s = freshSessionId();
+      await store.append(s, [event(s, 0)]);
+
+      const first = await store.readSince(s, -1);
+      const mutated = first[0];
+      expect(mutated).toBeDefined();
+      if (mutated === undefined) return;
+      mutated.payload.note = "tampered";
+
+      const second = await store.readSince(s, -1);
+      expect(second[0]?.payload.note).toBe("event 0");
+    });
   });
 }

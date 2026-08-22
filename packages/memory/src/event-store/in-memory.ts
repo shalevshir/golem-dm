@@ -50,21 +50,26 @@ export function createInMemoryEventStore(): EventStore {
     readSince(sessionId, afterSequence) {
       const events =
         logs.get(sessionId)?.events.filter((each) => each.sequence > afterSequence) ?? [];
-      return Promise.resolve(events);
+      // A deep copy, not just a fresh array: the Postgres store parses rows
+      // into new objects, so a caller that mutates a returned event must see
+      // the same nothing happen in both stores. Cost is one clone per
+      // replayed batch, which happens once per reconnect.
+      return Promise.resolve(events.map((each) => structuredClone(each)));
     },
 
     latestSnapshot(sessionId) {
       const snapshot = logs.get(sessionId)?.snapshot ?? null;
-      // A copy, never the store's own record: a caller mutating the result
-      // must not be able to reach into the cache. Mirrors `readSince`, which
-      // never hands back the live `events` array either.
-      return Promise.resolve(snapshot === null ? null : { ...snapshot });
+      // `{ ...snapshot }` used to be enough for the array, but `state` is an
+      // object the caller could reach into. Same reasoning as `readSince`.
+      return Promise.resolve(snapshot === null ? null : structuredClone(snapshot));
     },
 
     putSnapshot(sessionId, sequence, state) {
       const log = logFor(sessionId);
       if (log.snapshot === null || log.snapshot.sequence < sequence) {
-        log.snapshot = { sequence, state };
+        // Cloned on the way in too: `pipeline.ts` hands us its live
+        // `session.state` and keeps mutating it after this returns.
+        log.snapshot = { sequence, state: structuredClone(state) };
       }
       return Promise.resolve();
     },
