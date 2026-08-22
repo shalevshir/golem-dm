@@ -14,10 +14,10 @@ import {
   createVercelPort,
   DEFAULT_MODEL_ROUTING,
 } from "@ai-dm/agents";
+import { createInMemoryEventStore } from "@ai-dm/memory";
 import type { FastifyBaseLogger } from "fastify";
 import { buildApp } from "./app.js";
 import { loadConfig } from "./config.js";
-import { createInMemoryEventStore } from "./core/event-store.js";
 import type { MetricsPort } from "./core/pipeline.js";
 import { loadConditions } from "./encounters/index.js";
 import { createSessionRegistry } from "./transport/http.js";

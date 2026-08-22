@@ -49,11 +49,11 @@ import {
   createTacticalAgent,
   DEFAULT_MODEL_ROUTING,
 } from "@ai-dm/agents";
+import { createInMemoryEventStore } from "@ai-dm/memory";
+import type { EventStore } from "@ai-dm/memory";
 import { ServerFrame, fold } from "@ai-dm/schemas";
 import type { GameEvent, SessionState } from "@ai-dm/schemas";
 import { buildApp } from "./app.js";
-import { createInMemoryEventStore } from "./core/event-store.js";
-import type { EventStore } from "./core/event-store.js";
 import type { TurnPorts } from "./core/pipeline.js";
 import { loadSession } from "./core/session.js";
 import type { Session } from "./core/session.js";

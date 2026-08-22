@@ -16,11 +16,11 @@
 // `createSession` and `loadSession` build it the same way before folding
 // anything on top of it.
 import { z } from "zod";
+import type { EventStore } from "@ai-dm/memory";
 import type { BuiltEncounter, CombatWorld } from "@ai-dm/rules-engine";
 import { fold, NarrativeEmittedPayload } from "@ai-dm/schemas";
 import type { GameEvent, SessionState } from "@ai-dm/schemas";
 import { buildEncounterById } from "../encounters/index.js";
-import type { EventStore } from "./event-store.js";
 
 /** Sequence 0's payload. Parsed rather than cast — it is the only thing that
  * tells a reloaded session which encounter it is. */

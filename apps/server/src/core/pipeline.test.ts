@@ -10,6 +10,8 @@ import {
   DEFAULT_MODEL_ROUTING,
   NARRATIVE_PROMPT_VERSION,
 } from "@ai-dm/agents";
+import { createInMemoryEventStore } from "@ai-dm/memory";
+import type { EventStore } from "@ai-dm/memory";
 import { DiceRolledPayload, NarrativeEmittedPayload } from "@ai-dm/schemas";
 import type {
   ClientMessage,
@@ -18,8 +20,6 @@ import type {
   ServerFrame,
   SessionState,
 } from "@ai-dm/schemas";
-import { createInMemoryEventStore } from "./event-store.js";
-import type { EventStore } from "./event-store.js";
 import { SNAPSHOT_EVERY, handleCommand } from "./pipeline.js";
 import type { NarrativeTurnMetrics, TacticalTurnMetrics, TurnPorts } from "./pipeline.js";
 import { createSession, loadSession } from "./session.js";

@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import Fastify from "fastify";
+import { createInMemoryEventStore } from "@ai-dm/memory";
 import { EncounterCatalogue } from "@ai-dm/schemas";
-import { createInMemoryEventStore } from "../core/event-store.js";
 import { encounterCatalogue } from "../encounters/index.js";
 import { createSessionRegistry, registerHttpRoutes } from "./http.js";
 import type { SessionRegistry } from "./http.js";

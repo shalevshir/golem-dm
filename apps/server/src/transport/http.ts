@@ -4,7 +4,7 @@
 // on whether the id already existed.
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
-import type { EventStore } from "../core/event-store.js";
+import type { EventStore } from "@ai-dm/memory";
 import { createSession, loadSession } from "../core/session.js";
 import type { Session } from "../core/session.js";
 import { encounterCatalogue, UnknownEncounterError } from "../encounters/index.js";
