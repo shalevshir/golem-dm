@@ -66,7 +66,7 @@ describe("ActionBar", () => {
     // The combatant name in the target picker still needs <bdi>: it's
     // Hebrew now, same direction as the surrounding document, but the
     // `targetId` fallback used when the catalogue lookup misses is Latin
-    // (see the comment above `labelFor` in ActionBar.tsx). Pinned here the
+    // (see the comment inside `labelFor` in ActionBar.tsx). Pinned here the
     // same way `Grid.tsx` pins its own combatant-name <bdi> (98857bd), since
     // swapping it for a <span> leaves every other assertion in this file
     // green.

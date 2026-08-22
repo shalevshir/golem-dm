@@ -1028,8 +1028,11 @@ describe("handleCommand — narrative metrics", () => {
    * backed by `createFakePort({ stream: [[...]] })` only scripts one such
    * call — a second would throw "Fake port script exhausted" instead of
    * letting the assertions below run. Killing the hostiles keeps every test
-   * here to exactly the one narrated turn its "one call" assertions
-   * describe, regardless of which `narrative`/`clock` port it is given.
+   * that uses this fixture to exactly the one narrated turn its "one call"
+   * assertions describe, regardless of which `narrative`/`clock` port it is
+   * given. Not every test in this describe block uses it: "stamps each
+   * narrated turn with its own actorId" below keeps both hostiles alive on
+   * purpose, to narrate three turns instead of one.
    */
   async function narratedHeroTurn(overrides: Partial<TurnPorts>): Promise<ServerFrame[]> {
     const store = createInMemoryEventStore();

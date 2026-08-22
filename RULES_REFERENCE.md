@@ -213,8 +213,10 @@ Not yet implemented, roughly in dependency order:
   and tested (`combat/` `rollDeathSave`, §4); what is missing is a driver —
   `resolve.ts`'s own comment says it plainly, "this file does not drive it."
   An Unconscious player character would strand the pipeline with nothing
-  that ever calls `rollDeathSave`. Closes once something in the encounter
-  pipeline drives it.
+  that ever calls `rollDeathSave`. Both narrators already render an
+  `unconscious` beat that the pipeline cannot currently produce, so a
+  death-save driver gains working narration the day it lands. Closes once
+  something in the encounter pipeline drives it.
 - Stabilising, and the 1d4-hour natural recovery (§4)
 - HP maximum reduced to 0 (§4)
 - Condition mechanical effects beyond those listed in §6

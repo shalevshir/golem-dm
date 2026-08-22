@@ -75,7 +75,7 @@ Status: POC phase · Supersedes `dm-plan.md` (see `dm-plan-review.md` for the fa
 | 6 | **Provider adapter:** Vercel AI SDK wrapper, `ModelRouting` config | Mocked-provider tests pass | 3 | ✅ done |
 | 7 | **Tactical agent + sim:** validate→retry→fallback loop; benchmark Flash vs nano/mini | Legality ≥95% after retry on fixture scenarios; model chosen from data | 3–4 | ✅ done |
 | 8 | **Server + web:** Fastify+WS, event log, replay-on-reconnect, clickable canvas grid | Full combat playable E2E vs scripted enemy | 4–5 | ✅ done |
-| 9 | **Narrative agent:** Sonnet 5 streaming, Hebrew glossary, gendered narration, cache-stable prefix | First token <1.5s p50; Hebrew reviewed by native speaker | 5–6 | ⬜ not started |
+| 9 | **Narrative agent:** Sonnet 5 streaming, Hebrew glossary, gendered narration, cache-stable prefix | First token p50 1407ms, pooled n=36 (meets <1.5s); Hebrew reviewed by native speaker — pending (`docs/prompts/hebrew-review-2026-08-21.md` committed, not yet reviewed) | 5–6 | 🟡 agent shipped; native-speaker review pending |
 | 10 | **Memory:** pgvector episodic store, scene summarization, quest DAG | Replay test + top-k retrieval test pass | 6 | ⬜ not started |
 | 11 | **Closed beta:** 5–10 Hebrew-speaking playtesters; per-turn token/latency/cost dashboards | Measured cost table replaces §3 estimates; go/no-go review | 7–8 | ⬜ not started |
 
@@ -281,9 +281,12 @@ rule).
       the caller-supplied default on `CombatWorld.actionRangesFeet` for
       players and the base-AC row in `RULES_REFERENCE.md` §2. Shipped inside
       step 9 spec #1 (§4.5), not step 8.
-- [ ] **Step 9:** build the rules digest for the narrative/tactical static
+- [x] **Step 9:** build the rules digest for the narrative/tactical static
       prompt tier; verify each line against the notebook, then pin it under
-      the same hash-guard as `TACTICAL_PROMPT_VERSION`.
+      the same hash-guard as `TACTICAL_PROMPT_VERSION`. Shipped wired into
+      the **narrative role only**: the tactical prompt is exactly what step
+      7b benchmarked to justify `DEFAULT_MODEL_ROUTING.tactical`, and adding
+      the digest there would change that prompt (§4.5).
 - [ ] **Backlog:** monster traits/reactions transcription (Pack Tactics,
       Parry, Undead Fortitude) once the engine grows hooks for them (§8).
 
@@ -488,12 +491,18 @@ Costs and gotchas the next engineer should know:
   websockets. Use a monotonic run token.
 - The narrative pane currently renders **English**, because the narrative
   agent is spec #1's deterministic stand-in; the Hebrew agent arrives in
-  step 9. Today the only Hebrew a player sees is UI chrome.
+  step 9. Today the only Hebrew a player sees is UI chrome. **Closed by
+  step 9 spec #2 (§4.5):** the server streams Hebrew narration from
+  `claude-sonnet-5`, degrading to a Hebrew deterministic renderer rather
+  than an English one, so the narrative pane is Hebrew end to end.
 - Hebrew name data now exists throughout `data/srd/` and `data/characters/`
   (`nameHebrew`, added by step 9 spec #1 — see §4.5), but the web client
   does not consume it yet: combatant and action names still render as
   English (`nameEnglish`) inside the RTL UI — which is why every such
-  fragment is wrapped in `<bdi>`.
+  fragment is wrapped in `<bdi>`. **Closed by step 9 spec #2 (§4.5):**
+  `CombatLog.tsx`, `ActionBar.tsx` and `Grid.tsx` now render `nameHebrew`;
+  the `<bdi>` wrappers stay, load-bearing around the LTR roll-number traces
+  and harmless around names that are now same-direction with the page.
 
 The process finding, stated plainly, is the most transferable thing the
 slice produced: **seven separate tasks shipped a test whose name promised a
@@ -561,5 +570,81 @@ narrative role only — wiring the digest into the tactical prompt would
 change the prompt the step 7b benchmark measured, which is the sole
 justification for `DEFAULT_MODEL_ROUTING.tactical`.
 
-The roadmap's step 9 row (§4 above) stays **⬜ not started**: spec #1 is
-prerequisite infrastructure, and spec #2 is a design, not the agent.
+Spec #2 **shipped on 2026-08-21**, commits `f7b623b..e033e5d` (34 commits;
+suite 1042/76 → 1196/86 — schemas 140, rules-engine 402, web 96, agents 237,
+sim 194, server 127), all green under `pnpm test`, `pnpm typecheck` and
+`npx eslint packages apps tools`.
+
+**Measured against the exit criterion.** Time to first token, four live
+9-sample runs against `claude-sonnet-5` at prompt version `2026-08-21.1`:
+per-run p50 1842, 1432, 1314, 1458 ms — three of four pass, the first run
+the outlier. Pooled across all four (n=36), **p50 = 1407 ms**, which meets
+the criterion, but narrowly, and the caveat has to travel with the number:
+only 20 of 36 samples (56%) land under 1500 ms, and a single 9-sample run
+can land on either side of the line — the first one read 1842 ms and looked
+like a clean miss. Pooled p95 = 3397 ms, mean 1752 ms, min 1062 / max
+7865 ms — the tail is the weak result, and it matters, because narration
+shares its one 10s turn budget with the tactical call that precedes it on a
+hostile turn. Artifacts: `tools/sim/runs/live-narrative-*/report.md`, four
+runs, committed.
+
+**Output discipline**, all 36 samples: zero digit violations, zero
+non-Hebrew outputs, zero over-length outputs, zero errored streams. This is
+the only evidence these hold — nothing enforces them at runtime, because
+streaming forbids a post-filter (a token cannot be unsent once it is on the
+wire).
+
+**Cost, and a bound rather than a figure:** $0.0015 per narration, $0.0135
+per 9-sample run. `usage.promptTokens` reads 939 across all nine calls of a
+run while the static prompt tier alone is ~1455+ tokens, because
+Anthropic's `input_tokens` excludes `cache_read_input_tokens`
+(`packages/agents/src/providers/vercel.ts` passes the SDK field through
+verbatim). Two things follow: the cache-stable prefix is demonstrably
+working — an uncached run would bill roughly 14k prompt tokens, not 939 —
+and cached-token share is not measurable at all in this repo, since no
+`TokenUsage` field and no adapter surfaces a cache-read count. Recorded as
+unavailable, never as a number, mirroring the same honest gap §4.3 already
+recorded for the tactical role.
+
+**Fallback rate**, from a browser play-through of two `goblin-ambush`
+sessions to a conclusion (one won, one lost), 14 narrated turns, party and
+hostile reported separately as the design requires: party turns 6, 1
+fallback (17% — model 5, completed 1); hostile turns 8, 1 fallback (12% —
+model 7, deterministic 1); all turns 14, 2 fallbacks (14%). Narration
+latency median 5788 ms, max 10002 ms, exactly one turn hitting the 10s
+budget. All three degradation rungs fired in production, unprompted:
+`model`, `deterministic` (a hostile turn whose tactical call had already
+spent the budget), and `completed` (latencyMs 10002 — the deadline cut the
+stream mid-word and the pipeline appended the `… ` seam plus the
+deterministic Hebrew, visible mid-sentence in the UI). One observation
+worth recording honestly: the hostile fallback rate came out *lower* than
+the party rate, where the design anticipated the opposite; n=14 is far too
+small to overturn that reasoning, so it stands as an observation, not a
+finding. Rendering held throughout: combatant names, action names and the
+roll log all render Hebrew, digit runs sit LTR inside RTL text exactly as
+the `<bdi>` wrappers intend, and nothing renders reversed or mirrored.
+
+**Limitations this spec knowingly ships**, from the design's own
+accounting:
+
+- Nothing validates the model's Hebrew at runtime; a hallucinated noun or a
+  stray digit reaches the player.
+- The `unconscious` beat is rendered but unreachable, because
+  `diesAtZeroHp` stays pinned.
+- A player's own free text is never reflected in the narration.
+- The rules digest serves the narrative role only; the tactical prompt is
+  untouched until a re-benchmark.
+- The recent-narration window is two turns. A repetition at distance three
+  is invisible to the narrator.
+- The fight pulse assumes a single party combatant (ADR-0002).
+
+The roadmap's step 9 row (§4 above) is now **🟡 agent shipped;
+native-speaker review pending**: the agent is built, benchmarked live and
+played through a full `goblin-ambush` encounter in Hebrew, and the
+first-token criterion is met at the measured p50 above. The row's second
+exit criterion is not met: the Hebrew review sheet
+(`docs/prompts/hebrew-review-2026-08-21.md`) is generated and committed,
+but no native speaker has read it yet, and the spec is explicit that the
+sheet is not itself a blocking gate — putting a concrete artifact in front
+of a reviewer, rather than holding the step open on a task only they can
+perform.
