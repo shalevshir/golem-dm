@@ -4,7 +4,17 @@ import tseslint from "typescript-eslint";
 import prettier from "eslint-config-prettier";
 
 export default tseslint.config(
-  { ignores: ["**/dist/**", "**/node_modules/**", "**/*.gen.ts"] },
+  {
+    ignores: [
+      "**/dist/**",
+      "**/node_modules/**",
+      "**/*.gen.ts",
+      // Compiled by drizzle-kit, not by any package tsconfig, so the
+      // type-aware rules have no project to resolve it against.
+      "packages/memory/drizzle.config.ts",
+      "packages/memory/drizzle/**",
+    ],
+  },
   js.configs.recommended,
   ...tseslint.configs.strictTypeChecked,
   prettier,
