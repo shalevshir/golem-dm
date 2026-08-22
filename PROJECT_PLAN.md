@@ -611,16 +611,25 @@ a "goblin-ess" (`הגובלינית`), primed by that same roster. Correcting
 `SCENE_ENGLISH` to atmosphere only (ground, light, sound; no creature count, no
 roster) removed the card as a source of either error: a manual reread of all 36
 re-measured samples finds neither recurring anywhere — the wolf sample narrates
-the wolf throughout, and no sample states a creature count. It does not close
-the counter's blind spot entirely, and that is worth recording rather than
-rounding away: three of the 36 samples (four occurrences — one sample uses it
-twice) reach for `אחת` ("one") on their own initiative rather than from the
-scene card — "בתנופה אחת חדה" (in one sharp lunge), "בבת אחת" (all at once),
-"במכה אחת" (in one blow) — spelled-out numbers the prompt's blanket rule
-forbids just as much as a creature count, invisible to the same digit-only
-counter. Lower-stakes than the roster leak, since it asserts nothing false
-about the board, but the same blind spot: nothing except a human rereading the
-corpus catches it.
+the wolf throughout, and no sample states a creature count as a numeral. The
+counter's blind spot is not fully closed, though. Two samples reach for `היחיד`
+("the sole one") to state a creature count in words instead — and one of them
+is not merely a stylistic word choice but a narration contradicting the board
+state its own prompt supplied: a felling `critical_hit` leaves the FIGHT PULSE
+reading `hostilesStanding: one` ("Enemies still standing: one" in the rendered
+prompt), yet the model narrates `אלדד נותר לרגע היחיד הזקוף` ("Eldad remains
+for a moment the only one standing") — false, since a hostile is still standing
+too. That is a real, observed instance of the limitation this spec's own
+Limitations section already names as undetectable at runtime — "a fact the
+board contradicts" — seen once in 36 samples, not only in the abstract. The
+other, `באויב היחיד שעדיין עומד מולה` ("the sole enemy still standing before
+her"), is true of the board but still a count in words. Separately, three of
+the 36 samples (four occurrences — one sample uses it twice) reach for `אחת`
+("one") for emphasis rather than from the scene card — "בתנופה אחת חדה" (in one
+sharp lunge), "בבת אחת" (all at once), "במכה אחת" (in one blow) — the same
+blanket rule, the same digit-only blind spot, but nothing false about the board
+this time. Every instance in both groups was found by rereading the corpus;
+none of it registers on the counter.
 
 **Cost, across the four runs, not a single figure:** $0.0017–$0.0024 per
 narration, $0.0152–$0.0212 per 9-sample run — up from $0.0015–$0.0018 and
