@@ -21,7 +21,7 @@ Persistence layer, on **one Postgres instance** (image `pgvector/pgvector:pg17`)
 
 ## Testing
 
-Vitest against a throwaway Postgres (docker compose in `apps/server/`). Required today: append→replay→identical-projection round-trip, run against both event-store implementations via the shared conformance suite. Once episodic memory is built (spec #2): vector search returns a seeded fixture in top-k.
+Vitest against a throwaway Postgres (docker compose in `apps/server/`). Two distinct suites today: the shared `EventStore` conformance suite (`src/event-store/contract.ts`), run against both the in-memory and Postgres implementations; and the append→replay→identical-projection round-trip (`src/event-store/replay.test.ts`), Postgres-only and skipped without `DATABASE_URL`. Once episodic memory is built (spec #2): vector search returns a seeded fixture in top-k.
 
 ## Commands
 
