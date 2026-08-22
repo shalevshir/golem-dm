@@ -21,7 +21,12 @@ import type {
   SessionState,
 } from "@ai-dm/schemas";
 import { SNAPSHOT_EVERY, handleCommand } from "./pipeline.js";
-import type { NarrativeTurnMetrics, TacticalTurnMetrics, TurnPorts } from "./pipeline.js";
+import type {
+  NarrativeTurnMetrics,
+  SnapshotFailureRecord,
+  TacticalTurnMetrics,
+  TurnPorts,
+} from "./pipeline.js";
 import { createSession, loadSession } from "./session.js";
 import type { Session } from "./session.js";
 
@@ -770,6 +775,60 @@ describe("handleCommand — snapshot cadence", () => {
 
     const snapshot = await store.latestSnapshot("s1");
     expect(snapshot).toEqual({ sequence: SNAPSHOT_EVERY, state: stateAtSnapshot });
+  });
+
+  // The sibling of the two `internal_error` cases above, and the reason they
+  // are not enough: the in-memory store's `putSnapshot` can never reject, so
+  // until there was a Postgres one this `await` sat inside the turn's `try`
+  // harmlessly. A transient database error on the snapshot write must not
+  // end a turn whose events are already committed — if the crossing event is
+  // the closing `scene_changed`, control has already passed to a hostile,
+  // `playerAffordances()` returns silently, and the client is left with an
+  // `internal_error` and an inert board that a rejoin cannot repair.
+  it("completes the turn when the snapshot write fails", async () => {
+    const store = createInMemoryEventStore();
+    const session = await freshSession(store);
+    // Same fast-forward as the case above: the hero's six events land on
+    // 45..50 and the last one crosses the boundary, so `putSnapshot` is
+    // reached exactly once.
+    session.nextSequence = SNAPSHOT_EVERY - 5;
+    const failures: SnapshotFailureRecord[] = [];
+    const failing: EventStore = {
+      ...store,
+      putSnapshot: () =>
+        Promise.reject(new EventStoreUnavailableError("putSnapshot", new Error("boom"))),
+    };
+    const ports: TurnPorts = {
+      ...portsWith(failing),
+      metrics: {
+        recordTacticalTurn: () => undefined,
+        recordNarrativeTurn: () => undefined,
+        recordSnapshotFailure(record) {
+          failures.push(record);
+        },
+      },
+    };
+
+    const frames = await drain(handleCommand(session, dodge("hero"), ports));
+
+    // No error frame at all — a cache write may not end a turn.
+    expect(frames.filter((each) => each.type === "error")).toEqual([]);
+    // And the turn ran all the way through the hostile sweep back to the
+    // player, which is what a soft-locked board would not do.
+    const last = frames.at(-1);
+    expect(last?.type).toBe("turn_affordances");
+    expect(last?.type === "turn_affordances" && last.actorId).toBe("hero");
+    expect(session.state.round).toBe(2);
+    expect(session.state.currentActorIndex).toBe(0);
+    // The log is complete past the crossing event: the append half of the
+    // turn never depended on the snapshot half.
+    expect((await store.readSince("s1", SNAPSHOT_EVERY - 1)).map((each) => each.sequence)).toContain(
+      SNAPSHOT_EVERY,
+    );
+    // Contained, not swallowed: the operator still learns the store rejected
+    // a write, exactly once, for the sequence that failed.
+    expect(failures.map((each) => each.sequence)).toEqual([SNAPSHOT_EVERY]);
+    expect(failures[0]?.error).toBeInstanceOf(EventStoreUnavailableError);
   });
 });
 

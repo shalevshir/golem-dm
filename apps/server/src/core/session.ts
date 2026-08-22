@@ -115,6 +115,14 @@ export async function loadSession(input: {
   sessionId: string;
   store: EventStore;
 }): Promise<Session | null> {
+  // From genesis, deliberately, even though a snapshot may exist: snapshots
+  // are a cache and never authority (`EventStore.putSnapshot`'s contract),
+  // so folding the whole log is what guarantees a stale, truncated or
+  // corrupt snapshot can never reach a restored session. `join` with
+  // `resumeFrom` is the one path that reads `session_snapshots`, and it only
+  // uses it to skip replaying events the client already has. Accelerating
+  // this call with the snapshot is a possible follow-up, not an oversight;
+  // it would need the snapshot to be validated against the log first.
   const events = await input.store.readSince(input.sessionId, -1);
   const genesis = events[0];
   if (genesis === undefined) return null;

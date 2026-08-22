@@ -7,6 +7,24 @@ interface SessionLog {
   snapshot: EventSnapshot | null;
 }
 
+/**
+ * The copy this store keeps of whatever a caller hands it.
+ *
+ * A JSON round trip rather than `structuredClone`, because the Postgres
+ * store writes to a jsonb column and a jsonb round trip is lossy in three
+ * ways `structuredClone` is not: it drops a key whose value is `undefined`,
+ * turns `NaN`/`Infinity` into `null`, and turns a `Date` into its ISO
+ * string. Cloning faithfully here would leave the two implementations
+ * disagreeing on exactly those payloads — a divergence the conformance suite
+ * now pins (`contract.ts`, "drops a payload key whose value is undefined"),
+ * per `packages/memory/CLAUDE.md`: a behaviour only one store has is a bug in
+ * the contract. Taking the durable store's lossiness on deliberately is what
+ * makes the pair interchangeable.
+ */
+function storedCopy<T>(value: T): T {
+  return JSON.parse(JSON.stringify(value)) as T;
+}
+
 export function createInMemoryEventStore(): EventStore {
   const logs = new Map<string, SessionLog>();
 
@@ -42,7 +60,13 @@ export function createInMemoryEventStore(): EventStore {
       if (conflict !== null) return Promise.reject(conflict);
 
       const log = logFor(sessionId);
-      log.events.push(...events);
+      // Copied on the way in, not retained by reference: the Postgres store
+      // serializes to jsonb inside `append`, so the caller's object stops
+      // mattering the moment the call returns. Keeping the caller's own
+      // objects here would let a later mutation rewrite history in this
+      // store and not the other one — the mirror of the `putSnapshot` case,
+      // and just as much a contract violation.
+      log.events.push(...events.map(storedCopy));
       log.events.sort((a, b) => a.sequence - b.sequence);
       return Promise.resolve();
     },
@@ -54,22 +78,24 @@ export function createInMemoryEventStore(): EventStore {
       // into new objects, so a caller that mutates a returned event must see
       // the same nothing happen in both stores. Cost is one clone per
       // replayed batch, which happens once per reconnect.
-      return Promise.resolve(events.map((each) => structuredClone(each)));
+      return Promise.resolve(events.map(storedCopy));
     },
 
     latestSnapshot(sessionId) {
       const snapshot = logs.get(sessionId)?.snapshot ?? null;
       // `{ ...snapshot }` used to be enough for the array, but `state` is an
       // object the caller could reach into. Same reasoning as `readSince`.
-      return Promise.resolve(snapshot === null ? null : structuredClone(snapshot));
+      return Promise.resolve(snapshot === null ? null : storedCopy(snapshot));
     },
 
     putSnapshot(sessionId, sequence, state) {
       const log = logFor(sessionId);
       if (log.snapshot === null || log.snapshot.sequence < sequence) {
         // Cloned on the way in too: `pipeline.ts` hands us its live
-        // `session.state` and keeps mutating it after this returns.
-        log.snapshot = { sequence, state: structuredClone(state) };
+        // `session.state` and keeps mutating it after this returns. Same
+        // JSON-lossy copy as `append`, for the same reason — `state` lands in
+        // a jsonb column on the other side.
+        log.snapshot = { sequence, state: storedCopy(state) };
       }
       return Promise.resolve();
     },

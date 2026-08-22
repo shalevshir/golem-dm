@@ -129,6 +129,15 @@ export interface NarrativeTurnMetrics {
   promptVersion: string;
 }
 
+/** A `putSnapshot` rejection, contained inside `emit` — see `MetricsPort`. */
+export interface SnapshotFailureRecord {
+  sessionId: string;
+  /** The log sequence the failed snapshot would have reflected. */
+  sequence: number;
+  /** Whatever the store rejected with; `EventStoreUnavailableError` in practice. */
+  error: unknown;
+}
+
 /**
  * Where the metrics go is a transport decision, not a core one: core calls
  * this port, the transport decides it writes a structured log line. Reading
@@ -140,6 +149,17 @@ export interface NarrativeTurnMetrics {
  */
 export interface MetricsPort {
   recordTacticalTurn(metrics: TacticalTurnMetrics): void;
+  /**
+   * A snapshot write that failed. Optional, unlike its two siblings, so that
+   * adding it did not invalidate every existing `MetricsPort` implementation
+   * — call it through `?.` on both the port and the method.
+   *
+   * Not a turn metric but an operational one: `emit` contains this failure
+   * deliberately (a snapshot is a cache, never authority), which means the
+   * turn completes normally and nothing else in the system would ever say
+   * that the durable store rejected a write.
+   */
+  recordSnapshotFailure?(record: SnapshotFailureRecord): void;
   /**
    * One call per narrated turn, from `narrate()` below — the only place
    * that knows both which actor is narrating and which rung produced the
@@ -316,7 +336,36 @@ export async function* handleCommand(
       // Deliberately after the yield — nothing downstream reads it within
       // the same turn, so it must not sit inside the append-and-yield
       // window either.
-      await ports.store.putSnapshot(session.state.sessionId, event.sequence, session.state);
+      //
+      // And its own `try`, so a cache write can never end a turn. The append
+      // above already succeeded and `session.state`/`nextSequence` already
+      // moved, so the turn's outer catch — whose whole justification is that
+      // a failure there left the state untouched — is false on this path.
+      // Letting an `EventStoreUnavailableError` from here reach it would
+      // abort mid-turn with the log already advanced: if the crossing event
+      // is the closing `scene_changed`, control has passed to a hostile and
+      // `playerAffordances()` returns silently, so the client gets
+      // `internal_error` and an inert board that a rejoin cannot repair
+      // (`join` replays the same log and calls the same silent
+      // `playerAffordances`); if it is `player_input`, the id is already in
+      // `appliedClientMessageIds`, so a retry under the same
+      // `clientMessageId` is dropped forever. A missing snapshot costs a
+      // longer replay on the next reconnect and nothing else.
+      try {
+        await ports.store.putSnapshot(session.state.sessionId, event.sequence, session.state);
+      } catch (error) {
+        // Reported, not swallowed: a store that has stopped accepting
+        // snapshots is usually about to stop accepting appends, and this is
+        // the earliest visible symptom. Through `ports.metrics` because the
+        // pipeline does no I/O of its own — where the line goes is the
+        // transport's decision (`MetricsPort`'s doc comment), and tests that
+        // supply no metrics port simply see the failure contained.
+        ports.metrics?.recordSnapshotFailure?.({
+          sessionId: session.state.sessionId,
+          sequence: event.sequence,
+          error,
+        });
+      }
     }
   }
 

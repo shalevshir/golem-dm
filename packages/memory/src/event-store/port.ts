@@ -76,6 +76,15 @@ export interface EventStore {
    * duplicate within the batch itself) or `SessionMismatchError` if an
    * event's own `sessionId` disagrees with `sessionId`. Either rejection
    * leaves the store exactly as it was before the call.
+   *
+   * A `payload` is stored by value, through a JSON round trip: the caller
+   * may mutate the event it passed once this resolves, and the store keeps
+   * what it was handed. That round trip is lossy in the ways a jsonb column
+   * is — a key whose value is `undefined` is dropped, `NaN`/`Infinity`
+   * become `null`, a `Date` becomes its ISO string — and that lossiness is
+   * part of the contract, not an implementation detail of the durable store:
+   * `contract.ts` holds both implementations to it, so a payload cannot
+   * behave one way in a dev run and another on a deploy.
    */
   append(sessionId: string, events: readonly GameEvent[]): Promise<void>;
   /** Everything with `sequence > afterSequence`, in ascending order. */

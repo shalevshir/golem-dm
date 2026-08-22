@@ -92,6 +92,18 @@ const metrics: MetricsPort = {
   recordNarrativeTurn(record) {
     logHolder.current?.info(record, "narrative_turn_metrics");
   },
+  recordSnapshotFailure(record) {
+    // `warn`, not `error`: the turn it happened in completed normally
+    // (`emit` contains this deliberately — a snapshot is a cache, never
+    // authority), so nothing is broken yet. What it costs is a full replay
+    // on the next reconnect, and what it usually means is that the store is
+    // about to start rejecting appends too — which is exactly why this must
+    // not be silent.
+    logHolder.current?.warn(
+      { sessionId: record.sessionId, sequence: record.sequence, err: record.error },
+      "snapshot_write_failed",
+    );
+  },
 };
 
 const app = buildApp({
@@ -157,28 +169,78 @@ app.log.info(
 
 await app.listen({ port: config.port, host: "0.0.0.0" });
 
+/** pino's own `flush`, which fastify's `FastifyBaseLogger` — a `Pick` of
+ *  eight members — does not expose. */
+interface FlushableLogger {
+  flush(cb: (err?: Error) => void): void;
+}
+
+function isFlushable(logger: unknown): logger is FlushableLogger {
+  return (
+    typeof logger === "object" &&
+    logger !== null &&
+    typeof (logger as { flush?: unknown }).flush === "function"
+  );
+}
+
+/**
+ * pino writes asynchronously, so a `process.exit` immediately after a log
+ * call can truncate or lose the very line it was called to produce — which
+ * would make the shutdown-failure branch below silent in exactly the case it
+ * exists for. Reached through a structural check rather than an assertion
+ * because the method is not on the type fastify hands out: ESLint bans `!`,
+ * and a cast claiming it is always there would be a lie the day fastify
+ * swaps its logger. A logger without `flush` has nothing buffered to drain,
+ * so skipping is correct rather than a silent failure.
+ */
+async function flushLog(): Promise<void> {
+  const logger: unknown = app.log;
+  if (!isFlushable(logger)) return;
+  await new Promise<void>((resolve) => {
+    logger.flush(() => {
+      resolve();
+    });
+  });
+}
+
 // The process had no shutdown path before there was a connection to close.
 // Both signals, because a container stop sends SIGTERM and a terminal sends
 // SIGINT, and a half-closed pool keeps the process alive in either case.
-// `Promise.allSettled` (not two sequential `await`s) so a rejected
-// `app.close()` cannot skip the pool close it exists to guarantee, and
 // `app.log.error` (not a swallowed rejection) so an operator gets a
-// structured line instead of a raw stderr stack trace. `process.exit`
+// structured line instead of a raw stderr stack trace, and `process.exit`
 // makes termination depend on this code's own verdict, not on Node's
 // default unhandled-rejection behaviour.
+//
+// Sequential and in this order, NOT the `Promise.allSettled` this started
+// as: `ws.ts` drains an in-flight `handleCommand` to completion in a
+// detached task that `app.close()` does not await, so starting both closes
+// at once can end the pool under a turn that is still appending — every
+// remaining `emit` then rejects with `CONNECTION_ENDED` wrapped as
+// `EventStoreUnavailableError`, which is a torn turn in the log. The reason
+// `allSettled` was there — a rejected `app.close()` must not skip the pool
+// close — survives, because each close is caught on its own rather than
+// awaited in a chain that an earlier rejection could short-circuit; that is
+// also what keeps both diagnostics when both fail.
 for (const signal of ["SIGTERM", "SIGINT"] as const) {
   process.once(signal, () => {
     void (async () => {
-      const results = await Promise.allSettled([
-        app.close(),
-        postgresHandle?.close() ?? Promise.resolve(),
-      ]);
-      const failures = results.filter(
-        (result): result is PromiseRejectedResult => result.status === "rejected",
-      );
-      for (const failure of failures) {
-        app.log.error({ err: failure.reason }, "shutdown: close failed");
+      const failures: unknown[] = [];
+      try {
+        await app.close();
+      } catch (error) {
+        failures.push(error);
       }
+      // Unconditional: reached whether or not the close above rejected,
+      // which is the guarantee `Promise.allSettled` was here for.
+      try {
+        await postgresHandle?.close();
+      } catch (error) {
+        failures.push(error);
+      }
+      for (const failure of failures) {
+        app.log.error({ err: failure }, "shutdown: close failed");
+      }
+      await flushLog();
       process.exit(failures.length > 0 ? 1 : 0);
     })();
   });

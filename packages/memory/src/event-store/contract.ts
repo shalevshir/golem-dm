@@ -17,10 +17,12 @@ function event(sessionId: string, sequence: number): GameEvent {
     sequence,
     timestamp: "2026-08-19T10:00:00.000Z",
     type: "player_input",
-    // Only JSON-round-trip-safe values: a jsonb column drops a key whose
-    // value is `undefined`, turns `NaN` into `null` and a `Date` into a
-    // string, none of which the in-memory store does. Keeping payloads
-    // plain is what lets one suite hold both stores to the same equality.
+    // Deliberately plain, so the cases that assert whole-event equality do
+    // not double as a test of value normalization. The lossy values a jsonb
+    // column imposes — a key whose value is `undefined`, `NaN`, a `Date` —
+    // are not excluded from the contract, they are pinned by their own cases
+    // at the bottom of this suite, which is what stops a future payload
+    // drifting outside the set the two stores agree on.
     payload: { note: `event ${String(sequence)}` },
   };
 }
@@ -240,6 +242,63 @@ export function describeEventStoreContract(label: string, makeStore: () => Event
 
       const second = await store.readSince(s, -1);
       expect(second[0]?.payload.note).toBe("event 0");
+    });
+
+    it("does not let a caller mutate an event it handed to append", async () => {
+      const store = makeStore();
+      const s = freshSessionId();
+      const appended = event(s, 0);
+      await store.append(s, [appended]);
+      // The mirror of the `putSnapshot` case above, and the direction that
+      // actually diverged: the Postgres store serializes to jsonb inside
+      // `append`, so the caller's object stops mattering the moment the call
+      // returns, while a store that kept the reference would let this line
+      // rewrite a log that is supposed to be append-only.
+      appended.payload.note = "tampered";
+
+      expect((await store.readSince(s, -1))[0]?.payload.note).toBe("event 0");
+    });
+
+    // The three cases below pin the boundary of "the two stores are
+    // interchangeable". A jsonb column is a lossy round trip, and the losses
+    // are silent: without these, a payload carrying one of these values works
+    // in a dev run on the in-memory store, loses a key on the Postgres
+    // deploy, and only surfaces as a `.parse` failure in `reduce` at the next
+    // restart. Making the loss itself the contract means both stores lose the
+    // same thing, and a future divergence breaks a test rather than a deploy.
+    it("drops a payload key whose value is undefined", async () => {
+      const store = makeStore();
+      const s = freshSessionId();
+      await store.append(s, [
+        { ...event(s, 0), payload: { note: "kept", missing: undefined } },
+      ]);
+
+      const stored = (await store.readSince(s, -1))[0];
+      expect(stored).toBeDefined();
+      if (stored === undefined) return;
+      // `toEqual` treats `{ missing: undefined }` and `{}` as equal, so the
+      // assertion has to be on key presence or it would pass either way.
+      expect(Object.hasOwn(stored.payload, "missing")).toBe(false);
+      expect(stored.payload.note).toBe("kept");
+    });
+
+    it("stores NaN as null in a payload", async () => {
+      const store = makeStore();
+      const s = freshSessionId();
+      await store.append(s, [{ ...event(s, 0), payload: { roll: Number.NaN } }]);
+
+      const stored = (await store.readSince(s, -1))[0];
+      expect(stored?.payload.roll).toBeNull();
+    });
+
+    it("stores a Date in a payload as its ISO string", async () => {
+      const store = makeStore();
+      const s = freshSessionId();
+      const when = new Date("2026-08-19T10:00:00.000Z");
+      await store.append(s, [{ ...event(s, 0), payload: { when } }]);
+
+      const stored = (await store.readSince(s, -1))[0];
+      expect(stored?.payload.when).toBe("2026-08-19T10:00:00.000Z");
     });
   });
 }
