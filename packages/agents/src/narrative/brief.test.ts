@@ -44,7 +44,7 @@ const EMPTY_EFFECT: TurnEffect = {
 
 const CONDITION_NAMES = new Map<Condition, string>([["prone", "שרוע"]]);
 
-function briefInput(effect: TurnEffect, combatants: Combatant[]) {
+function briefInput(effect: TurnEffect, combatants: Combatant[], recentNarrations: readonly string[] = []) {
   return {
     actorId: "hero",
     effect,
@@ -52,7 +52,7 @@ function briefInput(effect: TurnEffect, combatants: Combatant[]) {
     statBlocks: new Map<string, CreatureStatBlock>([["hero", HERO], ["goblin-a", GOBLIN]]),
     conditionNamesHebrew: CONDITION_NAMES,
     sceneEnglish: "A dry hillside track.",
-    recentNarrations: [],
+    recentNarrations,
   };
 }
 
@@ -93,6 +93,26 @@ describe("buildNarrationBrief", () => {
     const brief = buildNarrationBrief(briefInput(EMPTY_EFFECT, [combatant({ combatantId: "hero", faction: "party", maxHp: 28, currentHp: 28 })]));
     expect(brief.actor).toEqual({ nameHebrew: "אלדד", gender: "masculine", conditionsHebrew: [] });
     expect(brief.actorSide).toBe("party");
+  });
+
+  // Neither field is derived from anything else in NarrationBriefInput — a
+  // pass-through with no other test surface. Without this, buildNarrationBrief
+  // could return "" / [] for both and every other test in this file would
+  // still be green: the scene card is what keeps the prompt's nouns to "data
+  // instead of hallucination" (spec's Decisions section), and the two-turn
+  // window is what the RECENT NARRATION section exists to prevent repetition
+  // with. Losing either silently is a real regression, not a cosmetic one.
+  it("passes the scene card through to the brief unchanged", () => {
+    const brief = buildNarrationBrief(briefInput(EMPTY_EFFECT, [combatant({ combatantId: "hero", faction: "party" })]));
+    expect(brief.sceneEnglish).toBe("A dry hillside track.");
+  });
+
+  it("passes recent narrations through to the brief unchanged and in order", () => {
+    const recentNarrations = ["אלדד מתקדם לעבר הגובלין.", "הגובלין לוחם מחטיא את אלדד."];
+    const brief = buildNarrationBrief(
+      briefInput(EMPTY_EFFECT, [combatant({ combatantId: "hero", faction: "party" })], recentNarrations),
+    );
+    expect(brief.recentNarrations).toEqual(recentNarrations);
   });
 
   it("emits a hold beat for a turn that did nothing", () => {

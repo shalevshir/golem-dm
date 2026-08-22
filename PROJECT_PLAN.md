@@ -399,16 +399,15 @@ rediscovering:
   round cap anywhere in the pipeline. Termination rests entirely on the
   combat math above; a caller that needs a bound (the E2E test included) has
   to impose its own.
-- **Per-turn metrics are missing two of the spec's five fields, honestly
-  rather than silently.** `TurnPorts.metrics` (`apps/server/src/core/
-  pipeline.ts`) records tokens in/out, retries and latency per tactical
-  call, but not cached tokens or cost: `TokenUsage`
-  (`packages/agents/src/providers/usage.ts`) has no cache-read field to
-  report, and the cost table lives in `tools/sim`, which nothing under
-  `apps/server` may depend on (dependency direction, root `CLAUDE.md` §5). A
-  cost figure computed from `TokenUsage` alone would also be *wrong*, not
-  merely incomplete — cache reads bill differently and nothing at this layer
-  reports them.
+- **Per-turn metrics are missing two of the spec's five fields, honestly rather
+  than silently.** `TurnPorts.metrics` (`apps/server/src/core/pipeline.ts`)
+  records tokens in/out, retries and latency per tactical call, but not cached
+  tokens or cost: `TokenUsage` (`packages/agents/src/providers/usage.ts`) has
+  no cache-read field to report, and the cost table lives in `tools/sim`, which
+  nothing under `apps/server` may depend on (dependency direction, root
+  `CLAUDE.md` §5). A cost figure computed from `TokenUsage` alone would also be
+  *wrong*, not merely incomplete — cache reads bill differently and nothing at
+  this layer reports them.
 - **Model routing is not yet config-overridable, though the spec calls for
   it to be.** The spec's §Config says routing "stays config
   (`DEFAULT_MODEL_ROUTING` as the default, overridable), never code," but
@@ -599,21 +598,24 @@ the prompt equally forbids, would not register as a violation.
 
 **Cost, across the four runs, not a single figure:** $0.0015–$0.0018 per
 narration, $0.0135–$0.0163 per 9-sample run. `usage.promptTokens` reads 939
-across all nine calls of a run while the static prompt tier alone is
-~1455+ tokens, because Anthropic's `input_tokens` excludes both
-`cache_read_input_tokens` and `cache_creation_input_tokens`
+across all nine calls of a run while the static prompt tier alone is ~1455
+tokens by a chars÷4 estimate (5820 characters ÷ 4), a heuristic that
+understates the Hebrew glossary segment — Hebrew tokens cost roughly twice a
+Latin-script character's share (root `CLAUDE.md`, invariant 2) — so the true
+static-tier count runs higher than 1455. Anthropic's `input_tokens` also
+excludes both `cache_read_input_tokens` and `cache_creation_input_tokens`
 (`packages/agents/src/providers/vercel.ts` passes the SDK field through
-verbatim) — and that cuts both ways rather than settling anything. A rough,
+verbatim), and that cuts both ways rather than settling anything. A rough,
 unmeasured estimate — ~1455 static tokens × nine calls, plus each call's
-dynamic beats/pulse/history — puts an unshared-prefix run at roughly 14k
-prompt tokens, well above the measured 939, which is consistent with the
-static tier being recognized as a cacheable block. It is equally consistent
-with every one of those nine calls paying to *write* that block rather than
-*read* it, since a cache write is excluded from `input_tokens` exactly like
-a cache read is. Cached-token share is not measurable at all in this repo
-to settle which: no `TokenUsage` field and no adapter surfaces a cache-read
-or cache-write count. Recorded as unavailable, never as a number, mirroring
-the same honest gap §4.3 already recorded for the tactical role.
+dynamic beats/pulse/history — puts an unshared-prefix run at roughly 14k prompt
+tokens, well above the measured 939, which is consistent with the static tier
+being recognized as a cacheable block. It is equally consistent with every one
+of those nine calls paying to *write* that block rather than *read* it, since a
+cache write is excluded from `input_tokens` exactly like a cache read is.
+Cached-token share is not measurable at all in this repo to settle which: no
+`TokenUsage` field and no adapter surfaces a cache-read or cache-write count.
+Recorded as unavailable, never as a number, mirroring the same honest gap §4.3
+already recorded for the tactical role.
 
 **Fallback rate**, from a browser play-through of two `goblin-ambush`
 sessions to a conclusion (one won, one lost), 14 narrated turns, party and

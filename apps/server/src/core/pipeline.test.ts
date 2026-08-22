@@ -1374,6 +1374,8 @@ describe("handleCommand — narration degradation ladder", () => {
     const { tokens, emitted } = narrativeOf(frames);
     expect(emitted.source).toBe("deterministic");
     expect(emitted.text).toBe(tokens.join(""));
+    expect(emitted.text).toMatch(/[֐-׿]/);
+    expect(emitted.text).not.toMatch(/[a-zA-Z]/);
   });
 
   it("completes a truncated narration instead of storing a severed sentence", async () => {

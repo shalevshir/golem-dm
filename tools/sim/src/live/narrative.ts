@@ -40,8 +40,18 @@ const GOBLIN: NarratedCreature = {
 const RANGER: NarratedCreature = { nameHebrew: "רעות", gender: "feminine", conditionsHebrew: [] };
 const WOLF_F: NarratedCreature = { nameHebrew: "זאבה", gender: "feminine", conditionsHebrew: [] };
 
+// Ground, light and sound only — no creature count and no creature roster,
+// matching production's discipline (`apps/server/src/encounters/index.ts`'s
+// `sceneEnglish`). NARRATIVE_SYSTEM_PROMPT licenses the model to draw nouns
+// from "Anything the SCENE section describes", so a count or a roster here
+// would measure the benchmark against a more permissive card than the one
+// that ships — and the model has been observed reproducing exactly that kind
+// of leak. Deliberately a different scene from production's own card (this
+// is a benchmark fixture, not a copy of it), held to the same rule.
 const SCENE_ENGLISH =
-  "A goblin ambush on a dry hillside track: two goblins break from cover as the party rounds a switchback.";
+  "Dusk on a narrow hillside trail. The ground is packed dirt and loose gravel, " +
+  "sloping toward a dry wash. The light is dim and reddening, and every footstep " +
+  "and scrape carries on the still air.";
 
 /**
  * A hand-written corpus, not a random sample: every `NarrationBeat` kind,
