@@ -75,7 +75,7 @@ Status: POC phase · Supersedes `dm-plan.md` (see `dm-plan-review.md` for the fa
 | 6 | **Provider adapter:** Vercel AI SDK wrapper, `ModelRouting` config | Mocked-provider tests pass | 3 | ✅ done |
 | 7 | **Tactical agent + sim:** validate→retry→fallback loop; benchmark Flash vs nano/mini | Legality ≥95% after retry on fixture scenarios; model chosen from data | 3–4 | ✅ done |
 | 8 | **Server + web:** Fastify+WS, event log, replay-on-reconnect, clickable canvas grid | Full combat playable E2E vs scripted enemy | 4–5 | ✅ done |
-| 9 | **Narrative agent:** Sonnet 5 streaming, Hebrew glossary, gendered narration, cache-stable prefix | First token p50 1407ms, pooled n=36 (meets <1.5s); Hebrew reviewed by native speaker — pending (`docs/prompts/hebrew-review-2026-08-21.md` committed, not yet reviewed) | 5–6 | 🟡 agent shipped; native-speaker review pending |
+| 9 | **Narrative agent:** Sonnet 5 streaming, Hebrew glossary, gendered narration, cache-stable prefix | First token p50 1407 ms, pooled n=36 (meets <1.5s; see §4.5 for the per-run spread); Hebrew reviewed by native speaker — pending (`docs/prompts/hebrew-review-2026-08-21.md` committed, not yet reviewed) | 5–6 | 🟡 agent shipped; native-speaker review pending |
 | 10 | **Memory:** pgvector episodic store, scene summarization, quest DAG | Replay test + top-k retrieval test pass | 6 | ⬜ not started |
 | 11 | **Closed beta:** 5–10 Hebrew-speaking playtesters; per-turn token/latency/cost dashboards | Measured cost table replaces §3 estimates; go/no-go review | 7–8 | ⬜ not started |
 
@@ -501,8 +501,9 @@ Costs and gotchas the next engineer should know:
   English (`nameEnglish`) inside the RTL UI — which is why every such
   fragment is wrapped in `<bdi>`. **Closed by step 9 spec #2 (§4.5):**
   `CombatLog.tsx`, `ActionBar.tsx` and `Grid.tsx` now render `nameHebrew`;
-  the `<bdi>` wrappers stay, load-bearing around the LTR roll-number traces
-  and harmless around names that are now same-direction with the page.
+  the `<bdi>` wrappers stay load-bearing in both places — around the LTR
+  roll-number traces, and around names, because the catalogue-miss fallback
+  is still a Latin id.
 
 The process finding, stated plainly, is the most transferable thing the
 slice produced: **seven separate tasks shipped a test whose name promised a
@@ -563,7 +564,7 @@ severity rather than handing the model a number, the deterministic renderer
 is rewritten in Hebrew so a failed provider never prints English, and the
 pipeline owns one degradation ladder covering both a provider error and a
 spent turn budget. It folds in two of the three inherited constraints: the
-web client switches to `nameHebrew`, closing the §4.3 follow-up, and the
+web client switches to `nameHebrew`, closing the §4.4 follow-up, and the
 `unconscious` beat is rendered but stays unreachable while `diesAtZeroHp`
 is pinned. It also closes §4.1's "Step 9" rules-digest task, for the
 narrative role only — wiring the digest into the tactical prompt would
@@ -592,19 +593,27 @@ runs, committed.
 non-Hebrew outputs, zero over-length outputs, zero errored streams. This is
 the only evidence these hold — nothing enforces them at runtime, because
 streaming forbids a post-filter (a token cannot be unsent once it is on the
-wire).
+wire) — and even that evidence has a blind spot: the corpus counter matches
+literal digit characters, so a number spelled out in Hebrew words, which
+the prompt equally forbids, would not register as a violation.
 
-**Cost, and a bound rather than a figure:** $0.0015 per narration, $0.0135
-per 9-sample run. `usage.promptTokens` reads 939 across all nine calls of a
-run while the static prompt tier alone is ~1455+ tokens, because
-Anthropic's `input_tokens` excludes `cache_read_input_tokens`
+**Cost, across the four runs, not a single figure:** $0.0015–$0.0018 per
+narration, $0.0135–$0.0163 per 9-sample run. `usage.promptTokens` reads 939
+across all nine calls of a run while the static prompt tier alone is
+~1455+ tokens, because Anthropic's `input_tokens` excludes both
+`cache_read_input_tokens` and `cache_creation_input_tokens`
 (`packages/agents/src/providers/vercel.ts` passes the SDK field through
-verbatim). Two things follow: the cache-stable prefix is demonstrably
-working — an uncached run would bill roughly 14k prompt tokens, not 939 —
-and cached-token share is not measurable at all in this repo, since no
-`TokenUsage` field and no adapter surfaces a cache-read count. Recorded as
-unavailable, never as a number, mirroring the same honest gap §4.3 already
-recorded for the tactical role.
+verbatim) — and that cuts both ways rather than settling anything. A rough,
+unmeasured estimate — ~1455 static tokens × nine calls, plus each call's
+dynamic beats/pulse/history — puts an unshared-prefix run at roughly 14k
+prompt tokens, well above the measured 939, which is consistent with the
+static tier being recognized as a cacheable block. It is equally consistent
+with every one of those nine calls paying to *write* that block rather than
+*read* it, since a cache write is excluded from `input_tokens` exactly like
+a cache read is. Cached-token share is not measurable at all in this repo
+to settle which: no `TokenUsage` field and no adapter surfaces a cache-read
+or cache-write count. Recorded as unavailable, never as a number, mirroring
+the same honest gap §4.3 already recorded for the tactical role.
 
 **Fallback rate**, from a browser play-through of two `goblin-ambush`
 sessions to a conclusion (one won, one lost), 14 narrated turns, party and
@@ -612,11 +621,13 @@ hostile reported separately as the design requires: party turns 6, 1
 fallback (17% — model 5, completed 1); hostile turns 8, 1 fallback (12% —
 model 7, deterministic 1); all turns 14, 2 fallbacks (14%). Narration
 latency median 5788 ms, max 10002 ms, exactly one turn hitting the 10s
-budget. All three degradation rungs fired in production, unprompted:
-`model`, `deterministic` (a hostile turn whose tactical call had already
-spent the budget), and `completed` (latencyMs 10002 — the deadline cut the
-stream mid-word and the pipeline appended the `… ` seam plus the
-deterministic Hebrew, visible mid-sentence in the UI). One observation
+budget. All three narration sources fired in production, unprompted:
+`model`, `deterministic` (that hostile turn's own `narrative_stream_finished`
+recorded `error=None` and no usage, which rules out an in-band provider
+error — `hebrew.ts` would have set `error` — so the shared turn deadline cut
+the stream before its first token), and `completed` (latencyMs 10002 — the
+deadline cut the stream mid-word and the pipeline appended the `… ` seam
+plus the deterministic Hebrew, visible mid-sentence in the UI). One observation
 worth recording honestly: the hostile fallback rate came out *lower* than
 the party rate, where the design anticipated the opposite; n=14 is far too
 small to overturn that reasoning, so it stands as an observation, not a

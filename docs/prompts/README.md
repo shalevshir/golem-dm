@@ -1,8 +1,11 @@
 # Prompt Assets
 
-Versioned prompt templates. English-only internal prompts; Hebrew appears only
-in the narrative agent's output instructions and the HE glossary
-(hebrew-glossary.md). Order sections static -> semi-static -> dynamic to keep
+Versioned prompt templates. English-only internal prompts — every
+instruction the narrative agent reads is English, including its output
+rules ("write 2 to 3 sentences", "no numbers"). Hebrew enters a prompt only
+as *values* the model reproduces rather than reads as an instruction: the HE
+glossary's Hebrew column (`hebrew-glossary.md`), `nameHebrew` strings, and
+prior narrations. Order sections static -> semi-static -> dynamic to keep
 the cacheable prefix byte-stable.
 
 ## Where prompt text actually lives
@@ -24,8 +27,8 @@ a TypeScript module, so it remains the source of record rather than moving
 into `prompt-text.ts` like everything else here. The runtime copy the
 narrative agent actually sends still has to live in TypeScript for the same
 purity reason as the rest of this table — so `narrative/prompt-text.ts`
-holds `GLOSSARY_TERMS`, a byte-for-byte copy of this file's table, and a
-parity test (`prompt-text.test.ts`) parses `hebrew-glossary.md` and fails
+holds `GLOSSARY_TERMS`, a row-for-row copy of `hebrew-glossary.md`'s table,
+and a parity test (`prompt-text.test.ts`) parses `hebrew-glossary.md` and fails
 the suite the moment the two disagree. Neither copy can drift silently: the
 table is the one a person edits, the module is the one that ships, and the
 test is what keeps them the same table.
