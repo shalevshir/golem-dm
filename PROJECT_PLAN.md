@@ -75,7 +75,7 @@ Status: POC phase · Supersedes `dm-plan.md` (see `dm-plan-review.md` for the fa
 | 6 | **Provider adapter:** Vercel AI SDK wrapper, `ModelRouting` config | Mocked-provider tests pass | 3 | ✅ done |
 | 7 | **Tactical agent + sim:** validate→retry→fallback loop; benchmark Flash vs nano/mini | Legality ≥95% after retry on fixture scenarios; model chosen from data | 3–4 | ✅ done |
 | 8 | **Server + web:** Fastify+WS, event log, replay-on-reconnect, clickable canvas grid | Full combat playable E2E vs scripted enemy | 4–5 | ✅ done |
-| 9 | **Narrative agent:** Sonnet 5 streaming, Hebrew glossary, gendered narration, cache-stable prefix | First token p50 1407 ms, pooled n=36 (meets <1.5s; see §4.5 for the per-run spread); Hebrew reviewed by native speaker — pending (`docs/prompts/hebrew-review-2026-08-21.md` committed, not yet reviewed) | 5–6 | 🟡 agent shipped; native-speaker review pending |
+| 9 | **Narrative agent:** Sonnet 5 streaming, Hebrew glossary, gendered narration, cache-stable prefix | First token p50 1340 ms, pooled n=36 (meets <1.5s; see §4.5 for the per-run spread); Hebrew reviewed by native speaker — pending (`docs/prompts/hebrew-review-2026-08-21.md` committed, not yet reviewed) | 5–6 | 🟡 agent shipped; native-speaker review pending |
 | 10 | **Memory:** pgvector episodic store, scene summarization, quest DAG | Replay test + top-k retrieval test pass | 6 | ⬜ not started |
 | 11 | **Closed beta:** 5–10 Hebrew-speaking playtesters; per-turn token/latency/cost dashboards | Measured cost table replaces §3 estimates; go/no-go review | 7–8 | ⬜ not started |
 
@@ -576,30 +576,59 @@ sim 194, server 127), all green under `pnpm test`, `pnpm typecheck` and
 `npx eslint packages apps tools`.
 
 **Measured against the exit criterion.** Time to first token, four live
-9-sample runs against `claude-sonnet-5` at prompt version `2026-08-21.1`:
-per-run p50 1842, 1432, 1314, 1458 ms — three of four pass, the first run
-the outlier. Pooled across all four (n=36), **p50 = 1407 ms**, which meets
-the criterion, but narrowly, and the caveat has to travel with the number:
-only 20 of 36 samples (56%) land under 1500 ms, and a single 9-sample run
-can land on either side of the line — the first one read 1842 ms and looked
-like a clean miss. Pooled p95 = 3397 ms, mean 1752 ms, min 1062 / max
-7865 ms — the tail is the weak result, and it matters, because narration
-shares its one 10s turn budget with the tactical call that precedes it on a
-hostile turn. Artifacts: `tools/sim/runs/live-narrative-*/report.md`, four
-runs, committed.
+9-sample runs against `claude-sonnet-5` at prompt version `2026-08-21.1`,
+re-measured at commit `13eab18` after the benchmark's own `SCENE_ENGLISH` scene
+card was corrected (below): per-run p50 1340, 1156, 1634, 1058 ms — three of
+four pass, the third run the outlier this time. Pooled across all four (n=36),
+**p50 = 1340 ms**, which meets the criterion, and the same caveat still travels
+with the number: still only 20 of 36 samples (56%) land under 1500 ms —
+unchanged from the previous measurement — and a single 9-sample run can still
+land on either side of the line: the third one read 1634 ms and would have
+looked like a miss on its own. Pooled p95 = 4466 ms, mean 2074 ms, min 966 /
+max **13332 ms** — the tail got *worse*, not better, than the previous
+measurement's p95 3397 ms and max 7865 ms, and that still matters for the same
+reason: narration shares its one 10s turn budget with the tactical call that
+precedes it on a hostile turn, and this run's worst sample alone would have
+exceeded that budget. Small samples, real variance, recorded rather than
+smoothed. Artifacts: `tools/sim/runs/live-narrative-*/report.md`, eight runs
+committed in total — these four (commit `13eab18`) plus the four superseded
+runs kept as the record of what was measured and why it needed correcting. Both
+sets stamp `promptVersion: 2026-08-21.1` — the shipped prompt never changed,
+only the benchmark's own scene-card fixture did — so it is the commit each
+report names, not the prompt version, that tells the two sets apart, and they
+must not be pooled together.
 
-**Output discipline**, all 36 samples: zero digit violations, zero
-non-Hebrew outputs, zero over-length outputs, zero errored streams. This is
-the only evidence these hold — nothing enforces them at runtime, because
-streaming forbids a post-filter (a token cannot be unsent once it is on the
-wire) — and even that evidence has a blind spot: the corpus counter matches
-literal digit characters, so a number spelled out in Hebrew words, which
-the prompt equally forbids, would not register as a violation.
+**Output discipline**, all 36 samples: zero digit violations, zero non-Hebrew
+outputs, zero over-length outputs, zero errored streams — as before. The corpus
+counter matches literal digit characters only, so a number spelled out in
+Hebrew words needs a human to catch it; this document used to state that as a
+hypothetical gap, and it no longer should, because it was real. Under the
+superseded scene card, the committed corpus read "...ומביט בשני הגובלינים..."
+("...looking at the two goblins..."), naming in words the exact count the
+card's own roster had handed the model — the `/[0-9]/` counter scored that
+sample clean — and the same corpus separately mis-narrated a downed she-wolf as
+a "goblin-ess" (`הגובלינית`), primed by that same roster. Correcting
+`SCENE_ENGLISH` to atmosphere only (ground, light, sound; no creature count, no
+roster) removed the card as a source of either error: a manual reread of all 36
+re-measured samples finds neither recurring anywhere — the wolf sample narrates
+the wolf throughout, and no sample states a creature count. It does not close
+the counter's blind spot entirely, and that is worth recording rather than
+rounding away: three of the 36 samples (four occurrences — one sample uses it
+twice) reach for `אחת` ("one") on their own initiative rather than from the
+scene card — "בתנופה אחת חדה" (in one sharp lunge), "בבת אחת" (all at once),
+"במכה אחת" (in one blow) — spelled-out numbers the prompt's blanket rule
+forbids just as much as a creature count, invisible to the same digit-only
+counter. Lower-stakes than the roster leak, since it asserts nothing false
+about the board, but the same blind spot: nothing except a human rereading the
+corpus catches it.
 
-**Cost, across the four runs, not a single figure:** $0.0015–$0.0018 per
-narration, $0.0135–$0.0163 per 9-sample run. `usage.promptTokens` reads 939
-across all nine calls of a run while the static prompt tier alone is ~1455
-tokens by a chars÷4 estimate (5820 characters ÷ 4), a heuristic that
+**Cost, across the four runs, not a single figure:** $0.0017–$0.0024 per
+narration, $0.0152–$0.0212 per 9-sample run — up from $0.0015–$0.0018 and
+$0.0135–$0.0163 in the previous measurement. `usage.promptTokens` still reads
+exactly 939 across all nine calls of a run, unchanged from before, so the rise
+is a completion-token effect — longer sampled outputs this round — not a
+prompt-side one, while the static prompt tier alone is ~1455 tokens by a
+chars÷4 estimate (5820 characters ÷ 4), a heuristic that
 understates the Hebrew glossary segment — Hebrew tokens cost roughly twice a
 Latin-script character's share (root `CLAUDE.md`, invariant 2) — so the true
 static-tier count runs higher than 1455. Anthropic's `input_tokens` also
