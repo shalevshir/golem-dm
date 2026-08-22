@@ -160,11 +160,26 @@ await app.listen({ port: config.port, host: "0.0.0.0" });
 // The process had no shutdown path before there was a connection to close.
 // Both signals, because a container stop sends SIGTERM and a terminal sends
 // SIGINT, and a half-closed pool keeps the process alive in either case.
+// `Promise.allSettled` (not two sequential `await`s) so a rejected
+// `app.close()` cannot skip the pool close it exists to guarantee, and
+// `app.log.error` (not a swallowed rejection) so an operator gets a
+// structured line instead of a raw stderr stack trace. `process.exit`
+// makes termination depend on this code's own verdict, not on Node's
+// default unhandled-rejection behaviour.
 for (const signal of ["SIGTERM", "SIGINT"] as const) {
   process.once(signal, () => {
     void (async () => {
-      await app.close();
-      await postgresHandle?.close();
+      const results = await Promise.allSettled([
+        app.close(),
+        postgresHandle?.close() ?? Promise.resolve(),
+      ]);
+      const failures = results.filter(
+        (result): result is PromiseRejectedResult => result.status === "rejected",
+      );
+      for (const failure of failures) {
+        app.log.error({ err: failure.reason }, "shutdown: close failed");
+      }
+      process.exit(failures.length > 0 ? 1 : 0);
     })();
   });
 }
