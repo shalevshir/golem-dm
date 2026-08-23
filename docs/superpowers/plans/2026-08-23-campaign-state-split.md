@@ -51,7 +51,7 @@ So the plan splits the change along the axis a reviewer actually reads: **Task 2
 
 No code. The number every later task is measured against.
 
-- [ ] **Step 1: Cut a branch and confirm the tree**
+- [x] **Step 1: Cut a branch and confirm the tree**
 
 The §4.7 docs merged to `main` as `10ea06c`. Work from a branch off current `main`, not `main` itself:
 
@@ -63,7 +63,7 @@ git switch -c step-11-campaign-state-split main
 
 If the tree is dirty with someone else's work, stop. This plan renames 36 files and will not merge cleanly with a concurrent edit — and `main` has been moving under this work: `41c778b` landed an unrelated conditions/rules-digest fix between the plan being written and executed. Measure the baseline yourself in Step 2 rather than trusting any count quoted elsewhere.
 
-- [ ] **Step 2: Measure**
+- [x] **Step 2: Measure**
 
 ```bash
 corepack enable
@@ -72,6 +72,24 @@ pnpm typecheck && npx eslint packages apps tools && echo "LINT+TYPES OK"
 ```
 
 Record the passed/files counts in the PR description. Both commands must exit 0 before anything moves.
+
+**Recorded 2026-08-23**, on `step-11-campaign-state-split` off `b0c9950`:
+
+| Package | Test files | Tests |
+|---|---|---|
+| `packages/schemas` | 6 | 140 |
+| `packages/rules-engine` | 15 | 402 |
+| `packages/memory` | 3 passed, 1 skipped (4) | 33 passed, 29 skipped (62) |
+| `apps/web` | 12 | 107 |
+| `packages/agents` | 21 | 239 |
+| `tools/sim` | 22 | 194 |
+| `apps/server` | 10 | 119 |
+| **Total** | **89 passed, 1 skipped (90)** | **1234 passed, 29 skipped (1263)** |
+
+`pnpm typecheck` and `npx eslint packages apps tools` both exit 0. The 29 skips
+are `packages/memory`'s Postgres cases, skipped without `DATABASE_URL`; the
+`apps/web` run emits jsdom `HTMLCanvasElement.prototype.getContext` warnings
+throughout and always has.
 
 ---
 
@@ -85,13 +103,13 @@ The wide, shallow half. `SessionState` keeps all eight fields and its meaning; o
 - Produces: `CampaignState` (still the flat eight fields), `CampaignCreated`, `campaign_state` frame, `campaignId` on `JoinMessage`, `campaign_id` / `campaign_snapshots` in the schema.
 - Consumes: nothing new.
 
-- [ ] **Step 1: Schemas**
+- [x] **Step 1: Schemas**
 
 `SessionState` → `CampaignState` (shape unchanged, `sessionId` field → `campaignId`). `SessionCreated` → `CampaignCreated`. `JoinMessage.sessionId` → `campaignId`. The `session_state` frame's literal becomes `campaign_state`.
 
 Leave `reduce`'s body alone beyond the field rename.
 
-- [ ] **Step 2: Memory**
+- [x] **Step 2: Memory**
 
 `schema.ts`: `session_id` → `campaign_id` (the composite PK becomes `(campaign_id, sequence)`), table `session_snapshots` → `campaign_snapshots`. Port, both stores, `validate.ts` and `contract.ts`: `sessionId` → `campaignId`, `SessionMismatchError` → `CampaignMismatchError`.
 
@@ -104,19 +122,19 @@ corepack enable && pnpm --filter @ai-dm/memory db:generate
 
 Anyone holding a local docker volume drops it. There is no other data anywhere: no Dockerfile, no hosting config.
 
-- [ ] **Step 3: Server**
+- [x] **Step 3: Server**
 
 `src/core/session.ts` → `src/core/campaign.ts` (`git mv`, so the rename is visible in history rather than as a delete plus an add). `Session` → `Campaign`, `createSession` → `createCampaign`, `loadSession` → `loadCampaign`, `SessionRegistry` → `CampaignRegistry`. `POST /sessions` → `POST /campaigns`.
 
 `recentNarrations` does not move and does not change (spec decision 7).
 
-- [ ] **Step 4: Web**
+- [x] **Step 4: Web**
 
 `App.tsx`'s `SESSION_STORAGE_KEY` → `CAMPAIGN_STORAGE_KEY` and its value string; `state/persistence.ts`'s `LOG_STORAGE_KEY` value, its `sessionId` field and both function parameters; `net/api.ts`, `net/connection.ts`, `state/store.ts`, `state/conclusion.ts`, `components/Grid.tsx`.
 
 Changing the two storage-key *values* is deliberate: a browser holding state under the old key must not have it read back against a campaign-shaped projection.
 
-- [ ] **Step 5: Verify**
+- [x] **Step 5: Verify**
 
 ```bash
 pnpm test && pnpm typecheck && npx eslint packages apps tools
@@ -124,7 +142,7 @@ pnpm test && pnpm typecheck && npx eslint packages apps tools
 
 Counts must equal Task 1's exactly. A changed count means something other than a rename happened.
 
-- [ ] **Step 6: Prove the rename is total**
+- [x] **Step 6: Prove the rename is total**
 
 ```bash
 grep -rn "sessionId\|session_id\|SessionState\|session_state" packages apps tools \
@@ -132,6 +150,39 @@ grep -rn "sessionId\|session_id\|SessionState\|session_state" packages apps tool
 ```
 
 Expect no hits. A surviving `sessionId` is either a miss or a deliberate exception that needs a comment saying why.
+
+**Done 2026-08-23 as `e0c92b1`.** 54 files. Counts identical to the baseline
+above; typecheck and eslint clean; the grep returns zero hits. Stronger check
+also run: reverse-renaming every changed file and Prettier-normalizing both
+sides reproduces `b0c9950` byte-for-byte, except one `ws.ts` line where
+Prettier preserves an object break the longer identifier forced. Deviations
+from the step list, each deliberate:
+
+- **`unknown_session` → `unknown_campaign`.** Not enumerated above and not
+  caught by Step 6's grep, but it names the stream key and spec decision 6 puts
+  the rename on the wire. It is wire-visible.
+- **`session_snapshot` (the event type) untouched**, per Task 3's note. So
+  `loadCampaign`'s corruption guard still reads `does not start with
+  session_snapshot`, correctly, until Task 5.
+- **`reduce.ts`'s comment quoting the task brief's `SessionStartedPayload` was
+  restored verbatim.** Renaming it would misquote a historical document *and*
+  collide with the real `CampaignStartedPayload` Task 3 introduces.
+- **`sessionStorage` (browser API) and `tools/sim`'s `TURNS_PER_SESSION` /
+  `costPer30TurnSessionUsd` left alone** — that "session" is a 30-turn
+  benchmark run, not the event stream. `tools/sim` is not in this plan's blast
+  radius and its diff was reverted.
+- **Prettier:** the longer identifiers pushed 8 files past 100 cols. 4 of them
+  (`events.ts`, `event-store/contract.ts`, `event-store/replay.test.ts`,
+  `core/pipeline.test.ts`) were *already* nonconformant at `b0c9950`, so they
+  were left rename-only rather than folding pre-existing churn into this diff;
+  the other 4 got a path-scoped `npx prettier --write`. `pnpm format` was not
+  run. Note for later tasks: this repo is not uniformly Prettier-clean, so
+  `--check` is not a useful gate — compare against the baseline file instead.
+
+The drizzle baseline regenerated as `0000_right_changeling.sql`
+(`0000_slow_betty_ross.sql` deleted). **Not yet applied to a real Postgres** —
+`packages/memory` skipped its 29 cases in both runs, so the column rename is
+unproven against a database until Task 8 Step 3 (or earlier, if convenient).
 
 ---
 
