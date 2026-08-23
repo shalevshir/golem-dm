@@ -72,12 +72,12 @@ sequence it so the tree compiles between tasks rather than after all of them.
 CampaignState = { world: WorldState, encounter: EncounterState | null }
 ```
 
-*This refines ADR-0004's second decision,* which listed a `mode` field. At this
-step `mode` would be exactly `encounter === null ? "exploration" : "encounter"`
-— derivable, and §4.7 already argues against storing what can be derived
-(regional danger, for the same reason). The three-valued enum earns its place in
-§4.7's step 4, when exploration and social actually diverge. The ADR is still
-PROPOSED and should be amended rather than contradicted.
+A draft of ADR-0004 listed a `mode` field. At this step it would be exactly
+`encounter === null ? "exploration" : "encounter"` — derivable, and §4.7 argues
+against storing what can be derived (regional danger, for the same reason). The
+three-valued enum earns its place in §4.7's step 4, when exploration and social
+actually diverge. **The ADR was amended to match at acceptance**, so the two now
+agree; this note stays only to record why.
 
 **2. `WorldState` starts nearly empty, and that is the point.**
 

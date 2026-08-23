@@ -1,6 +1,7 @@
 # ADR-0004: Campaign vs. session identity
 
-Status: PROPOSED (2026-08-23) — step 0 of `PROJECT_PLAN.md` §4.7.
+Status: ACCEPTED (2026-08-23) — step 0 of `PROJECT_PLAN.md` §4.7.
+Amended at acceptance: decisions 2 and 4 below, per the step-1 spec.
 
 Options considered: rename the stream to the campaign (A); keep `sessionId` as
 the stream key and widen its meaning (B); one campaign log plus a separate log
@@ -14,17 +15,26 @@ per encounter (C).
    protocol, the schemas, and the `game_events` / `session_snapshots` columns.
    One sequence space, one append-only stream, one fold.
 2. The projection splits. Today's `SessionState` becomes
-   `CampaignState = { mode, world: WorldState, encounter: EncounterState | null }`.
+   `CampaignState = { world: WorldState, encounter: EncounterState | null }`.
    `EncounterState` holds what `SessionState` holds now — grid, combatants,
    turn order, current actor, round — and is non-null only between
    `encounter_started` and `encounter_resolved`. At most one encounter is
    active at a time, which is what makes it a nullable field rather than a map.
+   **Mode is derived, not stored.** A draft of this ADR carried a `mode` field;
+   at this point it would be exactly `encounter === null`, and §4.7 argues
+   against storing what can be derived. The three-valued
+   `exploration | social | encounter` enum earns its place in §4.7's step 4,
+   when those cases actually diverge.
 3. `appliedClientMessageIds` moves to the campaign level, not the encounter's.
    Idempotency has to cover free text and narrative moves, not just turns.
-4. Seeds derive downward and never from fresh randomness: the campaign's root
-   seed is declared at genesis, an encounter's seed derives from it and the
-   sequence of its `encounter_started`, and a turn's seed derives from the
-   encounter's as it does today.
+4. Seeds derive from the campaign root seed and a log sequence, never from
+   fresh randomness. The root seed is declared at genesis; a turn's seed stays
+   `seedFor(rootSeed, sequence)` exactly as today, now over the campaign's
+   sequence space, which is still globally unique per turn; encounter-scoped
+   randomness uses the same port at the `encounter_started` sequence. An
+   earlier draft chained turn seeds off a per-encounter seed and claimed that
+   was current behaviour — it is not (`pipeline.ts:548`), and the extra link
+   would buy nothing.
 5. Genesis stops naming an encounter. Its payload declares the campaign's root
    seed and opening quest node; `encounterId` moves onto `EncounterState`.
 
