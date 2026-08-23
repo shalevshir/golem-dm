@@ -55,7 +55,7 @@ import { ServerFrame, fold } from "@ai-dm/schemas";
 import type { GameEvent, CampaignState } from "@ai-dm/schemas";
 import { buildApp } from "./app.js";
 import type { TurnPorts } from "./core/pipeline.js";
-import { loadCampaign } from "./core/campaign.js";
+import { encounterOf, loadCampaign } from "./core/campaign.js";
 import type { Campaign } from "./core/campaign.js";
 import { createCampaignRegistry } from "./transport/http.js";
 
@@ -262,7 +262,9 @@ async function joinAndAck(
 
 function livingFactions(state: CampaignState): ReadonlySet<string> {
   return new Set(
-    state.combatants.filter((combatant) => combatant.status === "alive").map((c) => c.faction),
+    (state.encounter?.combatants ?? [])
+      .filter((combatant) => combatant.status === "alive")
+      .map((c) => c.faction),
   );
 }
 
@@ -292,13 +294,14 @@ async function waitForProjection(
       throw new Error(`Campaign ${campaignId} disappeared while waiting for ${label}.`);
     if (predicate(campaign)) return campaign;
     if (Date.now() > deadline) {
-      const combatants = campaign.state.combatants
-        .map((c) => `${c.combatantId}=${String(c.currentHp)}hp/${c.status}`)
+      const combatants = encounterOf(campaign)
+        .combatants.map((c) => `${c.combatantId}=${String(c.currentHp)}hp/${c.status}`)
         .join(", ");
-      const actor = campaign.state.turnOrder[campaign.state.currentActorIndex] ?? "none";
+      const actor =
+        encounterOf(campaign).turnOrder[encounterOf(campaign).currentActorIndex] ?? "none";
       throw new Error(
         `Timed out after ${String(WAIT_TIMEOUT_MS)}ms waiting for ${label}. ` +
-          `Last projection: round ${String(campaign.state.round)}, up next ${actor}, ` +
+          `Last projection: round ${String(encounterOf(campaign).round)}, up next ${actor}, ` +
           `combatants [${combatants}].`,
       );
     }
@@ -383,7 +386,7 @@ describe("end to end", () => {
           if (candidate.nextSequence <= beforeSequence) return false;
           const alive = livingFactions(candidate.state);
           const backToHero =
-            candidate.state.turnOrder[candidate.state.currentActorIndex] === "hero";
+            encounterOf(candidate).turnOrder[encounterOf(candidate).currentActorIndex] === "hero";
           return alive.size < 2 || backToHero;
         },
         `hero command ${String(turn)} to resolve`,
@@ -410,7 +413,7 @@ describe("end to end", () => {
     // dodge) never dealt damage. Never asserted as a party win.
     expect(livingFactions(concluded.state)).toEqual(new Set(["hostile"]));
 
-    const hero = concluded.state.combatants.find((c) => c.combatantId === "hero");
+    const hero = encounterOf(concluded).combatants.find((c) => c.combatantId === "hero");
     if (hero === undefined) throw new Error("hero missing from the final projection");
     expect(hero.currentHp).toBe(0);
     // C-31: applyTurn's applyDamage call in
@@ -526,7 +529,8 @@ describe("end to end", () => {
       (candidate) => {
         if (candidate.nextSequence <= cut + 1) return false;
         const alive = livingFactions(candidate.state);
-        const backToHero = candidate.state.turnOrder[candidate.state.currentActorIndex] === "hero";
+        const backToHero =
+          encounterOf(candidate).turnOrder[encounterOf(candidate).currentActorIndex] === "hero";
         return alive.size < 2 || backToHero;
       },
       "the rest of the round to finish appending after the first socket closed",
@@ -544,7 +548,7 @@ describe("end to end", () => {
     // a reason that has nothing to do with reconnect.
     const roundEndAlive = livingFactions(afterRound.state);
     const roundEndBackToHero =
-      afterRound.state.turnOrder[afterRound.state.currentActorIndex] === "hero";
+      encounterOf(afterRound).turnOrder[encounterOf(afterRound).currentActorIndex] === "hero";
     const expectAffordances = roundEndAlive.size < 2 || roundEndBackToHero;
 
     // A second client resumes from what the first one had.

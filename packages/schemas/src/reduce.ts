@@ -37,26 +37,54 @@ export const SceneChangedPayload = z.object({ kind: z.string() });
 
 export function reduce(state: CampaignState, event: GameEvent): CampaignState {
   switch (event.type) {
+    // Campaign scope: an id applies to the whole campaign, not to whichever
+    // fight happened to be open when it arrived. A resent action must still
+    // be recognized as a duplicate after the encounter it named has ended.
     case "player_input": {
       const { clientMessageId } = PlayerInputPayload.parse(event.payload);
       return {
         ...state,
-        appliedClientMessageIds: [...state.appliedClientMessageIds, clientMessageId],
+        world: {
+          ...state.world,
+          appliedClientMessageIds: [...state.world.appliedClientMessageIds, clientMessageId],
+        },
       };
     }
 
     case "state_delta_applied": {
       const { combatants } = StateDeltaAppliedPayload.parse(event.payload);
-      return { ...state, combatants };
+      // Loud, not silent. A combat event outside a bracket means the log is
+      // corrupt or a producer is wrong, and returning `state` here would
+      // project a plausible-looking board out of an impossible history —
+      // far worse to debug than a throw at the sequence that caused it.
+      // Same class as this function's existing `.parse` failures.
+      if (state.encounter === null) {
+        throw new Error(
+          `Combat event ${event.type} at sequence ${String(event.sequence)} with no encounter open`,
+        );
+      }
+      return { ...state, encounter: { ...state.encounter, combatants } };
     }
 
     case "scene_changed": {
       const { kind } = SceneChangedPayload.parse(event.payload);
       if (kind !== "turn_advanced") return state;
-      const next = state.currentActorIndex + 1;
-      const wrapped = next >= state.turnOrder.length;
+      // Checked after the `kind` gate, not before: `turn_advanced` is the one
+      // kind that is a combat signal (this event keeps a narrative name it
+      // has never earned), and it is exactly the kind this branch writes the
+      // encounter for. Guarding the whole event type instead would make any
+      // future out-of-combat scene change — the kind §4.7's step 4 will
+      // emit — throw for arriving where it belongs.
+      if (state.encounter === null) {
+        throw new Error(
+          `Combat event ${event.type} at sequence ${String(event.sequence)} with no encounter open`,
+        );
+      }
+      const encounter = state.encounter;
+      const next = encounter.currentActorIndex + 1;
+      const wrapped = next >= encounter.turnOrder.length;
       const currentActorIndex = wrapped ? 0 : next;
-      const round = wrapped ? state.round + 1 : state.round;
+      const round = wrapped ? encounter.round + 1 : encounter.round;
 
       // A fresh action economy is the start of a turn (mirrors
       // `tools/sim/src/engine/encounter.ts`'s reset at the same logical
@@ -73,12 +101,12 @@ export function reduce(state: CampaignState, event: GameEvent): CampaignState {
       // dead/unconscious upcoming actor is harmless — nothing here revives
       // anyone, and `validateExecuteTurn` still refuses a non-`alive` actor
       // a turn regardless of its economy.
-      const upNextId = state.turnOrder[currentActorIndex];
-      const combatants = state.combatants.map((each) =>
+      const upNextId = encounter.turnOrder[currentActorIndex];
+      const combatants = encounter.combatants.map((each) =>
         each.combatantId === upNextId ? { ...each, actionEconomy: ActionEconomy.parse({}) } : each,
       );
 
-      return { ...state, currentActorIndex, round, combatants };
+      return { ...state, encounter: { ...encounter, currentActorIndex, round, combatants } };
     }
 
     // Recorded for replay, audit and 7b's rejection dataset, but they change

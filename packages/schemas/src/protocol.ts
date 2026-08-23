@@ -18,26 +18,63 @@ import { Combatant, Faction, GridMap } from "./world.js";
 export const MAX_FREE_TEXT_LENGTH = 500;
 
 /**
- * The serializable projection. Deliberately not `CombatWorld`: that carries a
- * `lineOfSight` function, which cannot be snapshotted. The algorithm is paired
- * back in at call time.
+ * What outlives every encounter: the campaign's identity, its randomness, and
+ * the ids it has already acted on.
+ *
+ * It holds almost nothing on purpose. The dials a campaign will eventually
+ * need — calendar, faction standing, current quest node — arrive with the
+ * §4.7 steps that give them meaning; a change that both restructures the
+ * projection and fills it could not be reviewed.
+ *
+ * `appliedClientMessageIds` sits here rather than on the encounter because
+ * idempotency has to survive a fight ending, and must cover free text and
+ * narrative moves later rather than turns alone.
+ */
+export const WorldState = z.object({
+  campaignId: z.string(),
+  /** Every seed in the campaign derives from this and a log sequence. */
+  rootSeed: z.number().int(),
+  appliedClientMessageIds: z.array(z.string()),
+});
+
+export type WorldState = z.infer<typeof WorldState>;
+
+/**
+ * One fight's board, and nothing that outlives it. Deliberately not
+ * `CombatWorld`: that carries a `lineOfSight` function, which cannot be
+ * snapshotted. The algorithm is paired back in at call time.
  *
  * Stat blocks are absent for the same reason they are absent from the event
  * log — they are static per encounter and re-derived from `encounterId`. A
  * snapshot holds only what events change.
  */
-export const CampaignState = z.object({
-  campaignId: z.string(),
-  /** Every turn's dice seed derives from this and the turn's sequence. */
-  rootSeed: z.number().int(),
+export const EncounterState = z.object({
   encounterId: z.string(),
   grid: GridMap,
   combatants: z.array(Combatant),
   turnOrder: z.array(z.string()),
   currentActorIndex: z.number().int().min(0),
   round: z.number().int().min(1),
-  /** Idempotency, as a projection of the log rather than connection state. */
-  appliedClientMessageIds: z.array(z.string()),
+});
+
+export type EncounterState = z.infer<typeof EncounterState>;
+
+/**
+ * The serializable projection: a campaign, and the one encounter open inside
+ * it if there is one (ADR-0004).
+ *
+ * A field rather than a map because the bracket is strictly non-overlapping —
+ * at most one encounter runs at a time, and a second `encounter_started`
+ * inside an open one is a corrupt log, not a second fight. Whether the
+ * campaign is in a fight is therefore `encounter !== null`, derived rather
+ * than stored: a `mode` enum would be exactly that expression today, and it
+ * earns its place only once exploration and social genuinely diverge (§4.7's
+ * step 4).
+ */
+export const CampaignState = z.object({
+  world: WorldState,
+  /** Non-null exactly between `encounter_started` and `encounter_resolved`. */
+  encounter: EncounterState.nullable(),
 });
 
 export type CampaignState = z.infer<typeof CampaignState>;

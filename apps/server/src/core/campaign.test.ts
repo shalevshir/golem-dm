@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { createInMemoryEventStore } from "@ai-dm/memory";
 import { fold } from "@ai-dm/schemas";
 import type { GameEvent } from "@ai-dm/schemas";
-import { createCampaign, loadCampaign, worldFor } from "./campaign.js";
+import { createCampaign, encounterOf, loadCampaign, worldFor } from "./campaign.js";
 import type { CreateCampaignInput } from "./campaign.js";
 
 const clock = (): string => "2026-08-19T10:00:00.000Z";
@@ -42,10 +42,10 @@ describe("createCampaign", () => {
       clock,
       uuid: uuids(),
     });
-    expect(campaign.state.turnOrder).toEqual(["hero", "goblin-a", "goblin-b"]);
-    expect(campaign.state.combatants).toHaveLength(3);
-    expect(campaign.state.round).toBe(1);
-    expect(campaign.state.currentActorIndex).toBe(0);
+    expect(encounterOf(campaign).turnOrder).toEqual(["hero", "goblin-a", "goblin-b"]);
+    expect(encounterOf(campaign).combatants).toHaveLength(3);
+    expect(encounterOf(campaign).round).toBe(1);
+    expect(encounterOf(campaign).currentActorIndex).toBe(0);
   });
 
   it("writes a session_snapshot event as sequence 0", async () => {
@@ -73,12 +73,12 @@ describe("createCampaign", () => {
       clock,
       uuid: uuids(),
     });
-    expect(campaign.state.campaignId).toBe("s1");
-    expect(campaign.state.rootSeed).toBe(42);
-    expect(campaign.state.encounterId).toBe("goblin-ambush");
-    expect(campaign.state.grid.width).toBe(12);
-    expect(campaign.state.grid.height).toBe(12);
-    expect(campaign.state.turnOrder).toEqual(["hero", "goblin-a", "goblin-b"]);
+    expect(campaign.state.world.campaignId).toBe("s1");
+    expect(campaign.state.world.rootSeed).toBe(42);
+    expect(encounterOf(campaign).encounterId).toBe("goblin-ambush");
+    expect(encounterOf(campaign).grid.width).toBe(12);
+    expect(encounterOf(campaign).grid.height).toBe(12);
+    expect(encounterOf(campaign).turnOrder).toEqual(["hero", "goblin-a", "goblin-b"]);
   });
 
   it("resolves the encounter's scene card once at creation", async () => {
@@ -129,7 +129,7 @@ describe("loadCampaign", () => {
       uuid: uuids(),
     });
 
-    const movedCombatants = created.state.combatants.map((each) =>
+    const movedCombatants = encounterOf(created).combatants.map((each) =>
       each.combatantId === "goblin-a" ? { ...each, position: [7, 3] } : each,
     );
     const genUuid = uuids();
@@ -157,9 +157,11 @@ describe("loadCampaign", () => {
     const expected = fold(created.state, tail);
 
     expect(loaded?.state).toEqual(expected);
-    const goblinA = loaded?.state.combatants.find((each) => each.combatantId === "goblin-a");
+    const goblinA = loaded?.state.encounter?.combatants.find(
+      (each) => each.combatantId === "goblin-a",
+    );
     expect(goblinA?.position).toEqual([7, 3]);
-    expect(loaded?.state.currentActorIndex).toBe(1);
+    expect(loaded?.state.encounter?.currentActorIndex).toBe(1);
     expect(loaded?.nextSequence).toBe(3);
   });
 
@@ -168,10 +170,10 @@ describe("loadCampaign", () => {
     const campaign = await createCampaign({ ...baseInput(), store, encounterId: "goblin-ambush" });
 
     for (const text of ["ראשון.", "שני.", "שלישי."]) {
-      await store.append(campaign.state.campaignId, [
+      await store.append(campaign.state.world.campaignId, [
         {
           eventId: `e-${text}`,
-          campaignId: campaign.state.campaignId,
+          campaignId: campaign.state.world.campaignId,
           sequence: campaign.nextSequence++,
           timestamp: "2026-08-21T00:00:00.000Z",
           type: "narrative_emitted",
@@ -180,7 +182,7 @@ describe("loadCampaign", () => {
       ]);
     }
 
-    const loaded = await loadCampaign({ campaignId: campaign.state.campaignId, store });
+    const loaded = await loadCampaign({ campaignId: campaign.state.world.campaignId, store });
     expect(loaded?.recentNarrations).toEqual(["שני.", "שלישי."]);
     expect(loaded?.recentNarrations).toHaveLength(NARRATION_WINDOW);
     expect(loaded?.sceneEnglish).toBe(campaign.sceneEnglish);
@@ -193,7 +195,7 @@ describe("loadCampaign", () => {
     const events: GameEvent[] = [
       {
         eventId: "e-1",
-        campaignId: campaign.state.campaignId,
+        campaignId: campaign.state.world.campaignId,
         sequence: campaign.nextSequence++,
         timestamp: "2026-08-21T00:00:00.000Z",
         type: "narrative_emitted",
@@ -210,7 +212,7 @@ describe("loadCampaign", () => {
       // from before this convention existed must not stop the campaign from loading.
       {
         eventId: "e-2",
-        campaignId: campaign.state.campaignId,
+        campaignId: campaign.state.world.campaignId,
         sequence: campaign.nextSequence++,
         timestamp: "2026-08-21T00:00:00.000Z",
         type: "narrative_emitted",
@@ -218,7 +220,7 @@ describe("loadCampaign", () => {
       },
       {
         eventId: "e-3",
-        campaignId: campaign.state.campaignId,
+        campaignId: campaign.state.world.campaignId,
         sequence: campaign.nextSequence++,
         timestamp: "2026-08-21T00:00:00.000Z",
         type: "narrative_emitted",
@@ -231,9 +233,9 @@ describe("loadCampaign", () => {
         },
       },
     ];
-    await store.append(campaign.state.campaignId, events);
+    await store.append(campaign.state.world.campaignId, events);
 
-    const loaded = await loadCampaign({ campaignId: campaign.state.campaignId, store });
+    const loaded = await loadCampaign({ campaignId: campaign.state.world.campaignId, store });
     expect(loaded).not.toBeNull();
     expect(loaded?.recentNarrations).toEqual(["ראשון.", "שני."]);
   });
@@ -251,8 +253,8 @@ describe("worldFor", () => {
       uuid: uuids(),
     });
     const world = worldFor(campaign);
-    expect(world.combatants).toEqual(campaign.state.combatants);
-    expect(world.grid).toEqual(campaign.state.grid);
+    expect(world.combatants).toEqual(encounterOf(campaign).combatants);
+    expect(world.grid).toEqual(encounterOf(campaign).grid);
     expect(world.actionRangesFeet).toBeDefined();
   });
 });

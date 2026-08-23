@@ -12,7 +12,13 @@
 import { z } from "zod";
 import { reduce } from "@ai-dm/schemas";
 import { ActionType, ActionValidatedPayload, AttackTrace, DiceRolledPayload } from "@ai-dm/schemas";
-import type { GameEvent, ServerFrame, CampaignState, TurnAffordances } from "@ai-dm/schemas";
+import type {
+  GameEvent,
+  ServerFrame,
+  CampaignState,
+  EncounterState,
+  TurnAffordances,
+} from "@ai-dm/schemas";
 
 export interface ClientState {
   snapshot: CampaignState | null;
@@ -70,14 +76,17 @@ export const initialClientState: ClientState = {
  * function and remains correct: the game genuinely cannot render without
  * valid state, but it can render just fine with an incomplete log.
  *
- * `snapshotBefore` is the snapshot as it stood before THIS event -- needed
- * on `scene_changed: turn_advanced` to know whose turn just ended, since the
+ * `snapshotBefore` is the board as it stood before THIS event -- needed on
+ * `scene_changed: turn_advanced` to know whose turn just ended, since the
  * fold that actually updates `currentActorIndex` happens separately (in
- * `reduce`, called alongside this from `applyFrame`).
+ * `reduce`, called alongside this from `applyFrame`). It is the encounter
+ * rather than the whole projection because a combat log is about a fight and
+ * nothing in the world outside one; nullable because a campaign between
+ * fights has no board at all.
  */
 function foldCombatLog(
   log: readonly CombatLogTurn[],
-  snapshotBefore: CampaignState,
+  snapshotBefore: EncounterState | null,
   event: GameEvent,
 ): CombatLogTurn[] {
   switch (event.type) {
@@ -122,6 +131,13 @@ function foldCombatLog(
       // dice_rolled and action_validated get no such upstream gate (reduce()
       // no-ops both), which is exactly why they need their own parse above.
       if (event.payload["kind"] !== "turn_advanced") return [...log];
+      // Unreachable in practice, for the same reason the missing .safeParse()
+      // above is safe: `reduce` throws on a `turn_advanced` folded with no
+      // encounter open, and `applyFrame` computes `snapshot` before
+      // `combatLog` in the same object literal -- so this branch never runs
+      // on a log the server produced. Display state no-ops rather than
+      // throwing where state itself would throw.
+      if (snapshotBefore === null) return [...log];
       const currentActorId = snapshotBefore.turnOrder[snapshotBefore.currentActorIndex];
       if (currentActorId === undefined) return [...log];
       const last = log.at(-1);
@@ -199,7 +215,7 @@ export function applyFrame(state: ClientState, frame: ServerFrame): ClientState 
         // stale. The server pushes a replacement when control is the
         // player's, so clearing here cannot strand the UI.
         affordances: null,
-        combatLog: foldCombatLog(state.combatLog, state.snapshot, frame.event),
+        combatLog: foldCombatLog(state.combatLog, state.snapshot.encounter, frame.event),
       };
     }
 

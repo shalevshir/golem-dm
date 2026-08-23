@@ -7,15 +7,15 @@ const snapshotFrame: ServerFrame = {
   type: "campaign_state",
   sequence: 0,
   snapshot: {
-    campaignId: "s1",
-    rootSeed: 1,
-    encounterId: "goblin-ambush",
-    grid: { width: 1, height: 1, tiles: [["normal"]] },
-    combatants: [],
-    turnOrder: [],
-    currentActorIndex: 0,
-    round: 1,
-    appliedClientMessageIds: [],
+    world: { campaignId: "s1", rootSeed: 1, appliedClientMessageIds: [] },
+    encounter: {
+      encounterId: "goblin-ambush",
+      grid: { width: 1, height: 1, tiles: [["normal"]] },
+      combatants: [],
+      turnOrder: [],
+      currentActorIndex: 0,
+      round: 1,
+    },
   },
 };
 

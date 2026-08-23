@@ -10,13 +10,13 @@
 // also what the tests drive, since jsdom has no 2D context to inspect.
 import { useEffect, useRef } from "react";
 import type { JSX } from "react";
-import type { CampaignState, Tile, TerrainType, TurnAffordances } from "@ai-dm/schemas";
+import type { EncounterState, Tile, TerrainType, TurnAffordances } from "@ai-dm/schemas";
 import type { CatalogueCombatant } from "../net/api.js";
 
 export const TILE_PX = 32;
 
 export interface GridProps {
-  snapshot: CampaignState;
+  snapshot: EncounterState;
   affordances: TurnAffordances | null;
   catalogue: CatalogueCombatant[];
   selectedTile: Tile | null;

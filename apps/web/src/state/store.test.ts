@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { fold } from "@ai-dm/schemas";
-import type { GameEvent, ServerFrame, CampaignState } from "@ai-dm/schemas";
+import type { GameEvent, ServerFrame, CampaignState, EncounterState } from "@ai-dm/schemas";
 import { applyFrame, initialClientState } from "./store.js";
 import type { ClientState } from "./store.js";
 import { combatant } from "./combatant-fixture.js";
@@ -10,16 +10,18 @@ import { combatant } from "./combatant-fixture.js";
 // actually change, and `reduce`'s `scene_changed` branch resets the up-next
 // actor's `actionEconomy` — a reset that is a silent no-op against an empty
 // `combatants` array.
-const genesis: CampaignState = {
-  campaignId: "s1",
-  rootSeed: 3,
+const genesisEncounter: EncounterState = {
   encounterId: "goblin-ambush",
   grid: { width: 2, height: 1, tiles: [["normal", "normal"]] },
   combatants: [combatant("hero", "party", "alive"), combatant("goblin-a", "hostile", "alive")],
   turnOrder: ["hero", "goblin-a"],
   currentActorIndex: 0,
   round: 1,
-  appliedClientMessageIds: [],
+};
+
+const genesis: CampaignState = {
+  world: { campaignId: "s1", rootSeed: 3, appliedClientMessageIds: [] },
+  encounter: genesisEncounter,
 };
 
 function event(
@@ -108,11 +110,12 @@ describe("applyFrame", () => {
     expect(client.sequence).toBe(5);
     // Sanity check that the log actually moved the projection — otherwise
     // this test could silently degrade back into a no-op comparison.
-    expect(client.snapshot?.combatants).not.toEqual(genesis.combatants);
+    expect(client.snapshot?.encounter?.combatants).not.toEqual(genesisEncounter.combatants);
     expect(
-      client.snapshot?.combatants.find((each) => each.combatantId === "goblin-a")?.currentHp,
+      client.snapshot?.encounter?.combatants.find((each) => each.combatantId === "goblin-a")
+        ?.currentHp,
     ).toBe(4);
-    expect(client.snapshot?.round).toBe(2);
+    expect(client.snapshot?.encounter?.round).toBe(2);
   });
 
   it("treats a campaign_state frame as authoritative and replaces state wholesale", () => {
@@ -125,7 +128,7 @@ describe("applyFrame", () => {
       type: "event",
       event: event(1, "player_input", { clientMessageId: "m1" }),
     });
-    expect(client.snapshot?.appliedClientMessageIds).toEqual(["m1"]);
+    expect(client.snapshot?.world.appliedClientMessageIds).toEqual(["m1"]);
 
     // A rejection recorded before the resync is a moment that predates the
     // authoritative snapshot; it must not survive to render afterward.
@@ -137,7 +140,10 @@ describe("applyFrame", () => {
     });
     expect(client.lastRejection).not.toBeNull();
 
-    const authoritative: CampaignState = { ...genesis, round: 9, appliedClientMessageIds: ["x"] };
+    const authoritative: CampaignState = {
+      world: { ...genesis.world, appliedClientMessageIds: ["x"] },
+      encounter: { ...genesisEncounter, round: 9 },
+    };
     client = applyFrame(client, { type: "campaign_state", sequence: 12, snapshot: authoritative });
 
     expect(client.snapshot).toEqual(authoritative);
@@ -257,10 +263,10 @@ describe("applyFrame", () => {
       }).not.toThrow();
 
       // The input is untouched...
-      expect(frozen.snapshot?.appliedClientMessageIds).toEqual([]);
+      expect(frozen.snapshot?.world.appliedClientMessageIds).toEqual([]);
       expect(frozen.sequence).toBe(3);
       // ...and the fold still happened, against a new object.
-      expect(result?.snapshot?.appliedClientMessageIds).toEqual(["m1"]);
+      expect(result?.snapshot?.world.appliedClientMessageIds).toEqual(["m1"]);
       expect(result?.sequence).toBe(4);
     });
 
@@ -366,8 +372,11 @@ describe("combatLog", () => {
     // action taken".
     const deadGoblinUp: CampaignState = {
       ...genesis,
-      combatants: [combatant("hero", "party", "alive"), combatant("goblin-a", "hostile", "dead")],
-      currentActorIndex: 1, // "goblin-a" is up, and dead
+      encounter: {
+        ...genesisEncounter,
+        combatants: [combatant("hero", "party", "alive"), combatant("goblin-a", "hostile", "dead")],
+        currentActorIndex: 1, // "goblin-a" is up, and dead
+      },
     };
     let client = applyFrame(initialClientState, {
       type: "campaign_state",

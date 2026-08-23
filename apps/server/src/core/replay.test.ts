@@ -225,7 +225,7 @@ describe("replay properties", () => {
 
   it("a different rootSeed produces a different event stream for the same commands", async () => {
     // C-21 (blocking): the brief's version asserted only
-    // `campaign.state.rootSeed === 99` right after passing `rootSeed: 99`
+    // `campaign.state.world.rootSeed === 99` right after passing `rootSeed: 99`
     // in — a tautology about the input that cannot fail regardless of what
     // the pipeline does with it.
     //
@@ -243,7 +243,7 @@ describe("replay properties", () => {
     // `ports.seedFor(rootSeed, sequence)`'s literal output
     // (`pipeline.ts`'s `enemyTurn`/`structured_action` handling) — which
     // has no sequence-0 freebie to hide behind: it only differs if
-    // `campaign.state.rootSeed` actually reached `seedFor` for every one of
+    // `campaign.state.world.rootSeed` actually reached `seedFor` for every one of
     // these turns. Verified by injecting the regression this comment used
     // to only assume: hardcoding `seedFor` in `portsWith` to
     // `(_rootSeed, sequence) => 42 * 1000 + sequence` (ignoring its

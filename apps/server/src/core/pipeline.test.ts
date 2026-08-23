@@ -27,7 +27,7 @@ import type {
   TacticalTurnMetrics,
   TurnPorts,
 } from "./pipeline.js";
-import { createCampaign, loadCampaign } from "./campaign.js";
+import { createCampaign, encounterOf, loadCampaign } from "./campaign.js";
 import type { Campaign } from "./campaign.js";
 
 function uuids(): () => string {
@@ -431,7 +431,10 @@ describe("handleCommand — join", () => {
     const upToSnapshot = Array.from({ length: 50 }, (_, index) => syntheticEvent(index + 1));
     await store.append("s1", upToSnapshot);
 
-    const snapshotState: CampaignState = { ...campaign.state, round: 99 };
+    const snapshotState: CampaignState = {
+      ...campaign.state,
+      encounter: { ...encounterOf(campaign), round: 99 },
+    };
     await store.putSnapshot("s1", 50, snapshotState);
 
     const tail = [syntheticEvent(51), syntheticEvent(52)];
@@ -646,7 +649,7 @@ describe("handleCommand — structured action", () => {
   it("rejects an illegal turn without advancing the turn", async () => {
     const store = createInMemoryEventStore();
     const campaign = await freshCampaign(store);
-    const before = campaign.state.currentActorIndex;
+    const before = encounterOf(campaign).currentActorIndex;
     const frames = await drain(
       handleCommand(
         campaign,
@@ -671,7 +674,7 @@ describe("handleCommand — structured action", () => {
     // original out-of-reach fixture, C-14 cannot silently un-break this by
     // making the proposed turn legal again.
     expect(rejected.reasons).toEqual(["destination_off_grid"]);
-    expect(campaign.state.currentActorIndex).toBe(before);
+    expect(encounterOf(campaign).currentActorIndex).toBe(before);
     const types = (await store.readSince("s1", 0)).map((each) => each.type);
     expect(types).toContain("action_rejected");
   });
@@ -818,8 +821,8 @@ describe("handleCommand — snapshot cadence", () => {
     const last = frames.at(-1);
     expect(last?.type).toBe("turn_affordances");
     expect(last?.type === "turn_affordances" && last.actorId).toBe("hero");
-    expect(campaign.state.round).toBe(2);
-    expect(campaign.state.currentActorIndex).toBe(0);
+    expect(encounterOf(campaign).round).toBe(2);
+    expect(encounterOf(campaign).currentActorIndex).toBe(0);
     // The log is complete past the crossing event: the append half of the
     // turn never depended on the snapshot half.
     expect((await store.readSince("s1", SNAPSHOT_EVERY - 1)).map((each) => each.sequence)).toContain(
@@ -855,8 +858,8 @@ describe("handleCommand — enemy turns", () => {
     await drain(handleCommand(campaign, dodge("hero"), ports));
 
     // Back to the top of the order, one round later.
-    expect(campaign.state.currentActorIndex).toBe(0);
-    expect(campaign.state.round).toBe(2);
+    expect(encounterOf(campaign).currentActorIndex).toBe(0);
+    expect(encounterOf(campaign).round).toBe(2);
     // hero + two goblins each had their proposal validated — and in that
     // exact order. `toHaveLength(3)` alone would still pass if the loop
     // revisited an actor and skipped another: 3 `action_validated`, 3
@@ -953,9 +956,12 @@ describe("handleCommand — enemy turns", () => {
     const campaign = await freshCampaign(store);
     campaign.state = {
       ...campaign.state,
-      combatants: campaign.state.combatants.map((each) =>
-        each.combatantId === "goblin-a" ? { ...each, status: "dead" as const } : each,
-      ),
+      encounter: {
+        ...encounterOf(campaign),
+        combatants: encounterOf(campaign).combatants.map((each) =>
+          each.combatantId === "goblin-a" ? { ...each, status: "dead" as const } : each,
+        ),
+      },
     };
     const ports: TurnPorts = {
       ...portsWith(store),
@@ -977,8 +983,8 @@ describe("handleCommand — enemy turns", () => {
       (each) => each.type === "action_validated",
     );
     expect(validated.map((each) => each.payload["actorId"])).toEqual(["hero", "goblin-b"]);
-    expect(campaign.state.currentActorIndex).toBe(0);
-    expect(campaign.state.round).toBe(2);
+    expect(encounterOf(campaign).currentActorIndex).toBe(0);
+    expect(encounterOf(campaign).round).toBe(2);
   });
 
   // Regression for the defect Task 11's replay properties caught: `reduce`
@@ -996,8 +1002,8 @@ describe("handleCommand — enemy turns", () => {
     const ports = portsWith(store);
 
     await drain(handleCommand(campaign, dodge("hero"), ports));
-    expect(campaign.state.round).toBe(2);
-    expect(campaign.state.currentActorIndex).toBe(0);
+    expect(encounterOf(campaign).round).toBe(2);
+    expect(encounterOf(campaign).currentActorIndex).toBe(0);
 
     const roundTwoHeroTurn: ClientMessage = {
       type: "structured_action",
@@ -1014,8 +1020,8 @@ describe("handleCommand — enemy turns", () => {
     // Before the fix, this is exactly where the engine answered
     // `action_already_used` and the round never advanced past hero again.
     expect(frames.filter((each) => each.type === "rejected")).toEqual([]);
-    expect(campaign.state.round).toBe(3);
-    expect(campaign.state.currentActorIndex).toBe(0);
+    expect(encounterOf(campaign).round).toBe(3);
+    expect(encounterOf(campaign).currentActorIndex).toBe(0);
 
     const heroValidations = (await store.readSince("s1", 0)).filter(
       (each) => each.type === "action_validated" && each.payload["actorId"] === "hero",
@@ -1128,9 +1134,12 @@ describe("handleCommand — narrative metrics", () => {
     const campaign = await freshCampaign(store);
     campaign.state = {
       ...campaign.state,
-      combatants: campaign.state.combatants.map((each) =>
-        each.faction === "hostile" ? { ...each, status: "dead" as const } : each,
-      ),
+      encounter: {
+        ...encounterOf(campaign),
+        combatants: encounterOf(campaign).combatants.map((each) =>
+          each.faction === "hostile" ? { ...each, status: "dead" as const } : each,
+        ),
+      },
     };
     const ports: TurnPorts = { ...portsWith(store), ...overrides };
     return drain(handleCommand(campaign, dodge("hero"), ports));
@@ -1305,7 +1314,7 @@ describe("handleCommand — turn timeout", () => {
       turnTimeoutMs: 50,
     };
     await drain(handleCommand(campaign, dodge("hero"), ports));
-    expect(campaign.state.round).toBe(2);
+    expect(encounterOf(campaign).round).toBe(2);
   }, 10_000);
 
   // Previously untested: both timeout tests above stall only the narrative
@@ -1339,8 +1348,8 @@ describe("handleCommand — turn timeout", () => {
       "scene_changed",
       "scene_changed",
     ]);
-    expect(campaign.state.currentActorIndex).toBe(0);
-    expect(campaign.state.round).toBe(2);
+    expect(encounterOf(campaign).currentActorIndex).toBe(0);
+    expect(encounterOf(campaign).round).toBe(2);
   }, 10_000);
 
   // The review's IMPORTANT finding: the tactical call and the narration
@@ -1420,7 +1429,7 @@ describe("handleCommand — turn timeout", () => {
     // for the actual figures and the real headroom the 750ms threshold
     // gives against each scenario).
     expect(elapsed).toBeLessThan(750);
-    expect(campaign.state.round).toBe(2);
+    expect(encounterOf(campaign).round).toBe(2);
   }, 10_000);
 });
 
@@ -1515,9 +1524,12 @@ describe("handleCommand — narration degradation ladder", () => {
     const campaign = await freshCampaign(store);
     campaign.state = {
       ...campaign.state,
-      combatants: campaign.state.combatants.map((each) =>
-        each.faction === "hostile" ? { ...each, status: "dead" as const } : each,
-      ),
+      encounter: {
+        ...encounterOf(campaign),
+        combatants: encounterOf(campaign).combatants.map((each) =>
+          each.faction === "hostile" ? { ...each, status: "dead" as const } : each,
+        ),
+      },
     };
 
     await drain(
@@ -1555,9 +1567,12 @@ describe("handleCommand — narration degradation ladder", () => {
     const campaign = await freshCampaign(store);
     campaign.state = {
       ...campaign.state,
-      combatants: campaign.state.combatants.map((each) =>
-        each.faction === "hostile" ? { ...each, status: "dead" as const } : each,
-      ),
+      encounter: {
+        ...encounterOf(campaign),
+        combatants: encounterOf(campaign).combatants.map((each) =>
+          each.faction === "hostile" ? { ...each, status: "dead" as const } : each,
+        ),
+      },
     };
 
     await drain(
@@ -1615,7 +1630,10 @@ describe("handleCommand — turn_affordances", () => {
     const store = createInMemoryEventStore();
     const campaign = await freshCampaign(store);
     // Advance past the hero so a goblin is up.
-    campaign.state = { ...campaign.state, currentActorIndex: 1 };
+    campaign.state = {
+      ...campaign.state,
+      encounter: { ...encounterOf(campaign), currentActorIndex: 1 },
+    };
 
     const frames = await drain(
       handleCommand(campaign, { type: "join", campaignId: "s1" }, portsWith(store)),

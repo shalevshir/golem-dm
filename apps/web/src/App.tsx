@@ -219,8 +219,9 @@ export function App(props: AppProps): JSX.Element {
   // hand. The live view still shows the victory/defeat screen normally;
   // this only affects what a subsequent mount reads.
   useEffect(() => {
-    if (state.snapshot === null) return;
-    if (conclusionOf(state.snapshot) === "ongoing") return;
+    const encounter = state.snapshot?.encounter ?? null;
+    if (encounter === null) return;
+    if (conclusionOf(encounter) === "ongoing") return;
     sessionStorage.removeItem(CAMPAIGN_STORAGE_KEY);
     clearStoredClientState();
   }, [state.snapshot]);
@@ -289,7 +290,13 @@ export function App(props: AppProps): JSX.Element {
     );
   }
 
-  if (state.snapshot === null || catalogue === null) {
+  // One narrowing for the whole board render below: a campaign with no
+  // encounter open has nothing to draw, which is the same "not ready yet" the
+  // pre-snapshot render already covers rather than a state of its own. The
+  // board components downstream take an `EncounterState` and never see the
+  // world, so this is where the two are separated.
+  const encounter = state.snapshot?.encounter ?? null;
+  if (state.snapshot === null || encounter === null || catalogue === null) {
     // `ErrorBanner` renders here too: an `error` frame that is not
     // `unknown_campaign` (`internal_error`, `malformed_message`) can arrive
     // on join, before any `campaign_state` — without this, the player would
@@ -310,7 +317,7 @@ export function App(props: AppProps): JSX.Element {
     );
   }
 
-  const conclusion = conclusionOf(state.snapshot);
+  const conclusion = conclusionOf(encounter);
   const yourTurn = state.affordances !== null && conclusion === "ongoing";
 
   return (
@@ -337,7 +344,7 @@ export function App(props: AppProps): JSX.Element {
       />
 
       <Grid
-        snapshot={state.snapshot}
+        snapshot={encounter}
         affordances={state.affordances}
         catalogue={catalogue.combatants}
         selectedTile={selectedTile}

@@ -2,19 +2,35 @@ import { describe, expect, it } from "vitest";
 import { fold, reduce } from "./reduce.js";
 import { ActionEconomy, Combatant } from "./world.js";
 import type { GameEvent } from "./events.js";
-import type { CampaignState } from "./protocol.js";
+import type { CampaignState, EncounterState } from "./protocol.js";
 
-const base: CampaignState = {
-  campaignId: "s1",
-  rootSeed: 7,
+const baseEncounter: EncounterState = {
   encounterId: "e1",
   grid: { width: 2, height: 1, tiles: [["normal", "normal"]] },
   combatants: [],
   turnOrder: ["hero", "villain"],
   currentActorIndex: 0,
   round: 1,
-  appliedClientMessageIds: [],
 };
+
+const base: CampaignState = {
+  world: { campaignId: "s1", rootSeed: 7, appliedClientMessageIds: [] },
+  encounter: baseEncounter,
+};
+
+/** `base` with the board overridden. Every case here folds combat events, so
+ * every one of them has a bracket open. */
+function withBoard(patch: Partial<EncounterState>): CampaignState {
+  return { ...base, encounter: { ...baseEncounter, ...patch } };
+}
+
+/** The projected board, or a failure. Combat events cannot be folded without
+ * one, so a null here is the assertion failing rather than a case to handle. */
+function boardOf(state: CampaignState): EncounterState {
+  const { encounter } = state;
+  if (encounter === null) throw new Error("expected an open encounter");
+  return encounter;
+}
 
 function event(
   sequence: number,
@@ -81,7 +97,7 @@ const rawCombatants = [
 describe("reduce", () => {
   it("records a player input's clientMessageId for idempotency", () => {
     const next = reduce(base, event(0, "player_input", { clientMessageId: "c1", actorId: "hero" }));
-    expect(next.appliedClientMessageIds).toEqual(["c1"]);
+    expect(next.world.appliedClientMessageIds).toEqual(["c1"]);
   });
 
   it("throws on a player_input payload that fails to parse", () => {
@@ -96,29 +112,28 @@ describe("reduce", () => {
   });
 
   it("replaces combatants from a state delta, round-tripping the full payload", () => {
-    const withStaleCombatant: CampaignState = {
-      ...base,
+    const withStaleCombatant = withBoard({
       combatants: Combatant.array().parse([rawCombatant({ combatantId: "stale" })]),
-    };
+    });
     const delta = event(2, "state_delta_applied", { combatants: rawCombatants });
     const next = reduce(withStaleCombatant, delta);
     // Starting from a *different* combatant than the delta carries: if
     // `reduce` merged or appended instead of replacing, "stale" would still
     // be present and this equality would fail.
-    expect(next.combatants).toEqual(Combatant.array().parse(rawCombatants));
+    expect(boardOf(next).combatants).toEqual(Combatant.array().parse(rawCombatants));
   });
 
   it("advances the actor index without wrapping the round mid-cycle", () => {
     const next = reduce(base, event(3, "scene_changed", { kind: "turn_advanced" }));
-    expect(next.currentActorIndex).toBe(1);
-    expect(next.round).toBe(1);
+    expect(boardOf(next).currentActorIndex).toBe(1);
+    expect(boardOf(next).round).toBe(1);
   });
 
   it("wraps to the next round when the turn order completes", () => {
-    const atEnd = { ...base, currentActorIndex: 1 };
+    const atEnd = withBoard({ currentActorIndex: 1 });
     const next = reduce(atEnd, event(4, "scene_changed", { kind: "turn_advanced" }));
-    expect(next.currentActorIndex).toBe(0);
-    expect(next.round).toBe(2);
+    expect(boardOf(next).currentActorIndex).toBe(0);
+    expect(boardOf(next).round).toBe(2);
   });
 
   // Regression for the defect Task 11's replay properties caught:
@@ -138,45 +153,43 @@ describe("reduce", () => {
   };
 
   it("refreshes the action economy of whoever's turn is beginning", () => {
-    const withSpentActors: CampaignState = {
-      ...base,
+    const withSpentActors = withBoard({
       combatants: Combatant.array().parse([
         rawCombatant({ combatantId: "hero", actionEconomy: SPENT_ECONOMY }),
         rawCombatant({ combatantId: "villain", actionEconomy: SPENT_ECONOMY }),
       ]),
-    };
+    });
     // currentActorIndex 0 -> 1: villain's turn begins.
     const next = reduce(withSpentActors, event(10, "scene_changed", { kind: "turn_advanced" }));
 
-    const villain = next.combatants.find((each) => each.combatantId === "villain");
+    const villain = boardOf(next).combatants.find((each) => each.combatantId === "villain");
     expect(villain?.actionEconomy).toEqual(ActionEconomy.parse({}));
     // hero's turn just ENDED, not begun — `turn_advanced` is not their cue
     // to refresh, and `state_delta_applied` (a separate event) already
     // recorded whatever they actually spent.
-    const hero = next.combatants.find((each) => each.combatantId === "hero");
+    const hero = boardOf(next).combatants.find((each) => each.combatantId === "hero");
     expect(hero?.actionEconomy).toEqual(SPENT_ECONOMY);
   });
 
   it("refreshes the wrapped-to actor's economy when a round rolls over", () => {
-    const atEndWithSpentActors: CampaignState = {
-      ...base,
+    const atEndWithSpentActors = withBoard({
       currentActorIndex: 1,
       combatants: Combatant.array().parse([
         rawCombatant({ combatantId: "hero", actionEconomy: SPENT_ECONOMY }),
         rawCombatant({ combatantId: "villain", actionEconomy: SPENT_ECONOMY }),
       ]),
-    };
+    });
     // currentActorIndex 1 -> wraps to 0: hero's NEW round begins.
     const next = reduce(
       atEndWithSpentActors,
       event(11, "scene_changed", { kind: "turn_advanced" }),
     );
 
-    expect(next.currentActorIndex).toBe(0);
-    expect(next.round).toBe(2);
-    const hero = next.combatants.find((each) => each.combatantId === "hero");
+    expect(boardOf(next).currentActorIndex).toBe(0);
+    expect(boardOf(next).round).toBe(2);
+    const hero = boardOf(next).combatants.find((each) => each.combatantId === "hero");
     expect(hero?.actionEconomy).toEqual(ActionEconomy.parse({}));
-    const villain = next.combatants.find((each) => each.combatantId === "villain");
+    const villain = boardOf(next).combatants.find((each) => each.combatantId === "villain");
     expect(villain?.actionEconomy).toEqual(SPENT_ECONOMY);
   });
 
@@ -212,19 +225,18 @@ describe("reduce", () => {
     expect(base).toEqual(before);
   });
 
-  // `base.combatants` is empty, so the test above never exercises the
+  // `base`'s board carries no combatants, so the test above never exercises the
   // economy-reset `.map` at all. With actual combatants present, this pins
   // that resetting the up-next actor's economy still builds a fresh
   // `combatants` array and fresh combatant objects rather than writing
   // through the ones the caller passed in.
   it("never mutates the combatants given to a turn-advancing scene_changed reduce", () => {
-    const withActors: CampaignState = {
-      ...base,
+    const withActors = withBoard({
       combatants: Combatant.array().parse([
         rawCombatant({ combatantId: "hero", actionEconomy: SPENT_ECONOMY }),
         rawCombatant({ combatantId: "villain", actionEconomy: SPENT_ECONOMY }),
       ]),
-    };
+    });
     const before = structuredClone(withActors);
     reduce(withActors, event(12, "scene_changed", { kind: "turn_advanced" }));
     expect(withActors).toEqual(before);
@@ -239,14 +251,14 @@ describe("fold", () => {
       event(2, "player_input", { clientMessageId: "c2", actorId: "villain" }),
     ];
     const folded = fold(base, events);
-    expect(folded.appliedClientMessageIds).toEqual(["c1", "c2"]);
-    expect(folded.currentActorIndex).toBe(1);
+    expect(folded.world.appliedClientMessageIds).toEqual(["c1", "c2"]);
+    expect(boardOf(folded).currentActorIndex).toBe(1);
   });
 
   it("is order-sensitive, so a shuffled log is a different projection", () => {
     const a = event(0, "scene_changed", { kind: "turn_advanced" });
     const b = event(1, "scene_changed", { kind: "turn_advanced" });
-    expect(fold(base, [a, b]).round).toBe(2);
-    expect(fold(base, [a]).round).toBe(1);
+    expect(boardOf(fold(base, [a, b])).round).toBe(2);
+    expect(boardOf(fold(base, [a])).round).toBe(1);
   });
 });

@@ -7,10 +7,11 @@
 // to its Bresenham default — but `worldFor` is where that field would come
 // from if it were populated, which is the mechanism this comment documents.)
 //
-// C-26: `reduce` never writes `campaignId`, `rootSeed`, `encounterId`, `grid`
-// or `turnOrder` — no event branch touches those five `CampaignState` fields,
-// and `session_snapshot` is deliberately a no-op in the projection (that is
-// what makes "fold-from-snapshot-plus-events equals fold-from-zero" hold).
+// C-26: `reduce` never writes `world.campaignId`, `world.rootSeed`,
+// `encounter.encounterId`, `encounter.grid` or `encounter.turnOrder` — no
+// event branch touches those five fields, and `session_snapshot` is
+// deliberately a no-op in the projection (that is what makes
+// "fold-from-snapshot-plus-events equals fold-from-zero" hold).
 // So "fold from zero" here means "fold from the campaign-creation state", not
 // from an empty object: `initialState` below is that genesis state, and both
 // `createCampaign` and `loadCampaign` build it the same way before folding
@@ -19,7 +20,7 @@ import { z } from "zod";
 import type { EventStore } from "@ai-dm/memory";
 import type { BuiltEncounter, CombatWorld } from "@ai-dm/rules-engine";
 import { fold, NarrativeEmittedPayload } from "@ai-dm/schemas";
-import type { GameEvent, CampaignState } from "@ai-dm/schemas";
+import type { GameEvent, CampaignState, EncounterState } from "@ai-dm/schemas";
 import { buildEncounterById } from "../encounters/index.js";
 
 /** Sequence 0's payload. Parsed rather than cast — it is the only thing that
@@ -60,11 +61,17 @@ export interface CreateCampaignInput {
 }
 
 /**
- * The genesis `CampaignState`: the five fields `reduce` never writes
- * (`campaignId`, `rootSeed`, `encounterId`, `grid`, `turnOrder`), plus the
- * starting combatants, round and turn index. `createCampaign` folds nothing
- * on top of this but the genesis event; `loadCampaign` rebuilds this exact
- * value before folding the rest of the log onto it.
+ * The genesis `CampaignState`: the whole world, plus the five encounter fields
+ * `reduce` never writes (`encounterId`, `grid`, `turnOrder`, and the world's
+ * `campaignId`/`rootSeed`), plus the starting combatants, round and turn
+ * index. `createCampaign` folds nothing on top of this but the genesis event;
+ * `loadCampaign` rebuilds this exact value before folding the rest of the log
+ * onto it.
+ *
+ * It still builds both halves at once because genesis still opens an
+ * encounter — the bracket that would let a campaign exist without one is the
+ * next task's work, and this one changes shape without changing when anything
+ * happens.
  */
 function initialState(input: {
   campaignId: string;
@@ -72,15 +79,19 @@ function initialState(input: {
   built: BuiltEncounter;
 }): CampaignState {
   return {
-    campaignId: input.campaignId,
-    rootSeed: input.rootSeed,
-    encounterId: input.built.encounterId,
-    grid: input.built.world.grid,
-    combatants: [...input.built.world.combatants],
-    turnOrder: [...input.built.turnOrder],
-    currentActorIndex: 0,
-    round: 1,
-    appliedClientMessageIds: [],
+    world: {
+      campaignId: input.campaignId,
+      rootSeed: input.rootSeed,
+      appliedClientMessageIds: [],
+    },
+    encounter: {
+      encounterId: input.built.encounterId,
+      grid: input.built.world.grid,
+      combatants: [...input.built.world.combatants],
+      turnOrder: [...input.built.turnOrder],
+      currentActorIndex: 0,
+      round: 1,
+    },
   };
 }
 
@@ -169,14 +180,34 @@ export async function loadCampaign(input: {
 }
 
 /**
+ * The open encounter, or a throw.
+ *
+ * `campaign.state.encounter` is nullable because a campaign between fights is
+ * now representable, but every caller below runs on the turn path, where an
+ * absent board is not a state to handle — it is a corrupt log or a producer
+ * bug, the same class `reduce` throws on. Narrow once through this at each
+ * point that reads the board, rather than re-narrowing per field: `emit`
+ * replaces `campaign.state` wholesale as a turn progresses, so a binding
+ * taken earlier would be describing a board that has already moved.
+ */
+export function encounterOf(campaign: Campaign): EncounterState {
+  const { encounter } = campaign.state;
+  if (encounter === null) {
+    throw new Error(`Campaign ${campaign.state.world.campaignId} has no encounter open`);
+  }
+  return encounter;
+}
+
+/**
  * The validator and the resolver want a `CombatWorld`; the projection holds
  * only its serializable half. This is where the two are married, and the only
  * place that knows the difference.
  */
 export function worldFor(campaign: Campaign): CombatWorld {
+  const encounter = encounterOf(campaign);
   return {
     ...campaign.built.world,
-    grid: campaign.state.grid,
-    combatants: campaign.state.combatants,
+    grid: encounter.grid,
+    combatants: encounter.combatants,
   };
 }

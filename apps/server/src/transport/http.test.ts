@@ -103,7 +103,7 @@ describe("CampaignRegistry", () => {
   it("caches the created campaign, so a later get returns the identical object", async () => {
     const { registry } = appWith();
     const created = await registry.create("goblin-ambush");
-    const fetched = await registry.get(created.state.campaignId);
+    const fetched = await registry.get(created.state.world.campaignId);
     expect(fetched).toBe(created);
   });
 
@@ -111,7 +111,7 @@ describe("CampaignRegistry", () => {
     const { registry, store } = appWith();
     const created = await registry.create("goblin-ambush");
     const readSince = vi.spyOn(store, "readSince");
-    await registry.get(created.state.campaignId);
+    await registry.get(created.state.world.campaignId);
     expect(readSince).not.toHaveBeenCalled();
   });
 
@@ -140,7 +140,7 @@ describe("CampaignRegistry.get", () => {
   it("folds a campaign once when two joins race", async () => {
     const { registry, store } = appWith();
     const created = await registry.create("goblin-ambush");
-    const campaignId = created.state.campaignId;
+    const campaignId = created.state.world.campaignId;
 
     // A second registry over the same store is what a restarted process
     // looks like: nothing in `live`, everything in the log. The gate holds

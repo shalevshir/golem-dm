@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { GameEvent, CampaignState } from "@ai-dm/schemas";
+import type { GameEvent, CampaignState, EncounterState } from "@ai-dm/schemas";
 import { SequenceConflictError, CampaignMismatchError } from "./port.js";
 import type { EventStore } from "./port.js";
 
@@ -29,16 +29,38 @@ function event(campaignId: string, sequence: number): GameEvent {
 
 function stateFor(campaignId: string): CampaignState {
   return {
-    campaignId,
-    rootSeed: 1,
-    encounterId: "e1",
-    grid: { width: 1, height: 1, tiles: [["normal"]] },
-    combatants: [],
-    turnOrder: [],
-    currentActorIndex: 0,
-    round: 1,
-    appliedClientMessageIds: [],
+    world: { campaignId, rootSeed: 1, appliedClientMessageIds: [] },
+    encounter: {
+      encounterId: "e1",
+      grid: { width: 1, height: 1, tiles: [["normal"]] },
+      combatants: [],
+      turnOrder: [],
+      currentActorIndex: 0,
+      round: 1,
+    },
   };
+}
+
+/** `stateFor` at a different round, for the cases that need two snapshots a
+ * store can tell apart. */
+function stateAtRound(campaignId: string, round: number): CampaignState {
+  const state = stateFor(campaignId);
+  return { ...state, encounter: { ...boardOf(state), round } };
+}
+
+/**
+ * The projected board, or a failure. `stateFor` always opens one, so a null
+ * here means the fixture stopped matching the projection rather than a case
+ * a store has to handle.
+ *
+ * These deep-copy assertions matter more now than they did flat: the field
+ * they poke at sits a level down, so a store that copied only the top level
+ * would hand back a board the caller can still write through.
+ */
+function boardOf(state: CampaignState): EncounterState {
+  const { encounter } = state;
+  if (encounter === null) throw new Error("expected the fixture to open an encounter");
+  return encounter;
 }
 
 /**
@@ -183,7 +205,7 @@ export function describeEventStoreContract(label: string, makeStore: () => Event
       const store = makeStore();
       const s = freshCampaignId();
       await store.putSnapshot(s, 100, stateFor(s));
-      await store.putSnapshot(s, 50, { ...stateFor(s), round: 4 });
+      await store.putSnapshot(s, 50, stateAtRound(s, 4));
       expect(await store.latestSnapshot(s)).toEqual({ sequence: 100, state: stateFor(s) });
     });
 
@@ -191,7 +213,7 @@ export function describeEventStoreContract(label: string, makeStore: () => Event
       const store = makeStore();
       const s = freshCampaignId();
       await store.putSnapshot(s, 100, stateFor(s));
-      await store.putSnapshot(s, 100, { ...stateFor(s), round: 9 });
+      await store.putSnapshot(s, 100, stateAtRound(s, 9));
       expect(await store.latestSnapshot(s)).toEqual({ sequence: 100, state: stateFor(s) });
     });
 
@@ -210,10 +232,10 @@ export function describeEventStoreContract(label: string, makeStore: () => Event
       const first = await store.latestSnapshot(s);
       expect(first).not.toBeNull();
       if (first === null) return;
-      first.state.round = 99;
+      boardOf(first.state).round = 99;
 
       const second = await store.latestSnapshot(s);
-      expect(second?.state.round).toBe(1);
+      expect(second === null ? null : boardOf(second.state).round).toBe(1);
     });
 
     it("does not let a caller mutate the state it handed to putSnapshot", async () => {
@@ -224,9 +246,10 @@ export function describeEventStoreContract(label: string, makeStore: () => Event
       // `pipeline.ts` passes its live `campaign.state` here and keeps
       // mutating it afterwards, so a store holding that object by reference
       // would silently rewrite a snapshot that was already taken.
-      state.round = 99;
+      boardOf(state).round = 99;
 
-      expect((await store.latestSnapshot(s))?.state.round).toBe(1);
+      const stored = await store.latestSnapshot(s);
+      expect(stored === null ? null : boardOf(stored.state).round).toBe(1);
     });
 
     it("does not expose stored events to a caller's mutation", async () => {

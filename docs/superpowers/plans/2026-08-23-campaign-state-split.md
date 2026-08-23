@@ -226,11 +226,11 @@ The deep, narrow half. No identifier renaming happens here; if a diff line chang
 - Produces: `WorldState`, `EncounterState`, `CampaignState = { world, encounter }`.
 - Consumes: `CampaignState` (flat) from Task 2, which it replaces.
 
-- [ ] **Step 1: The three schemas**
+- [x] **Step 1: The three schemas**
 
 Exactly the spec's Schema section. `WorldState` is `{ campaignId, rootSeed, appliedClientMessageIds }` and nothing else — the dials arrive in §4.7's steps 2–3, and a task that both restructures and fills the projection is not reviewable.
 
-- [ ] **Step 2: `reduce` dispatches on scope**
+- [x] **Step 2: `reduce` dispatches on scope**
 
 `player_input` writes `world.appliedClientMessageIds`. `state_delta_applied` and `scene_changed` write `encounter`. The no-op list stays explicit so the exhaustiveness check keeps forcing a decision per new type.
 
@@ -250,17 +250,49 @@ A combat event arriving with `encounter === null` throws, rather than returning 
 
 Silently ignoring it would project a plausible-looking board out of an impossible history, which is far worse to debug than a loud failure at fold time. `reduce` already throws on malformed payloads via `.parse`; this is the same class.
 
-- [ ] **Step 3: `encounter` is non-null everywhere, for now**
+- [x] **Step 3: `encounter` is non-null everywhere, for now**
 
 HTTP still starts an encounter at campaign creation, so nothing yet produces `encounter: null`. Task 5 introduces the bracket and Task 6 tests the guard. Callers read `campaign.state.encounter` and narrow it once at the top rather than re-narrowing per field.
 
 Seeds are unchanged: `seedFor(campaign.state.world.rootSeed, campaign.nextSequence)` at both `pipeline.ts` call sites (ADR-0004 decision 4, as amended — the formula does not change).
 
-- [ ] **Step 4: Web reads through `snapshot.encounter`**
+- [x] **Step 4: Web reads through `snapshot.encounter`**
 
 `Grid.tsx` and `conclusion.ts` take an `EncounterState`, not a `CampaignState` — they are board components and should not see the world. `store.ts` narrows once.
 
-- [ ] **Step 5: Verify** — counts equal Task 1's, plus whatever `reduce.test.ts` gained.
+- [x] **Step 5: Verify** — counts equal Task 1's, plus whatever `reduce.test.ts` gained.
+
+**Done 2026-08-23 as Task 4.** 25 files. `pnpm test` gives **1245 passed, 29
+skipped over 90 test files** — the baseline's 1234 plus Task 3's 7 new
+payload-parse cases plus 4 new `protocol.test.ts` cases for the shapes the
+split makes expressible (`encounter: null` parses; an *absent* `encounter` does
+not; a world-less campaign does not; `appliedClientMessageIds` sits on the
+world). No package dropped a test. Typecheck and eslint exit 0.
+
+Notes for whoever takes Task 5:
+
+- **`encounterOf(campaign)` is the narrowing seam** (`core/campaign.ts`). It
+  throws, because on the turn path an absent board is a corrupt log rather
+  than a state to handle. The spec's error-frame refusal (§Wiring) is
+  deliberately *not* here: nothing produces `encounter: null` until Task 5
+  opens the bracket, so a frame path would be untestable dead code. Add it
+  with the bracket.
+- **The bracket guard sits after `scene_changed`'s `kind` gate**, not before
+  it. `turn_advanced` is the only kind that writes the encounter; guarding the
+  whole event type would make §4.7 step 4's out-of-combat scene changes throw
+  for arriving where they belong. Task 6 Step 1 should fold a `turn_advanced`.
+- **`packages/memory` needed no source change at all** beyond fixtures —
+  `schema.ts`, `port.ts` and `postgres.ts` only ever name `CampaignState` as a
+  whole, so the split passed straight through them.
+- **`foldCombatLog` takes `EncounterState | null`** and no-ops on null, where
+  `reduce` throws. Display state degrades; state itself does not.
+- **Prettier:** `pipeline.ts`, `e2e.test.ts` and `ws.test.ts` were clean at
+  `b0c9950` and got a path-scoped `--write`. `pipeline.test.ts`,
+  `event-store/contract.ts` and `event-store/replay.test.ts` were already
+  nonconformant there and were left alone; their remaining `--check` failures
+  were verified to be the same hunks as at `b0c9950`. Check this with an
+  in-repo temp file — a copy under `/tmp` misses `.prettierrc` and reformats
+  at 80 cols, which reads as churn that is not there.
 
 ---
 

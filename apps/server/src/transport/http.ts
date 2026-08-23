@@ -149,7 +149,7 @@ export function registerHttpRoutes(app: FastifyInstance, registry: CampaignRegis
       }
       throw error;
     }
-    return reply.code(201).send({ campaignId: campaign.state.campaignId });
+    return reply.code(201).send({ campaignId: campaign.state.world.campaignId });
   });
 
   app.get<{ Params: { encounterId: string } }>("/encounters/:encounterId", (request, reply) => {

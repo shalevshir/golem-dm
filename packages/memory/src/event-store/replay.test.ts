@@ -25,15 +25,15 @@ describe.skipIf(url === undefined || url === "")("replay round-trip over Postgre
   // that does not need a real encounter.
   function genesisState(campaignId: string): CampaignState {
     return {
-      campaignId,
-      rootSeed: 7,
-      encounterId: "e1",
-      grid: { width: 2, height: 2, tiles: [["normal", "normal"], ["normal", "normal"]] },
-      combatants: [],
-      turnOrder: [],
-      currentActorIndex: 0,
-      round: 1,
-      appliedClientMessageIds: [],
+      world: { campaignId, rootSeed: 7, appliedClientMessageIds: [] },
+      encounter: {
+        encounterId: "e1",
+        grid: { width: 2, height: 2, tiles: [["normal", "normal"], ["normal", "normal"]] },
+        combatants: [],
+        turnOrder: [],
+        currentActorIndex: 0,
+        round: 1,
+      },
     };
   }
 

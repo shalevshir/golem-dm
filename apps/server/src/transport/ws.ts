@@ -119,7 +119,7 @@ export function registerWebSocketRoute(app: FastifyInstance, input: WebSocketRou
           turnInProgress();
           return;
         }
-        const campaignId = command.type === "join" ? undefined : campaign?.state.campaignId;
+        const campaignId = command.type === "join" ? undefined : campaign?.state.world.campaignId;
         const claimedCampaignLock = campaignId !== undefined && input.registry.tryBegin(campaignId);
         if (campaignId !== undefined && !claimedCampaignLock) {
           turnInProgress();

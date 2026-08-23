@@ -13,7 +13,7 @@ import type { EventStore } from "@ai-dm/memory";
 import { ServerFrame } from "@ai-dm/schemas";
 import { buildApp } from "../app.js";
 import type { TurnPorts } from "../core/pipeline.js";
-import { loadCampaign } from "../core/campaign.js";
+import { encounterOf, loadCampaign } from "../core/campaign.js";
 import { createCampaignRegistry } from "./http.js";
 import type { FastifyInstance } from "fastify";
 
@@ -201,9 +201,12 @@ async function waitForRoundSettled(store: EventStore, campaignId: string): Promi
     const campaign = await loadCampaign({ campaignId, store });
     if (campaign === null) throw new Error(`Campaign ${campaignId} disappeared while polling.`);
     const alive = new Set(
-      campaign.state.combatants.filter((c) => c.status === "alive").map((c) => c.faction),
+      encounterOf(campaign)
+        .combatants.filter((c) => c.status === "alive")
+        .map((c) => c.faction),
     );
-    const backToHero = campaign.state.turnOrder[campaign.state.currentActorIndex] === "hero";
+    const backToHero =
+      encounterOf(campaign).turnOrder[encounterOf(campaign).currentActorIndex] === "hero";
     if (alive.size < 2 || backToHero) return;
     if (Date.now() > deadline) {
       throw new Error(`Round never settled within ${String(FRAME_TIMEOUT_MS)}ms.`);

@@ -22,19 +22,21 @@ import { combatant } from "./state/combatant-fixture.js";
 
 function snapshotWith(combatants: Combatant[]): CampaignState {
   return {
-    campaignId: "s1",
-    rootSeed: 3,
-    encounterId: "goblin-ambush",
-    grid: {
-      width: 12,
-      height: 12,
-      tiles: Array.from({ length: 12 }, () => Array.from({ length: 12 }, () => "normal" as const)),
+    world: { campaignId: "s1", rootSeed: 3, appliedClientMessageIds: [] },
+    encounter: {
+      encounterId: "goblin-ambush",
+      grid: {
+        width: 12,
+        height: 12,
+        tiles: Array.from({ length: 12 }, () =>
+          Array.from({ length: 12 }, () => "normal" as const),
+        ),
+      },
+      combatants,
+      turnOrder: combatants.map((each) => each.combatantId),
+      currentActorIndex: 0,
+      round: 1,
     },
-    combatants,
-    turnOrder: combatants.map((each) => each.combatantId),
-    currentActorIndex: 0,
-    round: 1,
-    appliedClientMessageIds: [],
   };
 }
 
@@ -210,8 +212,10 @@ describe("App", () => {
     const expected = fold(genesis, log);
     // Round is the projection field the fold advances; a divergence in the
     // fold's turn-order bookkeeping shows up here.
-    expect(expected.round).toBe(2);
-    expect(expected.combatants.find((each) => each.combatantId === "goblin-a")?.currentHp).toBe(4);
+    expect(expected.encounter?.round).toBe(2);
+    expect(
+      expected.encounter?.combatants.find((each) => each.combatantId === "goblin-a")?.currentHp,
+    ).toBe(4);
 
     // The component's own projection, read back from the DOM (the Grid's
     // accessible combatant list) rather than from internal state — this is

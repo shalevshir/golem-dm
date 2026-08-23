@@ -44,7 +44,7 @@ import type {
   NarrationSource,
   ServerFrame,
 } from "@ai-dm/schemas";
-import { NARRATION_WINDOW, worldFor } from "./campaign.js";
+import { encounterOf, NARRATION_WINDOW, worldFor } from "./campaign.js";
 import type { Campaign } from "./campaign.js";
 
 /** `apps/server/CLAUDE.md`: snapshot every 50 events. */
@@ -309,7 +309,7 @@ export async function* handleCommand(
   ): AsyncIterable<ServerFrame> {
     const event: GameEvent = {
       eventId: ports.uuid(),
-      campaignId: campaign.state.campaignId,
+      campaignId: campaign.state.world.campaignId,
       sequence: campaign.nextSequence,
       timestamp: ports.clock(),
       type,
@@ -326,7 +326,7 @@ export async function* handleCommand(
     // changes no behaviour for event types it treats as a no-op.
     const next = reduce(campaign.state, event);
 
-    await ports.store.append(campaign.state.campaignId, [event]);
+    await ports.store.append(campaign.state.world.campaignId, [event]);
     campaign.nextSequence += 1;
     campaign.state = next;
     yield { type: "event", event };
@@ -352,7 +352,11 @@ export async function* handleCommand(
       // `clientMessageId` is dropped forever. A missing snapshot costs a
       // longer replay on the next reconnect and nothing else.
       try {
-        await ports.store.putSnapshot(campaign.state.campaignId, event.sequence, campaign.state);
+        await ports.store.putSnapshot(
+          campaign.state.world.campaignId,
+          event.sequence,
+          campaign.state,
+        );
       } catch (error) {
         // Reported, not swallowed: a store that has stopped accepting
         // snapshots is usually about to stop accepting appends, and this is
@@ -361,7 +365,7 @@ export async function* handleCommand(
         // transport's decision (`MetricsPort`'s doc comment), and tests that
         // supply no metrics port simply see the failure contained.
         ports.metrics?.recordSnapshotFailure?.({
-          campaignId: campaign.state.campaignId,
+          campaignId: campaign.state.world.campaignId,
           sequence: event.sequence,
           error,
         });
@@ -386,7 +390,7 @@ export async function* handleCommand(
     const input = buildNarrationBrief({
       actorId,
       effect,
-      combatants: campaign.state.combatants,
+      combatants: encounterOf(campaign).combatants,
       statBlocks: campaign.built.statBlocks,
       conditionNamesHebrew: ports.conditionNamesHebrew,
       sceneEnglish: campaign.sceneEnglish,
@@ -499,7 +503,7 @@ export async function* handleCommand(
         world,
         actorId,
         availableActions: statBlock === undefined ? [] : availableActionsFor(statBlock),
-        turnOrder: campaign.state.turnOrder,
+        turnOrder: encounterOf(campaign).turnOrder,
         abortSignal: controller.signal,
       });
     } finally {
@@ -545,7 +549,7 @@ export async function* handleCommand(
 
     yield* emit("action_validated", { actorId, turn: proposal.turn, source: proposal.source });
 
-    const seed = ports.seedFor(campaign.state.rootSeed, campaign.nextSequence);
+    const seed = ports.seedFor(campaign.state.world.rootSeed, campaign.nextSequence);
     const { world: after, effect } = applyTurn({
       world,
       actorId,
@@ -579,11 +583,15 @@ export async function* handleCommand(
    * purely so a defect in that math or in `reduce` cannot hang the pipeline.
    */
   async function* runEnemyTurns(): AsyncIterable<ServerFrame> {
-    for (let guard = 0; guard <= campaign.state.turnOrder.length; guard += 1) {
-      const actorId = campaign.state.turnOrder[campaign.state.currentActorIndex];
+    for (let guard = 0; guard <= encounterOf(campaign).turnOrder.length; guard += 1) {
+      // Re-read per pass, not hoisted: `enemyTurn` and the skip below both
+      // emit, and `emit` replaces `campaign.state` wholesale — a board bound
+      // before the loop would describe a turn that has already ended.
+      const encounter = encounterOf(campaign);
+      const actorId = encounter.turnOrder[encounter.currentActorIndex];
       if (actorId === undefined) return;
 
-      const combatant = campaign.state.combatants.find((each) => each.combatantId === actorId);
+      const combatant = encounter.combatants.find((each) => each.combatantId === actorId);
       if (combatant === undefined) return;
       if (combatant.faction === "party") return;
 
@@ -594,8 +602,8 @@ export async function* handleCommand(
       }
 
       const livingFactions = new Set(
-        campaign.state.combatants
-          .filter((each) => each.status === "alive")
+        encounterOf(campaign)
+          .combatants.filter((each) => each.status === "alive")
           .map((each) => each.faction),
       );
       if (livingFactions.size < 2) return;
@@ -625,10 +633,11 @@ export async function* handleCommand(
   // `yield*`-ing it from the async `handleCommand` generator works the same
   // either way.
   function* playerAffordances(): Iterable<ServerFrame> {
-    const actorId = campaign.state.turnOrder[campaign.state.currentActorIndex];
+    const encounter = encounterOf(campaign);
+    const actorId = encounter.turnOrder[encounter.currentActorIndex];
     if (actorId === undefined) return;
 
-    const actor = campaign.state.combatants.find((each) => each.combatantId === actorId);
+    const actor = encounter.combatants.find((each) => each.combatantId === actorId);
     if (actor === undefined || actor.faction !== "party" || actor.status !== "alive") return;
 
     const statBlock = campaign.built.statBlocks.get(actorId);
@@ -660,7 +669,7 @@ export async function* handleCommand(
         async function* joinFrames(
           command: Extract<ClientMessage, { type: "join" }>,
         ): AsyncIterable<ServerFrame> {
-          const campaignId = campaign.state.campaignId;
+          const campaignId = campaign.state.world.campaignId;
 
           if (command.resumeFrom === undefined) {
             // Nothing to resume from: hand back the live projection wholesale.
@@ -740,9 +749,10 @@ export async function* handleCommand(
         // second turn. It must run before anything else, including the
         // turn-order check: by the time a duplicate arrives, the turn it
         // named may already have moved on to someone else.
-        if (campaign.state.appliedClientMessageIds.includes(command.clientMessageId)) return;
+        if (campaign.state.world.appliedClientMessageIds.includes(command.clientMessageId)) return;
 
-        const currentActorId = campaign.state.turnOrder[campaign.state.currentActorIndex];
+        const encounter = encounterOf(campaign);
+        const currentActorId = encounter.turnOrder[encounter.currentActorIndex];
         if (currentActorId !== command.actorId) {
           yield {
             type: "error",
@@ -817,7 +827,7 @@ export async function* handleCommand(
           source: "human",
         });
 
-        const seed = ports.seedFor(campaign.state.rootSeed, campaign.nextSequence);
+        const seed = ports.seedFor(campaign.state.world.rootSeed, campaign.nextSequence);
         const { world: after, effect } = applyTurn({
           world,
           actorId: command.actorId,

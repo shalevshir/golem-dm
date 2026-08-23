@@ -244,18 +244,43 @@ describe("CampaignCreated", () => {
 });
 
 describe("CampaignState", () => {
+  const world = { campaignId: "s1", rootSeed: 7, appliedClientMessageIds: [] };
+  const encounter = {
+    encounterId: "goblin-ambush",
+    grid: { width: 1, height: 1, tiles: [["normal"]] },
+    combatants: [],
+    turnOrder: [],
+    currentActorIndex: 0,
+    round: 1,
+  };
+
   it("requires the fields a projection is folded into", () => {
+    const state = CampaignState.parse({ world, encounter });
+    expect(state.encounter?.round).toBe(1);
+  });
+
+  // The shape the split exists for: a campaign between fights, which the flat
+  // projection could not express at all.
+  it("accepts a campaign with no encounter open", () => {
+    const state = CampaignState.parse({ world, encounter: null });
+    expect(state.encounter).toBeNull();
+  });
+
+  it("rejects an absent encounter field, which is not the same as a null one", () => {
+    expect(() => CampaignState.parse({ world })).toThrow();
+  });
+
+  it("rejects a campaign with no world", () => {
+    expect(() => CampaignState.parse({ encounter })).toThrow();
+  });
+
+  // Idempotency is the world's, not the board's: it has to survive the
+  // encounter that produced it ending.
+  it("keeps appliedClientMessageIds on the world rather than the encounter", () => {
     const state = CampaignState.parse({
-      campaignId: "s1",
-      rootSeed: 7,
-      encounterId: "goblin-ambush",
-      grid: { width: 1, height: 1, tiles: [["normal"]] },
-      combatants: [],
-      turnOrder: [],
-      currentActorIndex: 0,
-      round: 1,
-      appliedClientMessageIds: [],
+      world: { ...world, appliedClientMessageIds: ["c1"] },
+      encounter: null,
     });
-    expect(state.round).toBe(1);
+    expect(state.world.appliedClientMessageIds).toStrictEqual(["c1"]);
   });
 });
