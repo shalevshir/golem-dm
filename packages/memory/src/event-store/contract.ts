@@ -192,7 +192,7 @@ export function describeEventStoreContract(label: string, makeStore: () => Event
     it("returns the newest snapshot, state included", async () => {
       const store = makeStore();
       const s = freshCampaignId();
-      const newer = { ...stateFor(s), round: 4 };
+      const newer = stateAtRound(s, 4);
       await store.putSnapshot(s, 50, stateFor(s));
       await store.putSnapshot(s, 100, newer);
       // The full payload, not just the sequence — losing the state blob on
