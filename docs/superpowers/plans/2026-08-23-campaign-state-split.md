@@ -195,7 +195,7 @@ Additive only. Nothing produces or consumes them yet, so the tree compiles and t
 **Interfaces:**
 - Produces: `campaign_started`, `encounter_started`, `encounter_resolved` in the `GameEvent` type enum; `CampaignStartedPayload`, `EncounterStartedPayload`, `EncounterResolvedPayload`.
 
-- [ ] **Step 1: Extend the enum and add the payload conventions**
+- [x] **Step 1: Extend the enum and add the payload conventions**
 
 Keep `session_snapshot` in the enum for now — Task 5 removes it, once nothing writes it. Adding the three types will fail `reduce`'s exhaustiveness check immediately; add them to the no-op list in the same step, with a comment saying Task 4 gives two of them behaviour. That keeps this task compiling.
 
@@ -212,7 +212,7 @@ export const EncounterResolvedPayload = z.object({
 });
 ```
 
-- [ ] **Step 2: Verify** — counts unchanged except the new payload-parse tests.
+- [x] **Step 2: Verify** — counts unchanged except the new payload-parse tests.
 
 ---
 

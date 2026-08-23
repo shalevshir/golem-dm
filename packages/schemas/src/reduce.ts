@@ -92,6 +92,17 @@ export function reduce(state: CampaignState, event: GameEvent): CampaignState {
     case "narrative_emitted":
     case "session_snapshot":
       return state;
+
+    // Declared ahead of the projection split that gives them meaning: the
+    // next task moves the combat fields under `state.encounter`, and two of
+    // these three become the events that open and close that bracket.
+    // `campaign_started` stays a no-op even then — like genesis today, the
+    // world it declares is rebuilt from its payload before the fold begins
+    // rather than folded out of it.
+    case "campaign_started":
+    case "encounter_started":
+    case "encounter_resolved":
+      return state;
   }
 }
 
