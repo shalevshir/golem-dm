@@ -2044,14 +2044,18 @@ actually exists."
 
 ## Verification checklist
 
-Before calling this done, all of these must hold:
+Before calling this done, all of these must hold.
+**Status as of 2026-08-23** (measured on `f974c4b`, after the final whole-branch
+review's fix wave): every item verified except the two noted inline.
 
-- [ ] `pnpm test` green, with the memory package's Postgres block **running** (not skipped) when `DATABASE_URL` is set, and **skipped** (not failed) when it is not
-- [ ] `pnpm typecheck` exit 0
-- [ ] `npx eslint packages apps tools` exit 0
-- [ ] CI green on the branch, with the `db:migrate` step reporting applied migrations
-- [ ] `grep -rn "event-store" apps/server/src` returns no import lines
-- [ ] `apps/server/package.json` has gained no dependency — no `postgres`, no `drizzle-orm`
-- [ ] A server restart mid-encounter resumes the session in the browser (Task 10, Step 7)
-- [ ] Starting with a bad `DATABASE_URL` exits at boot, not on the first turn
-- [ ] Starting with no `DATABASE_URL` logs the in-memory warning and plays normally
+- [x] `pnpm test` green, with the memory package's Postgres block **running** (not skipped) when `DATABASE_URL` is set, and **skipped** (not failed) when it is not — 1252 passed / 89 files with it set; 1223 passed / 29 skipped / 89 without. A blank `DATABASE_URL=""` skips identically to absent.
+- [x] `pnpm typecheck` exit 0
+- [x] `npx eslint packages apps tools` exit 0
+- [ ] CI green on the branch, with the `db:migrate` step reporting applied migrations — **NOT VERIFIED.** `ci.yml` triggers on `push:{branches:[main]}` and `pull_request` only, so pushing this branch fires no run and none exists. The service block ships reviewed but unexecuted; it runs for the first time on the eventual PR or merge.
+- [x] `grep -rn "event-store" apps/server/src` returns no import lines — 2 hits, both prose in comments
+- [x] `apps/server/package.json` has gained no dependency — no `postgres`, no `drizzle-orm`
+- [~] A server restart mid-encounter resumes the session in the browser (Task 10, Step 7) — **PARTIAL, run 2026-08-23.** Fought two rounds (Eldad 28->20 HP, one goblin killed), SIGTERM'd the server, restarted, reloaded the tab. **Board state, session id and the log all survived**: identical combatant HP, the dead goblin correctly no longer targetable, and the next turn appended at sequence 29 on top of a max of 28 rather than restarting at 0. Both boots logged `event log: postgres`; the SIGTERM exit was clean.
+  **What did not survive: the roll log and the Hebrew narration**, which this checklist item's Step 7 text also names. Not a store defect — all 39 events including every `dice_rolled` and `narrative_emitted` are in Postgres. Cause is client-side: `sequenceRef` (`apps/web/src/App.tsx:87`) is in-memory React state reset to 0 by a reload, so the client sends `join` with no `resumeFrom`, and `pipeline.ts:665` answers with a bare `session_state` projection and no event history. The session id is persisted to `sessionStorage`; the sequence is not. Pre-existing web-client limitation that durability newly exposed — before this branch a restart lost the session outright. Fix is to persist the sequence alongside the id; the server's snapshot-plus-tail path already exists and is tested, it is simply never asked.
+  Two corrections to Step 7's own text: the session id lives in `sessionStorage`, **not the URL** (the URL stays `/`), and `apps/server/.env` sets `PORT=3001` while the Vite proxy targets `3000`, so the `PORT=3000` override in the command is load-bearing.
+- [x] Starting with a bad `DATABASE_URL` exits at boot, not on the first turn — verified in Task 6 (port 9999, crashes inside `probe()` before any listen)
+- [x] Starting with no `DATABASE_URL` logs the in-memory warning and plays normally
