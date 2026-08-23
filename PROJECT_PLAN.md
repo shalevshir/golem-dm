@@ -76,8 +76,8 @@ Status: POC phase · Supersedes `dm-plan.md` (see `dm-plan-review.md` for the fa
 | 7 | **Tactical agent + sim:** validate→retry→fallback loop; benchmark Flash vs nano/mini | Legality ≥95% after retry on fixture scenarios; model chosen from data | 3–4 | ✅ done |
 | 8 | **Server + web:** Fastify+WS, event log, replay-on-reconnect, clickable canvas grid | Full combat playable E2E vs scripted enemy | 4–5 | ✅ done |
 | 9 | **Narrative agent:** Sonnet 5 streaming, Hebrew glossary, gendered narration, cache-stable prefix | First token p50 1340 ms, pooled n=36 (meets <1.5s; see §4.5 for the per-run spread); Hebrew reviewed by native speaker — pending (`docs/prompts/hebrew-review-2026-08-21.md` committed, not yet reviewed) | 5–6 | 🟡 agent shipped; native-speaker review pending |
-| 10 | **Memory:** pgvector episodic store, scene summarization, quest DAG | Replay test + top-k retrieval test pass | 6 | 🟡 spec #1 shipped; episodic memory not started |
-| 11 | **Closed beta:** 5–10 Hebrew-speaking playtesters; per-turn token/latency/cost dashboards | Measured cost table replaces §3 estimates; go/no-go review | 7–8 | ⬜ not started |
+| 10 | **Memory:** pgvector episodic store, scene summarization, quest DAG | Replay test + top-k retrieval test pass | 6 | 🟡 spec #1 merged to `main`, CI green; spec #2 folded into §4.7's sequence (step 7) |
+| 11 | **Closed beta:** 5–10 Hebrew-speaking playtesters; per-turn token/latency/cost dashboards | Measured cost table replaces §3 estimates; go/no-go review | 7–8 | ⬜ deferred behind the §4.7 narrative foundation |
 
 ### Status as of 2026-08-17
 
@@ -720,7 +720,9 @@ in-memory path survives for tests and for `pnpm dev` without docker.
 producer and a prompt tier that reads retrieval back; today the narrator's
 history is `recentNarrations`, a two-turn window of raw strings. It also
 needs an embedding port, which does not exist in `@ai-dm/agents` and cannot
-simply be imported: `@ai-dm/memory` depends only on `@ai-dm/schemas`.
+simply be imported: `@ai-dm/memory` depends only on `@ai-dm/schemas`. §4.7's
+sequence step 7 records which of these the narrative foundation resolves and
+which are still spec #2's to solve.
 
 **The quest DAG is deferred out of step 10 entirely.** A grep for
 "campaign" across the repo returns a line of `packages/memory`'s charter, a
@@ -728,3 +730,221 @@ comment on the static prompt tier, and that comment's copy in an older
 spec — no code, no schema, no second encounter. `SessionState` is
 combat-only. `quest_nodes` would be a table nothing reads, and the shape it
 should have is not knowable until there is a campaign concept to serve.
+
+### 4.7 The narrative layer — assessment and decomposition (designed 2026-08-23)
+
+Ten of eleven roadmap steps built the tactical vertical. This section records
+an audit of the other one, the decision that follows from it, and the
+architecture proposed to close it.
+
+#### What exists, and what only appears to
+
+§1's diagram asserts a three-tier cascade over a world-state layer. Two of
+those tiers and none of that layer are built. The narrative agent is real and
+good, but what it is, precisely, is a combat commentator: its whole input is
+one turn, a pulse, two prior narrations and a static scene card, and it can
+change nothing (invariant 1, correctly). "Narrative layer" today means a prose
+skin on the tactical layer.
+
+The placeholders that assert intent without design:
+
+- **`free_text` is closed.** It is in `ClientMessage`
+  (`packages/schemas/src/protocol.ts:78`), and the pipeline answers every one
+  with a `free_text_not_supported` error frame. It is the only door into
+  open-ended play.
+- **The intent tier is a stub.** `packages/agents/src/intent/index.ts` is
+  `export {}` under a comment naming the right categories (`combat | check |
+  social | exploration | ooc`). The cascade is two tiers, not three.
+- **`intent_classified` is a reserved word** — in the `GameEvent` enum
+  (`events.ts:16`), a no-op in `reduce` (`reduce.ts:87`).
+- **`SessionState` is combat-only** (`protocol.ts:29`): grid, combatants,
+  turn order, current actor, round, plus ids and idempotency. No world, no
+  time, no location, no quest.
+- **`scene_changed` is a combat signal with a narrative name.** Payload
+  schema `{kind: string}`; `reduce` handles exactly one kind,
+  `turn_advanced` (`reduce.ts:53`).
+- **`CharacterSheet` carries no identity** — no bonds, ideals, flaws, goals
+  or backstory. `nameHebrew` and `grammaticalGender` are the only
+  non-mechanical fields, and the second exists for Hebrew verb agreement.
+- **One encounter exists**, `GOBLIN_AMBUSH`, a TS const in
+  `apps/server/src/encounters/index.ts:22`.
+- **Session identity is encounter identity** — genesis payload is
+  `{encounterId, rootSeed}` (`apps/server/src/core/session.ts:27`).
+- `packages/memory/src/world-state.ts` and `episodic.ts` are both `export {}`.
+
+Building the deterministic core first was the right order: it is the part a
+capable model cannot paper over, and it is what makes the LLM safe to use at
+all. But it has a consequence the roadmap did not record — steps 10 and 11
+both stall, and the thing they stall on is not episodic memory or dashboards.
+It is the entire non-combat half of the game.
+
+#### Decision: the narrative foundation lands before the closed beta
+
+Taken 2026-08-23. The work below refactors session identity, `SessionState`
+and `reduce` — the load-bearing pieces. Doing it after a beta means either
+migrating that beta's data or discarding it. Step 11 slips accordingly; step
+10's spec #2 is folded into the sequence below rather than being attempted
+against a corpus that does not exist.
+
+#### The governing constraint
+
+In combat, `validateExecuteTurn` adjudicates every LLM proposal. Out of
+combat, if nothing adjudicates, an LLM mutates state and invariants 1 and 3
+are both gone. **The answer is the same shape one level up:** a
+`NarrativeMove` schema that a GM tier proposes, and a pure *scene engine* —
+sibling to the rules engine — that validates it against world state (does
+this NPC exist, is this edge reachable, is this exit open) before anything
+becomes an event. Branching is then data, not prose.
+
+#### Storyline and campaign progression
+
+An authored quest DAG is the spine; simulation is texture. The DAG is
+deterministic, testable and replayable, and it costs authoring effort; a
+purely emergent world is cheap to author, nearly untestable, and puts an LLM
+in charge of world state, which is the invariant-1 violation again. So: an
+authored graph for the main arc, plus a few coarse dials (faction relations,
+regional danger) that modify how a node *presents*, never whether it exists.
+
+`QuestNode` carries preconditions as predicates over world state, a
+`sceneEnglish` card, outbound edges, and effects declared as data and applied
+by the engine. The intent router picks an edge, the engine checks its
+predicate, the narrator describes the traversal.
+
+This content is original, so it lives in `data/world/`, **not `data/srd/`** —
+invariant 6 restricts that directory to SRD 5.2.1 CC-BY material and
+`NOTICE.md`'s wording is fixed.
+
+New event types: `quest_node_entered`, `quest_node_completed`,
+`world_delta_applied`, `encounter_started`, `encounter_resolved`. Extending
+the `GameEvent` enum trips `reduce`'s exhaustiveness check (`reduce.ts:85`)
+by design.
+
+**The campaign is the log; an encounter is a span within it.** `SessionState`
+splits into a persistent `WorldState` and an `EncounterState` present only
+during combat.
+
+#### Worldbuilding and global state
+
+Static lore — locations, factions, NPCs, history — is zod-validated content
+in `data/world/`, loaded by a loader that throws rather than producing
+something half-valid (the `buildEncounter` precedent). Events reference it
+**by stable id, never embedded text**, so editing a lore file cannot
+retroactively invalidate a replay.
+
+Mutable world state is a projection of the log, in
+`packages/memory/src/world-state.ts` — which is what invariant 3 forces and
+what `packages/memory/CLAUDE.md:7` already commits to. The Postgres tables
+are a materialized cache of that fold, the same relationship
+`session_snapshots` has to `game_events`; `SNAPSHOT_EVERY = 50` generalizes
+to keep a long campaign's fold affordable.
+
+- **Calendar/time** advances only through explicit events — travel, rest,
+  declared node effects. A wall-clock read makes replay diverge, the failure
+  mode the `timestamp`-as-`text` decision already guards against (§4.6).
+- **Faction relations** are a coarse scalar per pair (−3..+3, named bands),
+  changed only by declared effects. A model reads a band name far more
+  reliably than a number, and coarse buckets are much easier to assert on.
+- **Regional danger** is derived from faction relations and quest progress,
+  not stored. Derived state cannot drift.
+- **Town events** carry a `scheduledFor` time and fire when the calendar
+  crosses it — deterministic under replay because time is event-driven.
+
+#### Character narrative profiles and memory
+
+Narrative fields do not go on `CharacterSheet`: that schema is the rules
+engine's input, and the rules engine must not grow a dependency on story
+data. A separate `CharacterProfile`, keyed by `characterId`, splits the same
+way the world does — authored (background, bonds, ideals, flaws, goals,
+starting alignment) in `data/characters/`, earned (secrets learned, goals
+advanced or abandoned, alignment drift, reputation) as a projection. The
+split is not tidiness: the earned half must replay, the authored half must be
+editable without invalidating replays.
+
+**Alignment shifts are declared effects of specific logged choices, with a
+reason — not a hidden morality meter.** A meter is untestable and is exactly
+the quantity a model will hallucinate movement in. Logged shifts make "why
+did my character become this" answerable from the event stream.
+
+NPC affinity is the same pattern: a projection of `(npcId → band + remembered
+facts)`. That remembered-facts list is what finally gives **episodic memory a
+consumer** — a query a two-turn `recentNarrations` window genuinely cannot
+answer, over a corpus (NPC-tagged scene summaries) that spans more than one
+fight. Step 10's spec #2 becomes designable at that point and not before.
+
+Cost consequence: the narrative prompt is layered for cache stability
+(`static` / `semiStatic` / `dynamic`). Retrieved memories vary per turn, so
+they land in the uncached tail — which interacts directly with the missing
+`cache_read_input_tokens` field described under step 11 below.
+
+#### Integration with tactical combat
+
+A quest node declares an encounter by id with a narrow, schema'd
+parameterization — spawn table, map, starting positions, surprise — and
+`buildEncounter` then runs exactly as it does today. The bridge is
+deliberately not a general hook: an open one would erode the tactical layer's
+tested legality guarantees at the edges.
+
+**An encounter's `rootSeed` derives from the campaign seed and sequence,
+never fresh randomness.** Otherwise campaign replay diverges the instant a
+fight starts. This generalizes the rule already in force per-turn
+(`protocol.ts:31`).
+
+`encounter_resolved` carries the outcome — survivors, HP, resources spent,
+notable moments — feeding three consumers: world-state deltas via declared
+effects, a scene summary for episodic memory, and quest-node preconditions
+for what is now reachable.
+
+Mode is campaign state (`exploration | social | encounter`), not a separate
+system: combat is a bracketed span in one log. This is also what makes
+`free_text` implementable and gives the intent router its reason to exist.
+`abilityCheck` (`packages/rules-engine/src/checks/index.ts:66`) is already
+built and tested, so out-of-combat skill checks come nearly free.
+
+#### Sequence
+
+0. **ADR: campaign vs. session identity** —
+   [`docs/decisions/0004-campaign-vs-session-identity.md`](docs/decisions/0004-campaign-vs-session-identity.md),
+   PROPOSED. Load-bearing; everything below depends on it.
+1. **Schemas and the `WorldState`/`EncounterState` split**, new event types,
+   `reduce` refactor — while the log is small and no users exist.
+   [`docs/superpowers/specs/2026-08-23-campaign-state-split-design.md`](docs/superpowers/specs/2026-08-23-campaign-state-split-design.md).
+2. **Static content loaders and a deliberately tiny authored world:** one
+   town, two factions, three NPCs, a five-node arc. Enough to prove the
+   pipeline, not to be good.
+3. **Scene engine:** predicates, edge legality, declared effects. Pure,
+   golden tests, no LLM.
+4. **Intent router, `free_text`, out-of-combat ability checks.**
+5. **The combat bridge:** `encounter_started` / `encounter_resolved`,
+   deterministic seed derivation.
+6. **Character profiles and NPC affinity projection.**
+7. **Episodic memory (step 10 spec #2)** — now with a real consumer. §4.6
+   left it undesignable for want of a corpus, a consumer and a producer.
+   This sequence supplies all three, and closes one of §4.6's two named
+   blockers but not the other — so what remains is stated here rather than
+   left to be rediscovered at step 7:
+   - *Corpus* — ADR-0004 makes `campaignId` the stream key and an encounter
+     a bracketed span, so a log finally spans more than one scene. Before
+     that there is nothing to retrieve over.
+   - *Consumer* — step 6's NPC affinity projection (`npcId` → band +
+     remembered facts) asks a question a two-turn `recentNarrations` window
+     genuinely cannot answer.
+   - *Producer* — `encounter_resolved` carries a scene summary, and this
+     sequence adds the scene-summarizer tier that writes it. Spec #2 no
+     longer has to invent its own summary producer, which §4.6 listed as a
+     blocker.
+   - *Still open — the embedding port.* §4.6's other blocker survives
+     untouched: `@ai-dm/memory` depends only on `@ai-dm/schemas`
+     (invariant 5), so an adapter living in `@ai-dm/agents` is unreachable
+     from where the store lives. Nothing above adds a port. Deciding where
+     it belongs is spec #2's first question, not a detail inside it.
+   - *Still open — cost.* Embedding calls are a fourth per-turn cost source
+     on top of intent, GM and scene summarizer, on the meter that is
+     unreportable by construction until the fix below lands.
+8. **Closed beta (step 11).**
+
+Two items are independent of this ordering. The
+`cache_read_input_tokens`-plus-pricing-relocation fix described for step 11
+becomes *more* urgent, not less, because this sequence adds three model tiers
+(intent, GM, scene summarizer) — four cost sources once step 7's embeddings
+join them — and cost is currently unreportable by construction. And none of
+the above requires party play — ADR-0002 stands.
