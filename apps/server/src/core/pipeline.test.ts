@@ -27,7 +27,7 @@ import type {
   TacticalTurnMetrics,
   TurnPorts,
 } from "./pipeline.js";
-import { createCampaign, encounterOf, loadCampaign } from "./campaign.js";
+import { createCampaign, encounterOf, loadCampaign, startEncounter } from "./campaign.js";
 import type { Campaign } from "./campaign.js";
 
 function uuids(): () => string {
@@ -96,10 +96,27 @@ async function drain(stream: AsyncIterable<ServerFrame>): Promise<ServerFrame[]>
   return frames;
 }
 
+/**
+ * The sequence of the last event `freshCampaign` writes. Genesis is two
+ * events now — `campaign_started` at 0, `encounter_started` at 1 — so the
+ * first event any turn appends lands at 2, and a test that wants "the log
+ * the pipeline wrote" reads from here rather than from 0.
+ */
+const GENESIS_SEQUENCE = 1;
+
 async function freshCampaign(store: EventStore): Promise<Campaign> {
+  // Two events, not one: `createCampaign` opens the stream and
+  // `startEncounter` opens the bracket. Every test below wants a board, so
+  // they arrive together here, exactly as `POST /campaigns` does them.
+  const ports = { store, clock: () => "2026-08-19T10:00:00.000Z", uuid: uuids() };
+  const campaign = await createCampaign({ campaignId: "s1", rootSeed: 42, ...ports });
+  return startEncounter({ campaign, encounterId: "goblin-ambush", ...ports });
+}
+
+/** Just `createCampaign` — a campaign with a world and no board. */
+async function encounterlessCampaign(store: EventStore): Promise<Campaign> {
   return createCampaign({
     campaignId: "s1",
-    encounterId: "goblin-ambush",
     rootSeed: 42,
     store,
     clock: () => "2026-08-19T10:00:00.000Z",
@@ -383,15 +400,15 @@ describe("handleCommand — join", () => {
   it("replays only the events after resumeFrom, in ascending sequence order", async () => {
     const store = createInMemoryEventStore();
     const campaign = await freshCampaign(store);
-    await store.append("s1", [syntheticEvent(1), syntheticEvent(2), syntheticEvent(3)]);
+    await store.append("s1", [syntheticEvent(2), syntheticEvent(3), syntheticEvent(4)]);
 
     const frames = await drain(
-      handleCommand(campaign, { type: "join", campaignId: "s1", resumeFrom: 1 }, portsWith(store)),
+      handleCommand(campaign, { type: "join", campaignId: "s1", resumeFrom: 2 }, portsWith(store)),
     );
 
     expect(frames.filter((each) => each.type === "campaign_state")).toHaveLength(0);
     const eventFrames = frames.filter((each) => each.type === "event");
-    expect(eventFrames.map((each) => each.event.sequence)).toEqual([2, 3]);
+    expect(eventFrames.map((each) => each.event.sequence)).toEqual([3, 4]);
   });
 
   // IMPORTANT-2: without this branch, a reconnecting client whose
@@ -407,12 +424,20 @@ describe("handleCommand — join", () => {
     const campaign = await freshCampaign(store);
 
     const frames = await drain(
-      handleCommand(campaign, { type: "join", campaignId: "s1", resumeFrom: 0 }, portsWith(store)),
+      handleCommand(
+        campaign,
+        { type: "join", campaignId: "s1", resumeFrom: GENESIS_SEQUENCE },
+        portsWith(store),
+      ),
     );
 
     // Task 4: this join lands on the hero's own turn, so a trailing
     // `turn_affordances` frame follows the `campaign_state` frame.
-    expect(frames[0]).toEqual({ type: "campaign_state", sequence: 0, snapshot: campaign.state });
+    expect(frames[0]).toEqual({
+      type: "campaign_state",
+      sequence: GENESIS_SEQUENCE,
+      snapshot: campaign.state,
+    });
     expect(frames).toHaveLength(2);
     expect(frames[1]?.type).toBe("turn_affordances");
   });
@@ -428,16 +453,18 @@ describe("handleCommand — join", () => {
     const store = createInMemoryEventStore();
     const campaign = await freshCampaign(store);
 
-    const upToSnapshot = Array.from({ length: 50 }, (_, index) => syntheticEvent(index + 1));
+    const upToSnapshot = Array.from({ length: 50 }, (_, index) =>
+      syntheticEvent(index + GENESIS_SEQUENCE + 1),
+    );
     await store.append("s1", upToSnapshot);
 
     const snapshotState: CampaignState = {
       ...campaign.state,
       encounter: { ...encounterOf(campaign), round: 99 },
     };
-    await store.putSnapshot("s1", 50, snapshotState);
+    await store.putSnapshot("s1", 51, snapshotState);
 
-    const tail = [syntheticEvent(51), syntheticEvent(52)];
+    const tail = [syntheticEvent(52), syntheticEvent(53)];
     await store.append("s1", tail);
 
     const frames = await drain(
@@ -446,11 +473,11 @@ describe("handleCommand — join", () => {
 
     expect(frames[0]).toEqual({
       type: "campaign_state",
-      sequence: 50,
+      sequence: 51,
       snapshot: snapshotState,
     });
     const eventFrames = frames.filter((each) => each.type === "event");
-    expect(eventFrames.map((each) => each.event.sequence)).toEqual([51, 52]);
+    expect(eventFrames.map((each) => each.event.sequence)).toEqual([52, 53]);
   });
 });
 
@@ -485,7 +512,7 @@ describe("handleCommand — free text", () => {
         portsWith(store),
       ),
     );
-    expect(await store.readSince("s1", 0)).toEqual([]);
+    expect(await store.readSince("s1", GENESIS_SEQUENCE)).toEqual([]);
   });
 });
 
@@ -512,7 +539,7 @@ describe("handleCommand — structured action", () => {
     const store = createInMemoryEventStore();
     const campaign = await freshCampaign(store);
     await drain(handleCommand(campaign, dodge("hero"), portsWith(store)));
-    const types = (await store.readSince("s1", 0)).map((each) => each.type);
+    const types = (await store.readSince("s1", GENESIS_SEQUENCE)).map((each) => each.type);
     const oneActorsTurn = [
       "action_validated",
       "dice_rolled",
@@ -525,7 +552,7 @@ describe("handleCommand — structured action", () => {
     // The type sequence alone can't tell three same-shaped turns apart — a
     // bug that ran the same actor's turn three times would produce this
     // exact list of types too. Pin *which* actor took each turn.
-    const validated = (await store.readSince("s1", 0)).filter(
+    const validated = (await store.readSince("s1", GENESIS_SEQUENCE)).filter(
       (each) => each.type === "action_validated",
     );
     expect(validated.map((each) => each.payload["actorId"])).toEqual([
@@ -542,7 +569,7 @@ describe("handleCommand — structured action", () => {
     const store = createInMemoryEventStore();
     const campaign = await freshCampaign(store);
     const frames = await drain(handleCommand(campaign, dodge("hero"), portsWith(store)));
-    const appended = await store.readSince("s1", 0);
+    const appended = await store.readSince("s1", GENESIS_SEQUENCE);
     const framedEvents = frames.filter((each) => each.type === "event").map((each) => each.event);
     expect(framedEvents).toEqual(appended);
   });
@@ -551,7 +578,9 @@ describe("handleCommand — structured action", () => {
     const store = createInMemoryEventStore();
     const campaign = await freshCampaign(store);
     await drain(handleCommand(campaign, dodge("hero"), portsWith(store)));
-    const rolled = (await store.readSince("s1", 0)).find((each) => each.type === "dice_rolled");
+    const rolled = (await store.readSince("s1", GENESIS_SEQUENCE)).find(
+      (each) => each.type === "dice_rolled",
+    );
     expect(rolled?.payload).toMatchObject({ seed: expect.any(Number) as number });
   });
 
@@ -574,7 +603,9 @@ describe("handleCommand — structured action", () => {
     };
 
     await drain(handleCommand(campaign, moveAndDodge, portsWith(store)));
-    const rolled = (await store.readSince("s1", 0)).find((each) => each.type === "dice_rolled");
+    const rolled = (await store.readSince("s1", GENESIS_SEQUENCE)).find(
+      (each) => each.type === "dice_rolled",
+    );
     expect(rolled?.payload).toMatchObject({ movedFeet: 10 });
     // The real wire payload, not a hand-built fixture: proves DiceRolledPayload
     // actually describes what the server emits, not just what a test expects.
@@ -585,7 +616,9 @@ describe("handleCommand — structured action", () => {
     const store = createInMemoryEventStore();
     const campaign = await freshCampaign(store);
     await drain(handleCommand(campaign, dodge("hero"), portsWith(store)));
-    const rolled = (await store.readSince("s1", 0)).find((each) => each.type === "dice_rolled");
+    const rolled = (await store.readSince("s1", GENESIS_SEQUENCE)).find(
+      (each) => each.type === "dice_rolled",
+    );
     expect(rolled?.payload).toMatchObject({ movedFeet: 0 });
   });
 
@@ -594,7 +627,7 @@ describe("handleCommand — structured action", () => {
     const campaign = await freshCampaign(store);
     const frames = await drain(handleCommand(campaign, dodge("hero"), portsWith(store)));
     expect(frames.some((each) => each.type === "narrative_token")).toBe(true);
-    const types = (await store.readSince("s1", 0)).map((each) => each.type);
+    const types = (await store.readSince("s1", GENESIS_SEQUENCE)).map((each) => each.type);
     expect(types).toContain("narrative_emitted");
   });
 
@@ -614,7 +647,7 @@ describe("handleCommand — structured action", () => {
     const store = createInMemoryEventStore();
     const campaign = await freshCampaign(store);
     const frames = await drain(handleCommand(campaign, dodge("hero"), portsWith(store)));
-    const emitted = (await store.readSince("s1", 0)).filter(
+    const emitted = (await store.readSince("s1", GENESIS_SEQUENCE)).filter(
       (each) => each.type === "narrative_emitted",
     );
     expect(emitted.length).toBeGreaterThan(0);
@@ -632,11 +665,11 @@ describe("handleCommand — structured action", () => {
     const store = createInMemoryEventStore();
     const campaign = await freshCampaign(store);
     await drain(handleCommand(campaign, dodge("hero"), portsWith(store)));
-    const afterFirst = (await store.readSince("s1", 0)).length;
+    const afterFirst = (await store.readSince("s1", GENESIS_SEQUENCE)).length;
 
     const frames = await drain(handleCommand(campaign, dodge("hero"), portsWith(store)));
     expect(frames).toEqual([]);
-    expect((await store.readSince("s1", 0)).length).toBe(afterFirst);
+    expect((await store.readSince("s1", GENESIS_SEQUENCE)).length).toBe(afterFirst);
   });
 
   // The brief's original illegal-turn fixture (an "attack" on goblin-a) relied
@@ -675,8 +708,39 @@ describe("handleCommand — structured action", () => {
     // making the proposed turn legal again.
     expect(rejected.reasons).toEqual(["destination_off_grid"]);
     expect(encounterOf(campaign).currentActorIndex).toBe(before);
-    const types = (await store.readSince("s1", 0)).map((each) => each.type);
+    const types = (await store.readSince("s1", GENESIS_SEQUENCE)).map((each) => each.type);
     expect(types).toContain("action_rejected");
+  });
+
+  // The bracket refusal (spec §Wiring). Reachable for the first time now
+  // that `createCampaign` no longer opens an encounter: a socket can send a
+  // `structured_action` whenever it likes, including between fights.
+  it("refuses a structured action when no encounter is open, with an error frame", async () => {
+    const store = createInMemoryEventStore();
+    const campaign = await encounterlessCampaign(store);
+
+    const frames = await drain(handleCommand(campaign, dodge("hero"), portsWith(store)));
+
+    // An existing code, not a new one. `not_your_turn` is already what a
+    // player gets for acting after a fight has ended (`state/conclusion.ts`,
+    // C-37) and the client already treats it as a stale click it must not
+    // surface (`ErrorBanner.tsx`) — which is exactly right here, since a
+    // campaign with no board pushes no affordances to click in the first
+    // place.
+    expect(frames).toEqual([
+      {
+        type: "error",
+        clientMessageId: "c1",
+        code: "not_your_turn",
+        message: expect.any(String) as string,
+      },
+    ]);
+    // Refused, not half-applied: nothing appended and no trailing
+    // affordance frame, because there is no board to offer one on. Read
+    // from 0 rather than `GENESIS_SEQUENCE` — this campaign's genesis is the
+    // single `campaign_started` event, with no `encounter_started` after it.
+    expect(await store.readSince("s1", 0)).toEqual([]);
+    expect(campaign.nextSequence).toBe(1);
   });
 
   // C-29: the store throws two error classes on a bad append, neither with a
@@ -686,7 +750,7 @@ describe("handleCommand — structured action", () => {
   it("turns a SequenceConflictError from the store into an internal_error frame", async () => {
     const store = createInMemoryEventStore();
     const campaign = await freshCampaign(store);
-    await store.append("s1", [syntheticEvent(1)]);
+    await store.append("s1", [syntheticEvent(GENESIS_SEQUENCE + 1)]);
 
     const frames = await drain(handleCommand(campaign, dodge("hero"), portsWith(store)));
 
@@ -707,8 +771,10 @@ describe("handleCommand — structured action", () => {
     expect(frames).toHaveLength(2);
     // Append-and-yield stayed one operation: the failed append never bumped
     // nextSequence or added anything beyond the one rogue event already there.
-    expect(campaign.nextSequence).toBe(1);
-    expect((await store.readSince("s1", 0)).map((each) => each.sequence)).toEqual([1]);
+    expect(campaign.nextSequence).toBe(GENESIS_SEQUENCE + 1);
+    expect((await store.readSince("s1", GENESIS_SEQUENCE)).map((each) => each.sequence)).toEqual([
+      GENESIS_SEQUENCE + 1,
+    ]);
   });
 
   // The third class, new with a durable store: a dropped connection, a lock
@@ -737,7 +803,7 @@ describe("handleCommand — structured action", () => {
     expect(frames).toHaveLength(2);
     // Append-and-yield stayed one operation: the failed append never bumped
     // nextSequence.
-    expect(campaign.nextSequence).toBe(1);
+    expect(campaign.nextSequence).toBe(GENESIS_SEQUENCE + 1);
   });
 });
 
@@ -866,7 +932,7 @@ describe("handleCommand — enemy turns", () => {
     // `narrative_emitted`, `currentActorIndex === 0` and `round === 2` are
     // all reachable that way too, since every path emits exactly one
     // `turn_advanced` regardless of which actor it was for.
-    const validated = (await store.readSince("s1", 0)).filter(
+    const validated = (await store.readSince("s1", GENESIS_SEQUENCE)).filter(
       (each) => each.type === "action_validated",
     );
     expect(validated.map((each) => each.payload["actorId"])).toEqual([
@@ -886,7 +952,7 @@ describe("handleCommand — enemy turns", () => {
 
     await drain(handleCommand(campaign, dodge("hero"), ports));
 
-    const rejected = (await store.readSince("s1", 0)).filter(
+    const rejected = (await store.readSince("s1", GENESIS_SEQUENCE)).filter(
       (each) => each.type === "action_rejected",
     );
     expect(rejected.length).toBeGreaterThan(0);
@@ -912,7 +978,7 @@ describe("handleCommand — enemy turns", () => {
 
     await drain(handleCommand(campaign, dodge("hero"), ports));
 
-    const rejected = (await store.readSince("s1", 0)).filter(
+    const rejected = (await store.readSince("s1", GENESIS_SEQUENCE)).filter(
       (each) => each.type === "action_rejected",
     );
     expect(rejected.length).toBeGreaterThan(0);
@@ -942,7 +1008,7 @@ describe("handleCommand — enemy turns", () => {
       ]),
     };
     await drain(handleCommand(campaign, dodge("hero"), ports));
-    const narrated = (await store.readSince("s1", 0)).filter(
+    const narrated = (await store.readSince("s1", GENESIS_SEQUENCE)).filter(
       (each) => each.type === "narrative_emitted",
     );
     expect(narrated).toHaveLength(3);
@@ -979,7 +1045,7 @@ describe("handleCommand — enemy turns", () => {
 
     await drain(handleCommand(campaign, dodge("hero"), ports));
 
-    const validated = (await store.readSince("s1", 0)).filter(
+    const validated = (await store.readSince("s1", GENESIS_SEQUENCE)).filter(
       (each) => each.type === "action_validated",
     );
     expect(validated.map((each) => each.payload["actorId"])).toEqual(["hero", "goblin-b"]);
@@ -1023,7 +1089,7 @@ describe("handleCommand — enemy turns", () => {
     expect(encounterOf(campaign).round).toBe(3);
     expect(encounterOf(campaign).currentActorIndex).toBe(0);
 
-    const heroValidations = (await store.readSince("s1", 0)).filter(
+    const heroValidations = (await store.readSince("s1", GENESIS_SEQUENCE)).filter(
       (each) => each.type === "action_validated" && each.payload["actorId"] === "hero",
     );
     expect(heroValidations).toHaveLength(2);
@@ -1277,7 +1343,7 @@ describe("handleCommand — turn timeout", () => {
     const frames = await drain(handleCommand(campaign, dodge("hero"), ports));
 
     // The turn completed rather than hanging, and it still produced prose.
-    const emitted = (await store.readSince("s1", 0)).filter(
+    const emitted = (await store.readSince("s1", GENESIS_SEQUENCE)).filter(
       (each) => each.type === "narrative_emitted",
     );
     expect(emitted.length).toBeGreaterThan(0);
@@ -1337,7 +1403,7 @@ describe("handleCommand — turn timeout", () => {
     // goblins' tactical calls stall until the abort fires, and each
     // forfeits with a bare turn_advanced — no action_validated,
     // dice_rolled, state_delta_applied or narrative_emitted for either.
-    const types = (await store.readSince("s1", 0)).map((each) => each.type);
+    const types = (await store.readSince("s1", GENESIS_SEQUENCE)).map((each) => each.type);
     expect(types).toEqual([
       "player_input",
       "action_validated",

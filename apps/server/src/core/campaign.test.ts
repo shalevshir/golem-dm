@@ -1,9 +1,18 @@
 import { describe, expect, it } from "vitest";
 import { createInMemoryEventStore } from "@ai-dm/memory";
-import { fold } from "@ai-dm/schemas";
+import { fold, reduce } from "@ai-dm/schemas";
 import type { GameEvent } from "@ai-dm/schemas";
-import { createCampaign, encounterOf, loadCampaign, worldFor } from "./campaign.js";
-import type { CreateCampaignInput } from "./campaign.js";
+import {
+  builtOf,
+  createCampaign,
+  encounterOf,
+  loadCampaign,
+  resolveEncounter,
+  startEncounter,
+  worldFor,
+} from "./campaign.js";
+import type { Campaign, CreateCampaignInput } from "./campaign.js";
+import { UnknownEncounterError } from "../encounters/index.js";
 
 const clock = (): string => "2026-08-19T10:00:00.000Z";
 
@@ -16,6 +25,7 @@ function uuids(): () => string {
 }
 
 const NARRATION_WINDOW = 2;
+const ENCOUNTER_ID = "goblin-ambush";
 
 /** The `CreateCampaignInput` fields shared by every test below; a test spreads
  * this and overrides only what it cares about. `store` and `uuid` are fresh
@@ -23,7 +33,6 @@ const NARRATION_WINDOW = 2;
 function baseInput(): CreateCampaignInput {
   return {
     campaignId: "s1",
-    encounterId: "goblin-ambush",
     rootSeed: 42,
     store: createInMemoryEventStore(),
     clock,
@@ -31,61 +40,204 @@ function baseInput(): CreateCampaignInput {
   };
 }
 
+/**
+ * `createCampaign` followed by `startEncounter` — what `POST /campaigns` does
+ * today, and what every test that wants a board wants. Genesis is two events
+ * now, so a campaign with an open encounter is two calls; the `uuid` port is
+ * shared between them, so event ids stay sequential across both.
+ */
+async function startedCampaign(input: CreateCampaignInput): Promise<Campaign> {
+  const campaign = await createCampaign(input);
+  return startEncounter({
+    campaign,
+    encounterId: ENCOUNTER_ID,
+    store: input.store,
+    clock: input.clock,
+    uuid: input.uuid,
+  });
+}
+
 describe("createCampaign", () => {
+  it("opens the stream with no encounter", async () => {
+    // The state the whole split exists for: a campaign that has a world and
+    // no board. Nothing could express it before genesis became two events.
+    const input = baseInput();
+    const campaign = await createCampaign(input);
+    expect(campaign.state.encounter).toBeNull();
+    expect(campaign.built).toBeNull();
+    expect(campaign.state.world.campaignId).toBe("s1");
+    expect(campaign.state.world.rootSeed).toBe(42);
+    expect(campaign.state.world.appliedClientMessageIds).toEqual([]);
+    expect(campaign.recentNarrations).toEqual([]);
+  });
+
+  it("writes a campaign_started event as sequence 0, carrying only the root seed", async () => {
+    const input = baseInput();
+    await createCampaign(input);
+    const events = await input.store.readSince("s1", -1);
+    expect(events).toHaveLength(1);
+    expect(events[0]).toMatchObject({ sequence: 0, type: "campaign_started" });
+    // Named, never snapshotted: no `state` and no `encounterId` — the first
+    // is what keeps live campaign state from being aliased into the store,
+    // and the second now belongs to `encounter_started` instead.
+    expect(events[0]?.payload).toEqual({ rootSeed: 42 });
+  });
+
+  it("refuses the board through encounterOf, worldFor and builtOf", async () => {
+    const campaign = await createCampaign(baseInput());
+    expect(() => encounterOf(campaign)).toThrow(/no encounter open/);
+    expect(() => worldFor(campaign)).toThrow(/no encounter open/);
+    expect(() => builtOf(campaign)).toThrow(/no encounter open/);
+  });
+});
+
+describe("startEncounter", () => {
   it("projects the encounter's combatants and turn order", async () => {
-    const store = createInMemoryEventStore();
-    const campaign = await createCampaign({
-      campaignId: "s1",
-      encounterId: "goblin-ambush",
-      rootSeed: 42,
-      store,
-      clock,
-      uuid: uuids(),
-    });
+    const campaign = await startedCampaign(baseInput());
     expect(encounterOf(campaign).turnOrder).toEqual(["hero", "goblin-a", "goblin-b"]);
     expect(encounterOf(campaign).combatants).toHaveLength(3);
     expect(encounterOf(campaign).round).toBe(1);
     expect(encounterOf(campaign).currentActorIndex).toBe(0);
   });
 
-  it("writes a session_snapshot event as sequence 0", async () => {
-    const store = createInMemoryEventStore();
-    await createCampaign({
-      campaignId: "s1",
-      encounterId: "goblin-ambush",
-      rootSeed: 42,
-      store,
-      clock,
-      uuid: uuids(),
-    });
-    const events = await store.readSince("s1", -1);
-    expect(events).toHaveLength(1);
-    expect(events[0]).toMatchObject({ sequence: 0, type: "session_snapshot" });
+  it("writes an encounter_started event carrying only the encounter id", async () => {
+    const input = baseInput();
+    await startedCampaign(input);
+    const events = await input.store.readSince("s1", -1);
+    expect(events).toHaveLength(2);
+    expect(events[1]).toMatchObject({ sequence: 1, type: "encounter_started" });
+    expect(events[1]?.payload).toEqual({ encounterId: ENCOUNTER_ID });
   });
 
-  it("seeds campaignId, rootSeed, encounterId, grid and turnOrder as genesis state", async () => {
-    const store = createInMemoryEventStore();
-    const campaign = await createCampaign({
-      campaignId: "s1",
-      encounterId: "goblin-ambush",
-      rootSeed: 42,
-      store,
-      clock,
-      uuid: uuids(),
-    });
-    expect(campaign.state.world.campaignId).toBe("s1");
-    expect(campaign.state.world.rootSeed).toBe(42);
-    expect(encounterOf(campaign).encounterId).toBe("goblin-ambush");
+  it("seeds encounterId, grid and turnOrder — the three reduce never writes", async () => {
+    const campaign = await startedCampaign(baseInput());
+    expect(encounterOf(campaign).encounterId).toBe(ENCOUNTER_ID);
     expect(encounterOf(campaign).grid.width).toBe(12);
     expect(encounterOf(campaign).grid.height).toBe(12);
     expect(encounterOf(campaign).turnOrder).toEqual(["hero", "goblin-a", "goblin-b"]);
   });
 
-  it("resolves the encounter's scene card once at creation", async () => {
-    const campaign = await createCampaign({ ...baseInput(), encounterId: "goblin-ambush" });
-    expect(campaign.sceneEnglish).toContain("hillside");
-    expect(campaign.sceneEnglish).toBe(campaign.built.sceneEnglish);
-    expect(campaign.recentNarrations).toEqual([]);
+  it("resolves the encounter's scene card, reachable through builtOf", async () => {
+    const campaign = await startedCampaign(baseInput());
+    expect(builtOf(campaign).sceneEnglish).toContain("hillside");
+    expect(builtOf(campaign).encounterId).toBe(ENCOUNTER_ID);
+  });
+
+  it("mutates the campaign it was handed rather than returning a copy", async () => {
+    // `http.ts`'s registry and every live socket alias one `Campaign` object
+    // (CRITICAL-1). A `startEncounter` that returned a fresh record would
+    // leave all of them holding the encounter-less one.
+    const input = baseInput();
+    const created = await createCampaign(input);
+    const started = await startEncounter({
+      campaign: created,
+      encounterId: ENCOUNTER_ID,
+      store: input.store,
+      clock: input.clock,
+      uuid: input.uuid,
+    });
+    expect(started).toBe(created);
+    expect(created.state.encounter).not.toBeNull();
+  });
+
+  it("refuses a second encounter inside an open bracket, appending nothing", async () => {
+    // The fold guard runs before the append, so a refused event never
+    // reaches an append-only log — there is no correction event that could
+    // take it back out.
+    const input = baseInput();
+    const campaign = await startedCampaign(input);
+    await expect(
+      startEncounter({
+        campaign,
+        encounterId: ENCOUNTER_ID,
+        store: input.store,
+        clock: input.clock,
+        uuid: input.uuid,
+      }),
+    ).rejects.toThrow(/already open/);
+    expect(await input.store.readSince("s1", -1)).toHaveLength(2);
+    expect(campaign.nextSequence).toBe(2);
+  });
+
+  it("refuses an unknown encounter id before appending anything", async () => {
+    const input = baseInput();
+    const campaign = await createCampaign(input);
+    await expect(
+      startEncounter({
+        campaign,
+        encounterId: "not-a-real-encounter",
+        store: input.store,
+        clock: input.clock,
+        uuid: input.uuid,
+      }),
+    ).rejects.toThrow(UnknownEncounterError);
+    expect(await input.store.readSince("s1", -1)).toHaveLength(1);
+  });
+});
+
+describe("resolveEncounter", () => {
+  it("closes the bracket and keeps the world", async () => {
+    const input = baseInput();
+    const campaign = await startedCampaign(input);
+    campaign.state = reduce(campaign.state, {
+      eventId: "00000000-0000-4000-8000-00000000ffff",
+      campaignId: "s1",
+      sequence: campaign.nextSequence++,
+      timestamp: clock(),
+      type: "player_input",
+      payload: { clientMessageId: "c1" },
+    });
+
+    await resolveEncounter({
+      campaign,
+      outcome: "victory",
+      survivorIds: ["hero"],
+      store: input.store,
+      clock: input.clock,
+      uuid: input.uuid,
+    });
+
+    expect(campaign.state.encounter).toBeNull();
+    expect(campaign.built).toBeNull();
+    // Idempotency spans the campaign, not the fight: a resent action must
+    // still be recognized as a duplicate after the encounter it named ended.
+    expect(campaign.state.world.appliedClientMessageIds).toEqual(["c1"]);
+  });
+
+  it("takes the encounter id from the open encounter, not from the caller", async () => {
+    const input = baseInput();
+    const campaign = await startedCampaign(input);
+    await resolveEncounter({
+      campaign,
+      outcome: "victory",
+      survivorIds: ["hero"],
+      store: input.store,
+      clock: input.clock,
+      uuid: input.uuid,
+    });
+    const events = await input.store.readSince("s1", -1);
+    expect(events.at(-1)).toMatchObject({ type: "encounter_resolved" });
+    expect(events.at(-1)?.payload).toEqual({
+      encounterId: ENCOUNTER_ID,
+      outcome: "victory",
+      survivorIds: ["hero"],
+    });
+  });
+
+  it("refuses to close a bracket that was never opened", async () => {
+    const input = baseInput();
+    const campaign = await createCampaign(input);
+    await expect(
+      resolveEncounter({
+        campaign,
+        outcome: "victory",
+        survivorIds: [],
+        store: input.store,
+        clock: input.clock,
+        uuid: input.uuid,
+      }),
+    ).rejects.toThrow(/no encounter open/);
+    expect(await input.store.readSince("s1", -1)).toHaveLength(1);
   });
 });
 
@@ -97,18 +249,66 @@ describe("loadCampaign", () => {
   });
 
   it("rebuilds an identical projection from a log of exactly one event", async () => {
-    const store = createInMemoryEventStore();
-    const created = await createCampaign({
-      campaignId: "s1",
-      encounterId: "goblin-ambush",
-      rootSeed: 42,
-      store,
-      clock,
-      uuid: uuids(),
-    });
-    const loaded = await loadCampaign({ campaignId: "s1", store });
+    // One event is now a campaign that has not entered a fight yet, so this
+    // also pins that a campaign with no encounter reloads as one, rather
+    // than as a load failure.
+    const input = baseInput();
+    const created = await createCampaign(input);
+    const loaded = await loadCampaign({ campaignId: "s1", store: input.store });
     expect(loaded?.state).toEqual(created.state);
+    expect(loaded?.state.encounter).toBeNull();
+    expect(loaded?.built).toBeNull();
     expect(loaded?.nextSequence).toBe(created.nextSequence);
+  });
+
+  it("rebuilds the encounter's initial board from its own encounter_started", async () => {
+    // The load path's half of `initialEncounterState`: `reduce` cannot fill
+    // the bracket it opens, so this proves `loadCampaign` substitutes the
+    // rebuilt board rather than leaving a hole where the fold left one.
+    const input = baseInput();
+    const created = await startedCampaign(input);
+    const loaded = await loadCampaign({ campaignId: "s1", store: input.store });
+    expect(loaded?.state).toEqual(created.state);
+    expect(loaded?.built?.encounterId).toBe(ENCOUNTER_ID);
+    expect(loaded?.nextSequence).toBe(created.nextSequence);
+  });
+
+  it("reloads a campaign whose encounter has been resolved as encounter-less", async () => {
+    const input = baseInput();
+    const campaign = await startedCampaign(input);
+    await resolveEncounter({
+      campaign,
+      outcome: "victory",
+      survivorIds: ["hero"],
+      store: input.store,
+      clock: input.clock,
+      uuid: input.uuid,
+    });
+
+    const loaded = await loadCampaign({ campaignId: "s1", store: input.store });
+    expect(loaded?.state).toEqual(campaign.state);
+    expect(loaded?.state.encounter).toBeNull();
+    // Cleared in step with the projection, so `builtOf` cannot serve a board
+    // the fold says is gone.
+    expect(loaded?.built).toBeNull();
+    expect(loaded?.nextSequence).toBe(3);
+  });
+
+  it("throws on a log that does not start with campaign_started", async () => {
+    const store = createInMemoryEventStore();
+    await store.append("s1", [
+      {
+        eventId: "00000000-0000-4000-8000-000000000001",
+        campaignId: "s1",
+        sequence: 0,
+        timestamp: clock(),
+        type: "scene_changed",
+        payload: { kind: "turn_advanced" },
+      },
+    ]);
+    await expect(loadCampaign({ campaignId: "s1", store })).rejects.toThrow(
+      /does not start with campaign_started/,
+    );
   });
 
   // On a log of exactly one event (just the genesis), `events.slice(1)` folds
@@ -119,25 +319,19 @@ describe("loadCampaign", () => {
   // `nextSequence` derivation, which Task 9 and Task 14 depend on to place
   // their next append.
   it("rebuilds an identical projection by folding a non-empty tail", async () => {
-    const store = createInMemoryEventStore();
-    const created = await createCampaign({
-      campaignId: "s1",
-      encounterId: "goblin-ambush",
-      rootSeed: 42,
-      store,
-      clock,
-      uuid: uuids(),
-    });
+    const input = baseInput();
+    const created = await startedCampaign(input);
 
     const movedCombatants = encounterOf(created).combatants.map((each) =>
       each.combatantId === "goblin-a" ? { ...each, position: [7, 3] } : each,
     );
     const genUuid = uuids();
+    // Sequences 0 and 1 are the two genesis events, so a tail starts at 2.
     const tail: GameEvent[] = [
       {
         eventId: genUuid(),
         campaignId: "s1",
-        sequence: 1,
+        sequence: 2,
         timestamp: clock(),
         type: "state_delta_applied",
         payload: { combatants: movedCombatants },
@@ -145,15 +339,17 @@ describe("loadCampaign", () => {
       {
         eventId: genUuid(),
         campaignId: "s1",
-        sequence: 2,
+        sequence: 3,
         timestamp: clock(),
         type: "scene_changed",
         payload: { kind: "turn_advanced" },
       },
     ];
-    await store.append("s1", tail);
+    await input.store.append("s1", tail);
 
-    const loaded = await loadCampaign({ campaignId: "s1", store });
+    const loaded = await loadCampaign({ campaignId: "s1", store: input.store });
+    // `fold` is enough for a tail that opens no bracket — `created.state`
+    // already has the board `encounter_started` could not fold in.
     const expected = fold(created.state, tail);
 
     expect(loaded?.state).toEqual(expected);
@@ -162,12 +358,12 @@ describe("loadCampaign", () => {
     );
     expect(goblinA?.position).toEqual([7, 3]);
     expect(loaded?.state.encounter?.currentActorIndex).toBe(1);
-    expect(loaded?.nextSequence).toBe(3);
+    expect(loaded?.nextSequence).toBe(4);
   });
 
   it("rebuilds the narration window from the log tail on load", async () => {
     const store = createInMemoryEventStore();
-    const campaign = await createCampaign({ ...baseInput(), store, encounterId: "goblin-ambush" });
+    const campaign = await startedCampaign({ ...baseInput(), store });
 
     for (const text of ["ראשון.", "שני.", "שלישי."]) {
       await store.append(campaign.state.world.campaignId, [
@@ -185,12 +381,12 @@ describe("loadCampaign", () => {
     const loaded = await loadCampaign({ campaignId: campaign.state.world.campaignId, store });
     expect(loaded?.recentNarrations).toEqual(["שני.", "שלישי."]);
     expect(loaded?.recentNarrations).toHaveLength(NARRATION_WINDOW);
-    expect(loaded?.sceneEnglish).toBe(campaign.sceneEnglish);
+    expect(loaded?.built?.sceneEnglish).toBe(builtOf(campaign).sceneEnglish);
   });
 
   it("tolerates a narrative_emitted payload missing source and promptVersion", async () => {
     const store = createInMemoryEventStore();
-    const campaign = await createCampaign({ ...baseInput(), store, encounterId: "goblin-ambush" });
+    const campaign = await startedCampaign({ ...baseInput(), store });
 
     const events: GameEvent[] = [
       {
@@ -243,15 +439,7 @@ describe("loadCampaign", () => {
 
 describe("worldFor", () => {
   it("pairs the projection with a CombatWorld the validator accepts", async () => {
-    const store = createInMemoryEventStore();
-    const campaign = await createCampaign({
-      campaignId: "s1",
-      encounterId: "goblin-ambush",
-      rootSeed: 42,
-      store,
-      clock,
-      uuid: uuids(),
-    });
+    const campaign = await startedCampaign(baseInput());
     const world = worldFor(campaign);
     expect(world.combatants).toEqual(encounterOf(campaign).combatants);
     expect(world.grid).toEqual(encounterOf(campaign).grid);

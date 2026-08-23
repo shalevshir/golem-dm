@@ -15,7 +15,7 @@ export const GameEvent = z.object({
   type: z.enum([
     "player_input", "intent_classified", "action_proposed", "action_validated",
     "action_rejected", "dice_rolled", "state_delta_applied", "narrative_emitted",
-    "scene_changed", "session_snapshot",
+    "scene_changed",
     "campaign_started", "encounter_started", "encounter_resolved",
   ]),
   /** English machine payload. Never store Hebrew here except narrative_emitted. */

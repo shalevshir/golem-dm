@@ -43,9 +43,13 @@ describe.skipIf(url === undefined || url === "")("replay round-trip over Postgre
       campaignId,
       sequence: 0,
       timestamp: "2026-08-22T10:00:00.000Z",
-      // `reduce` treats session_snapshot as a no-op, which is exactly what
-      // makes "fold from snapshot plus events equals fold from zero" hold.
-      type: "session_snapshot",
+      // `reduce` treats campaign_started as a no-op — the world it declares
+      // is rebuilt from its payload before the fold begins rather than folded
+      // out of it — which is exactly what makes "fold from snapshot plus
+      // events equals fold from zero" hold. `genesisState` above is that
+      // rebuilt starting state, standing in for the one
+      // `apps/server`'s `loadCampaign` builds from this event's `rootSeed`.
+      type: "campaign_started",
       payload: {},
     };
     // `state_delta_applied`'s payload is `StateDeltaAppliedPayload` in

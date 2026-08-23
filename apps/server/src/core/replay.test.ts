@@ -18,7 +18,7 @@ import type {
 } from "@ai-dm/schemas";
 import { SNAPSHOT_EVERY, handleCommand } from "./pipeline.js";
 import type { TurnPorts } from "./pipeline.js";
-import { createCampaign, loadCampaign } from "./campaign.js";
+import { createCampaign, loadCampaign, startEncounter } from "./campaign.js";
 import type { Campaign } from "./campaign.js";
 
 const CLOCK = (): string => "2026-08-19T10:00:00.000Z";
@@ -125,14 +125,7 @@ async function playRounds(
 ): Promise<Campaign> {
   const campaignId = options.campaignId ?? "s1";
   const rootSeed = options.rootSeed ?? 42;
-  const campaign = await createCampaign({
-    campaignId,
-    encounterId: ENCOUNTER_ID,
-    rootSeed,
-    store,
-    clock: CLOCK,
-    uuid: uuids(),
-  });
+  const campaign = await startedCampaign(store, { campaignId, rootSeed });
   const ports = portsWith(store);
 
   for (let round = 0; round < rounds; round += 1) {
@@ -142,29 +135,46 @@ async function playRounds(
 }
 
 /**
- * The genesis `CampaignState` a client must fold from — built from its own
- * throwaway store and its own uuid counter, so it never shares an object
- * reference with anything `playRounds` produced.
+ * A campaign with its first encounter open: `createCampaign` then
+ * `startEncounter`, sequences 0 and 1, the pair `POST /campaigns` writes.
+ */
+async function startedCampaign(store: EventStore, options: PlayOptions = {}): Promise<Campaign> {
+  const ports = { store, clock: CLOCK, uuid: uuids() };
+  const campaign = await createCampaign({
+    campaignId: options.campaignId ?? "s1",
+    rootSeed: options.rootSeed ?? 42,
+    ...ports,
+  });
+  return startEncounter({ campaign, encounterId: ENCOUNTER_ID, ...ports });
+}
+
+/**
+ * The `CampaignState` a client must fold from, and the sequence it is the
+ * state *after* — built from its own throwaway store and its own uuid
+ * counter, so it never shares an object reference with anything `playRounds`
+ * produced.
  *
  * C-26 / C-35: `reduce` never writes `campaignId`, `rootSeed`, `encounterId`,
  * `grid` or `turnOrder`, and Task 8 removed the `state` field that used to
  * ride along in the sequence-0 payload (keeping it aliased live campaign
  * state into the store by reference). The only remaining correct source for
  * "the state `fold` starts from" is the campaign API itself: `createCampaign`
- * builds exactly that state, the same way `loadCampaign` rebuilds it before
- * folding the rest of a log on top.
+ * plus `startEncounter` build exactly that state, the same way
+ * `loadCampaign` rebuilds it before folding the rest of a log on top.
+ *
+ * `sequence` is returned rather than assumed because that starting point is
+ * no longer sequence 0. Genesis is two events, and the second of them —
+ * `encounter_started` — is one `fold` cannot apply: the initial board comes
+ * from the encounter catalogue, which `@ai-dm/schemas` may never import
+ * (invariant 5), so `reduce` deliberately leaves it as a guard-only no-op
+ * and `campaign.ts` substitutes the board. Every fold below therefore starts
+ * from *after* this sequence, not after sequence 0.
  */
-async function genesisStateFor(options: PlayOptions = {}): Promise<CampaignState> {
-  const scratch = createInMemoryEventStore();
-  const campaign = await createCampaign({
-    campaignId: options.campaignId ?? "s1",
-    encounterId: ENCOUNTER_ID,
-    rootSeed: options.rootSeed ?? 42,
-    store: scratch,
-    clock: CLOCK,
-    uuid: uuids(),
-  });
-  return campaign.state;
+async function genesisStateFor(
+  options: PlayOptions = {},
+): Promise<{ state: CampaignState; sequence: number }> {
+  const campaign = await startedCampaign(createInMemoryEventStore(), options);
+  return { state: campaign.state, sequence: campaign.nextSequence - 1 };
 }
 
 describe("replay properties", () => {
@@ -200,11 +210,16 @@ describe("replay properties", () => {
     // one a `readFileSync`) for no benefit — hoisted out once instead.
     const genesis = await genesisStateFor();
 
-    for (const cutEvent of events) {
+    // Cuts start at `genesis.sequence`, not at 0. The two events at or below
+    // it are the campaign's own genesis pair, which `genesis.state` already
+    // accounts for — folding either of them onto it would be applying them
+    // twice, and `encounter_started` says so out loud by throwing on an
+    // already-open bracket.
+    for (const cutEvent of events.filter((each) => each.sequence >= genesis.sequence)) {
       const k = cutEvent.sequence;
       const cached = fold(
-        genesis,
-        events.filter((each) => each.sequence > 0 && each.sequence <= k),
+        genesis.state,
+        events.filter((each) => each.sequence > genesis.sequence && each.sequence <= k),
       );
       const tail = events.filter((each) => each.sequence > k);
       const replayed = fold(cached, tail);
@@ -308,13 +323,13 @@ describe("snapshots", () => {
     // work would undo that fix, so this drops the cast entirely.
     const initial = await genesisStateFor();
     const upToSnapshot = events.filter(
-      (each) => each.sequence > 0 && each.sequence <= snapshot.sequence,
+      (each) => each.sequence > initial.sequence && each.sequence <= snapshot.sequence,
     );
 
     // The load-bearing assertion: fold the log up to the snapshot's sequence
     // and you must get the snapshot, byte for byte. A snapshot that
     // disagrees with the log is a fork, and reconnect would hand a client a
     // false world.
-    expect(fold(initial, upToSnapshot)).toEqual(snapshot.state);
+    expect(fold(initial.state, upToSnapshot)).toEqual(snapshot.state);
   });
 });

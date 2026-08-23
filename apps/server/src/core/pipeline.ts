@@ -44,7 +44,7 @@ import type {
   NarrationSource,
   ServerFrame,
 } from "@ai-dm/schemas";
-import { encounterOf, NARRATION_WINDOW, worldFor } from "./campaign.js";
+import { builtOf, encounterOf, NARRATION_WINDOW, worldFor } from "./campaign.js";
 import type { Campaign } from "./campaign.js";
 
 /** `apps/server/CLAUDE.md`: snapshot every 50 events. */
@@ -391,9 +391,9 @@ export async function* handleCommand(
       actorId,
       effect,
       combatants: encounterOf(campaign).combatants,
-      statBlocks: campaign.built.statBlocks,
+      statBlocks: builtOf(campaign).statBlocks,
       conditionNamesHebrew: ports.conditionNamesHebrew,
-      sceneEnglish: campaign.sceneEnglish,
+      sceneEnglish: builtOf(campaign).sceneEnglish,
       recentNarrations: campaign.recentNarrations,
     });
 
@@ -486,7 +486,7 @@ export async function* handleCommand(
    */
   async function* enemyTurn(actorId: string): AsyncIterable<ServerFrame> {
     const world = worldFor(campaign);
-    const statBlock = campaign.built.statBlocks.get(actorId);
+    const statBlock = builtOf(campaign).statBlocks.get(actorId);
     const deadline = Date.now() + ports.turnTimeoutMs;
     const controller = new AbortController();
     const timer = setTimeout(
@@ -555,7 +555,7 @@ export async function* handleCommand(
       actorId,
       turn: proposal.turn,
       plan: proposal.plan,
-      context: { statBlocks: campaign.built.statBlocks },
+      context: { statBlocks: builtOf(campaign).statBlocks },
       rng: seeded(seed),
     });
 
@@ -622,9 +622,14 @@ export async function* handleCommand(
    * every event frame, so any of these that does not re-push leaves the board
    * inert with no way back short of a reconnect.
    *
-   * Silent when it is a hostile's turn, when the actor is missing, or when the
-   * encounter has no stat block for them — none of those are error conditions
-   * for the client, they simply mean there is nothing to offer.
+   * Silent when no encounter is open, when it is a hostile's turn, when the
+   * actor is missing, or when the encounter has no stat block for them — none
+   * of those are error conditions for the client, they simply mean there is
+   * nothing to offer. The first of those is why this reads
+   * `campaign.state.encounter` rather than going through `encounterOf`: a
+   * campaign between fights has no board to offer affordances on, and a
+   * `join` there must still answer with its `campaign_state` frame rather
+   * than throw.
    */
   // Not `async function*`: unlike `emit`/`runEnemyTurns`, nothing here
   // awaits — `affordancesFor` is a pure, synchronous call into the rules
@@ -633,14 +638,15 @@ export async function* handleCommand(
   // `yield*`-ing it from the async `handleCommand` generator works the same
   // either way.
   function* playerAffordances(): Iterable<ServerFrame> {
-    const encounter = encounterOf(campaign);
+    const encounter = campaign.state.encounter;
+    if (encounter === null) return;
     const actorId = encounter.turnOrder[encounter.currentActorIndex];
     if (actorId === undefined) return;
 
     const actor = encounter.combatants.find((each) => each.combatantId === actorId);
     if (actor === undefined || actor.faction !== "party" || actor.status !== "alive") return;
 
-    const statBlock = campaign.built.statBlocks.get(actorId);
+    const statBlock = builtOf(campaign).statBlocks.get(actorId);
     if (statBlock === undefined) return;
 
     // Review round 1, item 5: the spread comes first and the explicit
@@ -751,6 +757,28 @@ export async function* handleCommand(
         // named may already have moved on to someone else.
         if (campaign.state.world.appliedClientMessageIds.includes(command.clientMessageId)) return;
 
+        // No open bracket, so there is no turn to take. `not_your_turn`
+        // rather than a new code: the situation is the one that code already
+        // covers — a click the affordance frame does not sanction, which the
+        // client deliberately does not surface (`ErrorBanner.tsx`) — and it
+        // is already the answer a player gets for acting after a fight has
+        // ended (`state/conclusion.ts`, C-37). A closed bracket is the same
+        // moment, one event later.
+        //
+        // Refused with a frame rather than `encounterOf`'s throw because this
+        // is the one place a closed bracket is an ordinary client mistake
+        // instead of a corrupt log: nothing else on the turn path is
+        // reachable without a board, but a socket can send this at any time.
+        if (campaign.state.encounter === null) {
+          yield {
+            type: "error",
+            clientMessageId: command.clientMessageId,
+            code: "not_your_turn",
+            message: "No encounter is open in this campaign.",
+          };
+          return;
+        }
+
         const encounter = encounterOf(campaign);
         const currentActorId = encounter.turnOrder[encounter.currentActorIndex];
         if (currentActorId !== command.actorId) {
@@ -833,7 +861,7 @@ export async function* handleCommand(
           actorId: command.actorId,
           turn: command.turn,
           plan: validation.plan,
-          context: { statBlocks: campaign.built.statBlocks },
+          context: { statBlocks: builtOf(campaign).statBlocks },
           rng: seeded(seed),
         });
 

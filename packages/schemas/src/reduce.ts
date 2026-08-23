@@ -109,27 +109,59 @@ export function reduce(state: CampaignState, event: GameEvent): CampaignState {
       return { ...state, encounter: { ...encounter, currentActorIndex, round, combatants } };
     }
 
+    // Opens the bracket — but only by refusing to open a second one. What
+    // the bracket CONTAINS cannot be folded: an encounter's initial board is
+    // rebuilt from its `encounterId` through the encounter catalogue, which
+    // lives downstream in `apps/server` and can never be imported here
+    // (invariant 5). So `apps/server/src/core/campaign.ts` runs this guard,
+    // then substitutes the rebuilt board — exactly as it already rebuilds
+    // genesis rather than reading a persisted `state` field. The check still
+    // belongs here, because `state.encounter` is this function's field and a
+    // strictly non-overlapping bracket is what makes it a nullable field
+    // rather than a map.
+    case "encounter_started": {
+      if (state.encounter !== null) {
+        throw new Error(
+          `encounter_started at sequence ${String(event.sequence)} with encounter ` +
+            `${state.encounter.encounterId} already open`,
+        );
+      }
+      return state;
+    }
+
+    // Closes it, and keeps the world: `appliedClientMessageIds` outlives the
+    // fight, while the combatants, their HP and their positions leave with
+    // it. Whatever must survive travels in the payload and, from §4.7's step
+    // 5 onward, into declared world-state effects.
+    //
+    // Closing a bracket that was never open is the same corrupt-log class as
+    // a combat event outside one, and throws for the same reason: the
+    // resulting projection would be indistinguishable from a legitimate one.
+    case "encounter_resolved": {
+      if (state.encounter === null) {
+        throw new Error(
+          `encounter_resolved at sequence ${String(event.sequence)} with no encounter open`,
+        );
+      }
+      return { ...state, encounter: null };
+    }
+
     // Recorded for replay, audit and 7b's rejection dataset, but they change
     // no projected field. Listed explicitly rather than caught by `default` so
     // adding a `GameEvent` type fails the exhaustiveness check here.
+    //
+    // `campaign_started` is a no-op for the same reason `encounter_started`
+    // cannot fill its own bracket: the world it declares is rebuilt from its
+    // payload before the fold begins, not folded out of it. That is what
+    // keeps "fold from a snapshot plus events equals fold from the campaign's
+    // starting state" true (C-26).
+    case "campaign_started":
     case "intent_classified":
     case "action_proposed":
     case "action_validated":
     case "action_rejected":
     case "dice_rolled":
     case "narrative_emitted":
-    case "session_snapshot":
-      return state;
-
-    // Declared ahead of the projection split that gives them meaning: the
-    // next task moves the combat fields under `state.encounter`, and two of
-    // these three become the events that open and close that bracket.
-    // `campaign_started` stays a no-op even then — like genesis today, the
-    // world it declares is rebuilt from its payload before the fold begins
-    // rather than folded out of it.
-    case "campaign_started":
-    case "encounter_started":
-    case "encounter_resolved":
       return state;
   }
 }

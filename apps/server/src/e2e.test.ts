@@ -448,7 +448,22 @@ describe("end to end", () => {
     expect(new Set(seen).size).toBe(seen.length);
 
     socket.close();
-  });
+
+    // An explicit timeout, well above vitest's 5s default, because this test
+    // plays a whole fight over a real socket and polls the store every 10ms
+    // for each of up to `MAX_HERO_COMMANDS` rounds. How long that takes is
+    // set by the dice, not by anything under test: the campaign state split
+    // moved every turn's seed by one sequence (genesis became two events, so
+    // `seedFor(rootSeed, nextSequence)` is evaluated one higher throughout),
+    // and this fight went from 6 rounds to 10 as a result. Deterministic
+    // either way, but 5s no longer fits it under a parallel `pnpm test`.
+    //
+    // 5s was never a bound anyone chose for this test; it only ever fit by
+    // accident. It also made `waitForProjection`'s own diagnostic — the one
+    // that names the round, the actor and every combatant's HP —
+    // unreachable past the first round or two, since vitest's timer would
+    // fire first and report nothing but a line number.
+  }, 30_000);
 
   // C-25: the brief's two reconnect assertions
   // (`live.length > cut` — a length always exceeds a sequence index — and

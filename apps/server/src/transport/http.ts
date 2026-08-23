@@ -5,7 +5,7 @@
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import type { EventStore } from "@ai-dm/memory";
-import { createCampaign, loadCampaign } from "../core/campaign.js";
+import { createCampaign, loadCampaign, startEncounter } from "../core/campaign.js";
 import type { Campaign } from "../core/campaign.js";
 import { encounterCatalogue, UnknownEncounterError } from "../encounters/index.js";
 
@@ -75,8 +75,30 @@ export function createCampaignRegistry(input: CampaignRegistryInput): CampaignRe
       const campaignId = input.uuid();
       const campaign = await createCampaign({
         campaignId,
-        encounterId,
         rootSeed: input.seed(),
+        store: input.store,
+        clock: input.clock,
+        uuid: input.uuid,
+      });
+      // Creating a campaign and entering its first fight are two events and
+      // two calls, but one request: the client-visible flow is unchanged, so
+      // a campaign that exists always has a board. §4.7's step 4 is what
+      // separates them — an exploration mode gives the gap between these two
+      // lines somewhere to live, and this call moves out to whatever starts
+      // an encounter then. `startEncounter` mutates `campaign` in place, so
+      // `live` holds the started one either way; it is awaited before the set
+      // so a half-started campaign is never reachable through `get`.
+      //
+      // `buildEncounterById` runs inside `startEncounter`, which is what
+      // keeps `UnknownEncounterError` reaching the route's 404 branch. The
+      // sequence-0 `campaign_started` is already in the log when it throws:
+      // an unknown id therefore leaves an encounter-less campaign behind
+      // rather than nothing at all. Harmless — it is unreachable, since its
+      // id was never returned to anyone — and the log is append-only, so
+      // there is nothing to roll back.
+      await startEncounter({
+        campaign,
+        encounterId,
         store: input.store,
         clock: input.clock,
         uuid: input.uuid,
