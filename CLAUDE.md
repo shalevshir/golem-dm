@@ -41,7 +41,7 @@ docker compose -f apps/server/docker-compose.yml up -d   # local Postgres+pgvect
 - Node 22, ESM only (`"type": "module"`), `.js` extensions in relative imports.
 - Tests colocated as `*.test.ts`, run with Vitest. New rules-engine code requires golden tests (see its CLAUDE.md).
 - camelCase in TS/JSON; DB columns snake_case.
-- Decisions live in `docs/decisions/` as ADRs. 0001 (2024/SRD 5.2.1), 0002 (solo), 0003 (spatial) are all ACCEPTED — check status before assuming anything is still open.
+- Decisions live in `docs/decisions/` as ADRs. 0001 (2024/SRD 5.2.1), 0002 (solo), 0003 (spatial), 0004 (campaign vs. session identity) are all ACCEPTED — check status before assuming anything is still open.
 - Full roadmap and architecture rationale: `PROJECT_PLAN.md`.
 - **Before writing or changing any 5e rule, read `RULES_REFERENCE.md`.** It maps every implemented rule to its SRD 5.2.1 source and its code location, and lists the places where 2024 differs from 2014. Verify against it rather than from memory — several 2024 rules (contests removed, unified exhaustion, surprise) differ from what recall suggests. For anything it doesn't cover, query the SRD NotebookLM notebook `3a0d4f39-93c2-48ee-b1d1-258c7f7583ab` via the NotebookLM MCP (`notebook_query`) — full SRD with citations. Dev-time only; never a runtime dependency (PROJECT_PLAN.md §4.1).
 
