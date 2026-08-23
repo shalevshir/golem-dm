@@ -5,6 +5,25 @@ on:
 jobs:
   ci:
     runs-on: ubuntu-latest
+    # The image apps/server/docker-compose.yml already pins, with the same
+    # credentials, so a contributor's local database and CI's are the same
+    # thing. Without this the two tests that prove the event log is durable
+    # would skip on every push.
+    services:
+      postgres:
+        image: pgvector/pgvector:pg17
+        env:
+          POSTGRES_USER: aidm
+          POSTGRES_PASSWORD: aidm
+          POSTGRES_DB: aidm
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U aidm"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      DATABASE_URL: postgres://aidm:aidm@localhost:5432/aidm
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -13,4 +32,9 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm typecheck
       - run: pnpm lint
+      # drizzle.config.ts reads the same DATABASE_URL, so this needs no
+      # configuration of its own. Applied explicitly rather than at server
+      # boot: a process that rewrites its own schema on start is hard to
+      # reason about during a rollout.
+      - run: pnpm --filter @ai-dm/memory db:migrate
       - run: pnpm test

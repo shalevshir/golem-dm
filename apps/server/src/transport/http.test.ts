@@ -1,7 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
 import Fastify from "fastify";
+import { createInMemoryEventStore } from "@ai-dm/memory";
+import type { EventStore } from "@ai-dm/memory";
 import { EncounterCatalogue } from "@ai-dm/schemas";
-import { createInMemoryEventStore } from "../core/event-store.js";
 import { encounterCatalogue } from "../encounters/index.js";
 import { createSessionRegistry, registerHttpRoutes } from "./http.js";
 import type { SessionRegistry } from "./http.js";
@@ -132,6 +133,49 @@ describe("SessionRegistry", () => {
     expect(registry.tryBegin("s2")).toBe(true);
     registry.end("s1");
     expect(registry.tryBegin("s2")).toBe(false);
+  });
+});
+
+describe("SessionRegistry.get", () => {
+  it("folds a session once when two joins race", async () => {
+    const { registry, store } = appWith();
+    const created = await registry.create("goblin-ambush");
+    const sessionId = created.state.sessionId;
+
+    // A second registry over the same store is what a restarted process
+    // looks like: nothing in `live`, everything in the log. The gate holds
+    // the fold open so both `get` calls are genuinely in flight at once —
+    // which against Postgres is just a network round trip, and `join` sits
+    // outside the session lock by design (ws.ts).
+    let reads = 0;
+    let release = (): void => {};
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const slow: EventStore = {
+      ...store,
+      async readSince(id, afterSequence) {
+        reads += 1;
+        await gate;
+        return store.readSince(id, afterSequence);
+      },
+    };
+    const restarted = createSessionRegistry({
+      store: slow,
+      uuid: () => "00000000-0000-4000-8000-000000000099",
+      clock: () => "2026-08-19T10:00:00.000Z",
+      seed: () => 42,
+    });
+
+    const both = Promise.all([restarted.get(sessionId), restarted.get(sessionId)]);
+    release();
+    const [first, second] = await both;
+
+    expect(first).not.toBeNull();
+    // One object, not two: two Sessions would each carry their own
+    // nextSequence and both keep appending to the same log.
+    expect(first).toBe(second);
+    expect(reads).toBe(1);
   });
 });
 

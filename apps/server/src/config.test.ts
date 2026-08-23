@@ -61,4 +61,21 @@ describe("loadConfig", () => {
       expect.unreachable("loadConfig should have thrown on the invalid PORT");
     }
   });
+
+  it("reads DATABASE_URL when set", () => {
+    expect(
+      loadConfig({ ANTHROPIC_API_KEY: "k", DATABASE_URL: "postgres://u:p@h:5432/db" }).databaseUrl,
+    ).toBe("postgres://u:p@h:5432/db");
+  });
+
+  it("treats a blank DATABASE_URL as absent", () => {
+    // `.env.example` ships keys blank, and a `.env` loader materialises
+    // `DATABASE_URL=` as "" rather than as missing. Blank must mean
+    // in-memory, not a connection attempt to the empty string.
+    expect(loadConfig({ ANTHROPIC_API_KEY: "k", DATABASE_URL: "" }).databaseUrl).toBeUndefined();
+  });
+
+  it("leaves databaseUrl undefined when unset", () => {
+    expect(loadConfig({ ANTHROPIC_API_KEY: "k" }).databaseUrl).toBeUndefined();
+  });
 });

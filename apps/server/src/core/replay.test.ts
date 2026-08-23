@@ -6,6 +6,8 @@ import { describe, expect, it } from "vitest";
 import { validateExecuteTurn } from "@ai-dm/rules-engine";
 import type { TacticalAgent } from "@ai-dm/agents";
 import { createDeterministicNarrative } from "@ai-dm/agents";
+import { createInMemoryEventStore } from "@ai-dm/memory";
+import type { EventStore } from "@ai-dm/memory";
 import { fold } from "@ai-dm/schemas";
 import type {
   ClientMessage,
@@ -14,8 +16,6 @@ import type {
   ServerFrame,
   SessionState,
 } from "@ai-dm/schemas";
-import { createInMemoryEventStore } from "./event-store.js";
-import type { EventStore } from "./event-store.js";
 import { SNAPSHOT_EVERY, handleCommand } from "./pipeline.js";
 import type { TurnPorts } from "./pipeline.js";
 import { createSession, loadSession } from "./session.js";
@@ -293,9 +293,11 @@ describe("snapshots", () => {
     // At 5 rounds (81 events total), sequence SNAPSHOT_EVERY (50) is the
     // ONLY boundary crossed, so `latestSnapshot` and "every snapshot point"
     // coincide today — but `latestSnapshot` only ever returns the newest
-    // one (`event-store.ts`), so nothing else pins that coincidence. Pin it
-    // explicitly rather than let a later round-count change silently narrow
-    // this test to whatever the last boundary happens to be, unnoticed.
+    // one (guaranteed by `@ai-dm/memory`'s conformance suite,
+    // `event-store/contract.ts`), so nothing else pins that coincidence.
+    // Pin it explicitly rather than let a later round-count change silently
+    // narrow this test to whatever the last boundary happens to be,
+    // unnoticed.
     expect(snapshot.sequence).toBe(SNAPSHOT_EVERY);
 
     // C-22 / C-35: get the fold's starting state from the session API, not

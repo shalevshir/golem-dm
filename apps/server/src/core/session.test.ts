@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
+import { createInMemoryEventStore } from "@ai-dm/memory";
 import { fold } from "@ai-dm/schemas";
 import type { GameEvent } from "@ai-dm/schemas";
-import { createInMemoryEventStore } from "./event-store.js";
 import { createSession, loadSession, worldFor } from "./session.js";
 import type { CreateSessionInput } from "./session.js";
 

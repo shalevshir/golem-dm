@@ -10,6 +10,8 @@ import {
   DEFAULT_MODEL_ROUTING,
   NARRATIVE_PROMPT_VERSION,
 } from "@ai-dm/agents";
+import { createInMemoryEventStore, EventStoreUnavailableError } from "@ai-dm/memory";
+import type { EventStore } from "@ai-dm/memory";
 import { DiceRolledPayload, NarrativeEmittedPayload } from "@ai-dm/schemas";
 import type {
   ClientMessage,
@@ -18,10 +20,13 @@ import type {
   ServerFrame,
   SessionState,
 } from "@ai-dm/schemas";
-import { createInMemoryEventStore } from "./event-store.js";
-import type { EventStore } from "./event-store.js";
 import { SNAPSHOT_EVERY, handleCommand } from "./pipeline.js";
-import type { NarrativeTurnMetrics, TacticalTurnMetrics, TurnPorts } from "./pipeline.js";
+import type {
+  NarrativeTurnMetrics,
+  SnapshotFailureRecord,
+  TacticalTurnMetrics,
+  TurnPorts,
+} from "./pipeline.js";
 import { createSession, loadSession } from "./session.js";
 import type { Session } from "./session.js";
 
@@ -702,6 +707,35 @@ describe("handleCommand — structured action", () => {
     expect(session.nextSequence).toBe(1);
     expect((await store.readSince("s1", 0)).map((each) => each.sequence)).toEqual([1]);
   });
+
+  // The third class, new with a durable store: a dropped connection, a lock
+  // or statement timeout, a deadlock, or a stored row that no longer parses.
+  // Unhandled it reaches ws.ts's catch-all, which sends internal_error and
+  // restores nothing — the C-1 soft-lock by a third route.
+  it("turns an EventStoreUnavailableError from the store into an internal_error frame", async () => {
+    const store = createInMemoryEventStore();
+    const session = await freshSession(store);
+    const failing: EventStore = {
+      ...store,
+      append: () => Promise.reject(new EventStoreUnavailableError("append", new Error("boom"))),
+    };
+
+    const frames = await drain(handleCommand(session, dodge("hero"), portsWith(failing)));
+
+    expect(frames[0]).toEqual({
+      type: "error",
+      clientMessageId: "c1",
+      code: "internal_error",
+      message: expect.any(String) as string,
+    });
+    const last = frames.at(-1);
+    expect(last?.type).toBe("turn_affordances");
+    expect(last?.type === "turn_affordances" && last.actorId).toBe("hero");
+    expect(frames).toHaveLength(2);
+    // Append-and-yield stayed one operation: the failed append never bumped
+    // nextSequence.
+    expect(session.nextSequence).toBe(1);
+  });
 });
 
 describe("handleCommand — snapshot cadence", () => {
@@ -711,8 +745,9 @@ describe("handleCommand — snapshot cadence", () => {
   // session's own sequence counter so the hero's dodge turn's six events
   // land on 45..50 and the last one crosses the boundary.
   // `EventStore.append`'s only invariant is "no duplicate sequence for this
-  // session" (event-store.ts) — it does not require a contiguous log — so
-  // this is a legitimate way to reach the boundary without a 44-turn setup.
+  // session" (`@ai-dm/memory`'s conformance suite, `event-store/contract.ts`)
+  // — it does not require a contiguous log — so this is a legitimate way to
+  // reach the boundary without a 44-turn setup.
   //
   // C-18: the hero's turn is immediately followed by the hostile sweep
   // (Task 10), which keeps advancing `session.state` past sequence 50
@@ -740,6 +775,60 @@ describe("handleCommand — snapshot cadence", () => {
 
     const snapshot = await store.latestSnapshot("s1");
     expect(snapshot).toEqual({ sequence: SNAPSHOT_EVERY, state: stateAtSnapshot });
+  });
+
+  // The sibling of the two `internal_error` cases above, and the reason they
+  // are not enough: the in-memory store's `putSnapshot` can never reject, so
+  // until there was a Postgres one this `await` sat inside the turn's `try`
+  // harmlessly. A transient database error on the snapshot write must not
+  // end a turn whose events are already committed — if the crossing event is
+  // the closing `scene_changed`, control has already passed to a hostile,
+  // `playerAffordances()` returns silently, and the client is left with an
+  // `internal_error` and an inert board that a rejoin cannot repair.
+  it("completes the turn when the snapshot write fails", async () => {
+    const store = createInMemoryEventStore();
+    const session = await freshSession(store);
+    // Same fast-forward as the case above: the hero's six events land on
+    // 45..50 and the last one crosses the boundary, so `putSnapshot` is
+    // reached exactly once.
+    session.nextSequence = SNAPSHOT_EVERY - 5;
+    const failures: SnapshotFailureRecord[] = [];
+    const failing: EventStore = {
+      ...store,
+      putSnapshot: () =>
+        Promise.reject(new EventStoreUnavailableError("putSnapshot", new Error("boom"))),
+    };
+    const ports: TurnPorts = {
+      ...portsWith(failing),
+      metrics: {
+        recordTacticalTurn: () => undefined,
+        recordNarrativeTurn: () => undefined,
+        recordSnapshotFailure(record) {
+          failures.push(record);
+        },
+      },
+    };
+
+    const frames = await drain(handleCommand(session, dodge("hero"), ports));
+
+    // No error frame at all — a cache write may not end a turn.
+    expect(frames.filter((each) => each.type === "error")).toEqual([]);
+    // And the turn ran all the way through the hostile sweep back to the
+    // player, which is what a soft-locked board would not do.
+    const last = frames.at(-1);
+    expect(last?.type).toBe("turn_affordances");
+    expect(last?.type === "turn_affordances" && last.actorId).toBe("hero");
+    expect(session.state.round).toBe(2);
+    expect(session.state.currentActorIndex).toBe(0);
+    // The log is complete past the crossing event: the append half of the
+    // turn never depended on the snapshot half.
+    expect((await store.readSince("s1", SNAPSHOT_EVERY - 1)).map((each) => each.sequence)).toContain(
+      SNAPSHOT_EVERY,
+    );
+    // Contained, not swallowed: the operator still learns the store rejected
+    // a write, exactly once, for the sequence that failed.
+    expect(failures.map((each) => each.sequence)).toEqual([SNAPSHOT_EVERY]);
+    expect(failures[0]?.error).toBeInstanceOf(EventStoreUnavailableError);
   });
 });
 

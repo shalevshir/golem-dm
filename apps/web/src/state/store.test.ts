@@ -471,4 +471,53 @@ describe("combatLog", () => {
     client = applyFrame(client, { type: "session_state", sequence: 12, snapshot: genesis });
     expect(client.combatLog).toEqual([]);
   });
+
+  // The counterpart to the test above, and what makes a reload able to keep
+  // its log: a `session_state` at exactly the sequence the client has already
+  // folded is not a move to a new moment, it is the same moment restated.
+  // A reload rejoins with no `resumeFrom`, so the server answers with its
+  // live projection at the newest sequence -- and a client whose restored
+  // sequence matches it holds a log that describes precisely that state.
+  it("keeps combatLog and narrative when a session_state restates the sequence already folded", () => {
+    let client = applyFrame(initialClientState, {
+      type: "session_state",
+      sequence: 0,
+      snapshot: genesis,
+    });
+    client = applyFrame(client, {
+      type: "event",
+      event: event(1, "action_validated", {
+        actorId: "hero",
+        turn: {
+          actorId: "hero",
+          mainAction: { actionType: "dodge" },
+          tacticalRationaleEnglish: "Test fixture.",
+        },
+        source: "human",
+      }),
+    });
+    client = applyFrame(client, { type: "narrative_token", streamId: "n1", text: "השומר מתגונן." });
+    expect(client.combatLog).toHaveLength(1);
+
+    client = applyFrame(client, { type: "session_state", sequence: 1, snapshot: genesis });
+    expect(client.combatLog).toHaveLength(1);
+    expect(client.narrative).toBe("השומר מתגונן.");
+    expect(client.narrativeStreamId).toBe("n1");
+  });
+
+  // The other half of the same rule: a snapshot at a sequence the client
+  // never reached describes a board that has moved on, so the narration of
+  // the turn it holds is as stale as the log -- both go.
+  it("clears the narrative alongside combatLog when a session_state moves the sequence", () => {
+    let client = applyFrame(initialClientState, {
+      type: "session_state",
+      sequence: 0,
+      snapshot: genesis,
+    });
+    client = applyFrame(client, { type: "narrative_token", streamId: "n1", text: "השומר מתגונן." });
+
+    client = applyFrame(client, { type: "session_state", sequence: 12, snapshot: genesis });
+    expect(client.narrative).toBe("");
+    expect(client.narrativeStreamId).toBeNull();
+  });
 });

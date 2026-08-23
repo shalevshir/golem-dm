@@ -2,25 +2,26 @@
 
 ## Purpose & boundary
 
-Persistence layer: durable world state (entities, factions, quest DAG) and episodic memory (pgvector embeddings of scene summaries) in **one Postgres instance** (image `pgvector/pgvector:pg17`). One DB keeps memories and world state transactionally consistent — do not introduce Pinecone/Redis without an ADR.
+Persistence layer, on **one Postgres instance** (image `pgvector/pgvector:pg17`) — do not introduce Pinecone/Redis without an ADR. **Built and live:** the append-only event log (`game_events`, `session_snapshots`), behind two implementations (in-memory, Postgres) that both answer to one conformance suite. **Planned, not built:** durable world state (entities, factions, quest DAG) and episodic memory (pgvector embeddings of scene summaries) — see the Stack bullets below for what's blocking each. The one-Postgres-instance design is so that, once built, memories and world state stay transactionally consistent with the event log.
 
 **Boundary:** the only package that talks to the database. World-state writes happen ONLY by applying validated `GameEvent`s (state is a projection). No LLM calls except embedding generation for episodic writes. Depends only on `@ai-dm/schemas`.
 
 ## Stack
 
 - drizzle-orm + `postgres` driver; migrations via drizzle-kit (checked into `drizzle/`).
-- Tables (snake_case): `game_events` (append-only, unique `(session_id, sequence)`), `session_snapshots`, `entities`, `faction_relations`, `quest_nodes`, `episodic_memories (embedding vector)`.
-- Embed scene **summaries**, not raw turns. Retrieval: cosine top-k, filtered by session/campaign.
+- Tables (snake_case): `game_events` (append-only, composite PK `(session_id, sequence)`), `session_snapshots`. Planned, not yet built: `entities`, `faction_relations`, `quest_nodes` (deferred past step 10 — no campaign concept exists yet) and `episodic_memories (embedding vector)` (spec #2).
+- Episodic memory design constraint, once built (spec #2, not yet designed): embed scene **summaries**, not raw turns; retrieval by cosine top-k, filtered by session/campaign. No embedding calls happen today — there is no episodic write path.
 
 ## Rules
 
 - `game_events` is append-only: no UPDATE or DELETE, ever. Corrections are new events.
 - Every projection must be rebuildable by replaying events from the last snapshot — write a replay test for each new projection.
 - Schema changes only via generated migrations; never edit applied migrations.
+- Both stores answer to one conformance suite (`src/event-store/contract.ts`). A behaviour only one of them has is a bug in the contract, not a feature — add it to the suite or remove it.
 
 ## Testing
 
-Vitest against a throwaway Postgres (docker compose in `apps/server/`). Required: append→replay→identical-projection round-trip; vector search returns seeded fixture in top-k.
+Vitest against a throwaway Postgres (docker compose in `apps/server/`). Two distinct suites today: the shared `EventStore` conformance suite (`src/event-store/contract.ts`), run against both the in-memory and Postgres implementations; and the append→replay→identical-projection round-trip (`src/event-store/replay.test.ts`), Postgres-only and skipped without `DATABASE_URL`. Once episodic memory is built (spec #2): vector search returns a seeded fixture in top-k.
 
 ## Commands
 

@@ -76,7 +76,7 @@ Status: POC phase · Supersedes `dm-plan.md` (see `dm-plan-review.md` for the fa
 | 7 | **Tactical agent + sim:** validate→retry→fallback loop; benchmark Flash vs nano/mini | Legality ≥95% after retry on fixture scenarios; model chosen from data | 3–4 | ✅ done |
 | 8 | **Server + web:** Fastify+WS, event log, replay-on-reconnect, clickable canvas grid | Full combat playable E2E vs scripted enemy | 4–5 | ✅ done |
 | 9 | **Narrative agent:** Sonnet 5 streaming, Hebrew glossary, gendered narration, cache-stable prefix | First token p50 1340 ms, pooled n=36 (meets <1.5s; see §4.5 for the per-run spread); Hebrew reviewed by native speaker — pending (`docs/prompts/hebrew-review-2026-08-21.md` committed, not yet reviewed) | 5–6 | 🟡 agent shipped; native-speaker review pending |
-| 10 | **Memory:** pgvector episodic store, scene summarization, quest DAG | Replay test + top-k retrieval test pass | 6 | ⬜ not started |
+| 10 | **Memory:** pgvector episodic store, scene summarization, quest DAG | Replay test + top-k retrieval test pass | 6 | 🟡 spec #1 shipped; episodic memory not started |
 | 11 | **Closed beta:** 5–10 Hebrew-speaking playtesters; per-turn token/latency/cost dashboards | Measured cost table replaces §3 estimates; go/no-go review | 7–8 | ⬜ not started |
 
 ### Status as of 2026-08-17
@@ -292,7 +292,7 @@ rule).
 
 ## 5. Open Risks
 
-Tactical-model quality on spatial reasoning (mitigated by sim benchmarking + fallback); Hebrew narrative register (native-speaker review in step 9); sequential-call latency stacking (streaming + intent bypass); licensing discipline as content grows (SRD-only rule in `data/srd/README.md`); solo→party scope creep (deferred by ADR-0002).
+Tactical-model quality on spatial reasoning (mitigated by sim benchmarking + fallback); Hebrew narrative register (native-speaker review in step 9); sequential-call latency stacking (streaming + intent bypass); licensing discipline as content grows (SRD-only rule in `data/srd/README.md`); solo→party scope creep (deferred by ADR-0002); the in-memory event store's silent data loss on restart when `DATABASE_URL` is absent — a deliberate fallback for dev/tests, not a warning a deploy operator is guaranteed to see before it costs a session (§4.6).
 
 ### 4.2 Step 8 decomposition (designed 2026-08-19)
 
@@ -699,3 +699,32 @@ but no native speaker has read it yet, and the spec is explicit that the
 sheet is not itself a blocking gate — putting a concrete artifact in front
 of a reviewer, rather than holding the step open on a task only they can
 perform.
+
+### 4.6 Step 10 decomposition (designed 2026-08-22)
+
+Step 10's row reads "pgvector episodic store, scene summarization, quest
+DAG". Only the first of those has a consumer today, and none of them has a
+place to live: `@ai-dm/memory` was three files and eight lines, all
+`export {}`. So the step splits.
+
+**Spec #1 — event-log persistence.**
+[`docs/superpowers/specs/2026-08-22-event-log-persistence-design.md`](docs/superpowers/specs/2026-08-22-event-log-persistence-design.md),
+plan at
+[`docs/superpowers/plans/2026-08-22-event-log-persistence.md`](docs/superpowers/plans/2026-08-22-event-log-persistence.md).
+Moves the `EventStore` contract out of `apps/server` — a Postgres store
+cannot import it from there under invariant 5 — holds both implementations
+to one conformance suite, and makes `DATABASE_URL` optional so the
+in-memory path survives for tests and for `pnpm dev` without docker.
+
+**Spec #2 — episodic memory**, not yet designed. It needs a scene-summary
+producer and a prompt tier that reads retrieval back; today the narrator's
+history is `recentNarrations`, a two-turn window of raw strings. It also
+needs an embedding port, which does not exist in `@ai-dm/agents` and cannot
+simply be imported: `@ai-dm/memory` depends only on `@ai-dm/schemas`.
+
+**The quest DAG is deferred out of step 10 entirely.** A grep for
+"campaign" across the repo returns a line of `packages/memory`'s charter, a
+comment on the static prompt tier, and that comment's copy in an older
+spec — no code, no schema, no second encounter. `SessionState` is
+combat-only. `quest_nodes` would be a table nothing reads, and the shape it
+should have is not knowable until there is a campaign concept to serve.
