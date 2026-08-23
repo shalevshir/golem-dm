@@ -294,6 +294,46 @@ Notes for whoever takes Task 5:
   in-repo temp file — a copy under `/tmp` misses `.prettierrc` and reformats
   at 80 cols, which reads as churn that is not there.
 
+### Postgres verification, run early (2026-08-23)
+
+Task 8 Step 3's database run, pulled forward because the column rename had
+been unproven since Task 2. **The migration applies and the schema is right:**
+`campaign_snapshots`, `campaign_id` on both tables, PK
+`(campaign_id, sequence)`, and zero columns matching `%session%`. With
+`DATABASE_URL` set, `pnpm test` is **1274 passed, 0 skipped over 90 test
+files** — `packages/memory` executes all 62 cases instead of skipping 29.
+
+**Not against the compose file.** Docker could not pull: the daemon (server
+29.1.3) stalls at zero bytes even on `hello-world`, though the host reaches
+`registry-1.docker.io` fine. Used the Homebrew **Postgres 18.3** already
+running on 5432 instead. The baseline migration is plain tables — no pgvector,
+no extension — so nothing in it is version-sensitive, but this does **not**
+exercise the `pgvector/pgvector:pg17` image, and episodic memory (§4.7 step 7)
+will need that image to work before it can be trusted.
+
+Verification ran against a **fresh `aidm_split_verify` database**, not `aidm`.
+The existing local `aidm` database still holds the **old `session_id` schema**
+with 2710 `game_events` rows and one applied migration from the deleted
+`0000_slow_betty_ross.sql` baseline. It was left untouched deliberately —
+`drizzle-kit migrate` will fail against it until someone drops those tables,
+and that is a call for whoever owns the data, not this plan.
+
+**It caught a real bug** (`eae8fd2`), which is the argument for running this
+before the PR rather than after. `contract.ts`'s newer-snapshot fixture still
+spread `round` at the top level after Task 4 nested it. Typecheck could not see
+it — excess-property checking does not apply through a variable, and `toEqual`
+takes `any` — and the in-memory store could not either, because it does no
+parsing and handed the stray key straight back. Only Postgres failed, since
+`postgres.ts` runs `CampaignState.parse` and zod strips unknown keys. A
+shape-change task should assume this class of miss survives a green
+in-memory suite.
+
+One caveat on the numbers: an early run showed 6 tests timing out at 5000ms
+against Postgres. Three consecutive runs afterwards, and the full-suite run,
+were clean with zero timeouts, so it did not reproduce and is recorded here
+rather than diagnosed. If it returns in CI, suspect connection setup on the
+first-ever queries against a new database rather than the store logic.
+
 ---
 
 ## Task 5: Genesis becomes two events
