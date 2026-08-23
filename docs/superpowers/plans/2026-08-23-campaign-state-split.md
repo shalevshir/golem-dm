@@ -344,21 +344,128 @@ first-ever queries against a new database rather than the store logic.
 - Produces: `createCampaign` (writes `campaign_started` at sequence 0, returns `encounter: null`), `startEncounter` (writes `encounter_started`, folds), `resolveEncounter` (writes `encounter_resolved`).
 - Consumes: Task 3's payload schemas, Task 4's projection.
 
-- [ ] **Step 1: Split `initialState`**
+- [x] **Step 1: Split `initialState`**
 
 Into `initialWorldState` (from `campaign_started`'s payload) and `initialEncounterState` (from `encounter_started`'s `encounterId`, via `buildEncounterById`). Both rebuild rather than persist — the same reasoning as today's genesis comment at `campaign.ts`'s `createCampaign`, which is deliberate and must survive the move.
 
-- [ ] **Step 2: `loadCampaign` folds both**
+- [x] **Step 2: `loadCampaign` folds both**
 
 Reads the log, rebuilds the world from sequence 0, and rebuilds each encounter's initial state from its own `encounter_started` before folding the rest onto it.
 
-- [ ] **Step 3: Drop `session_snapshot` from the enum**
+- [x] **Step 3: Drop `session_snapshot` from the enum**
 
 Nothing writes it now. Its only use was genesis and its name described the table, not the event. Removing it will fail `reduce`'s exhaustiveness check in the good way.
 
-- [ ] **Step 4: HTTP creates then starts**
+- [x] **Step 4: HTTP creates then starts**
 
 `POST /campaigns` calls `createCampaign` and then `startEncounter`, so the client-visible flow is unchanged. That temporary coupling is the seam §4.7's step 4 removes — leave a comment saying so.
+
+**Done 2026-08-23 as `40fbb0b`.** 10 files. Without a database, `pnpm test`
+gives **1258 passed, 29 skipped over 90 test files** — Task 4's 1245 plus 13
+new `apps/server` cases. With `DATABASE_URL` set: **1287 passed, 0 skipped**,
+`packages/memory` running all 62. Typecheck and eslint exit 0, and
+`grep -rn session_snapshot` over `packages apps tools` returns zero hits.
+
+**The `built`/`sceneEnglish` fork, resolved.** `Campaign.built` became
+`BuiltEncounter | null` and `sceneEnglish` was **deleted** — it was exactly
+`built.sceneEnglish`, so keeping it would have been a second field to hold
+null in step with the bracket for no gain. Lockstep nullability alone is not
+enough (two fields that *can* disagree), so nothing reads `built` directly:
+`builtOf(campaign)` is the single reader, it derives open-or-closed from
+`state.encounter` — the source of truth, since that is what `reduce` folds —
+before consulting `built` at all, and then refuses a `built` naming a
+different encounter. Neither failure is reachable today; the point is that
+they fail at the seam rather than handing the narrator one encounter's scene
+card and the validator another's stat blocks. `encounterOf` was left exactly
+as Task 4 shipped it rather than widened to return both halves, which would
+have churned ~40 test call sites in a task that is about behaviour.
+
+Other deviations from the step list, each deliberate:
+
+- **`reduce` cannot fill the bracket it opens**, so `encounter_started` is a
+  guard-only no-op there: it throws on an overlapping bracket and returns
+  `state` otherwise, and `campaign.ts` substitutes `initialEncounterState`
+  straight after. The catalogue lives in `apps/server` and
+  `@ai-dm/schemas` may never import it (invariant 5). **Consequence worth
+  carrying forward: `fold` alone can no longer project a campaign log across
+  a bracket.** `loadCampaign` is the only complete projector, and it folds
+  event-by-event rather than through `fold`. This is a generalization of the
+  status quo, not a regression — `fold` could never project genesis either —
+  but Task 7 Step 2's replay-across-a-bracket test cannot use bare `fold`,
+  and `packages/memory` cannot reach the catalogue to help.
+- **`encounter_resolved` throws when no bracket is open.** The spec only
+  named the `encounter_started` direction; this is the same corrupt-log class
+  and refuses for the same reason. No `encounterId`-match check was added —
+  the open/closed invariant is the one `EncounterState | null` encodes, and
+  `resolveEncounter` takes the id from the open encounter rather than from
+  its caller, so a mismatch has no producer.
+- **The pipeline's refusal uses `not_your_turn`**, per the spec's "existing
+  code where one fits". It fits precisely: `state/conclusion.ts` already
+  documents that every command after a fight ends is answered `not_your_turn`
+  (C-37), and a closed bracket is that same moment one event later. The
+  client already treats it as a stale click it must not surface
+  (`ErrorBanner.tsx`), which is right, since an encounter-less campaign
+  pushes no affordances to click.
+- **`playerAffordances` reads `campaign.state.encounter` directly** instead
+  of going through `encounterOf`. A campaign between fights has no board to
+  offer affordances on — the same "nothing to offer" class its doc comment
+  already lists — and a `join` there must still answer with its
+  `campaign_state` frame rather than throw.
+- **`startEncounter` and `resolveEncounter` mutate the `Campaign` in place**
+  and return it. Campaigns are shared objects: `http.ts`'s registry and every
+  live socket alias one record and `pipeline.ts`'s `emit` already advances
+  `state`/`nextSequence` on it (CRITICAL-1). Returning a fresh record would
+  leave all of them holding the pre-encounter one. Both run the catalogue
+  lookup and the fold guard **before** the append, so a refused event never
+  reaches an append-only log — there is no correction event that could take
+  it back out.
+- **`CreateCampaignInput` lost `encounterId`**, and a shared `CampaignPorts`
+  (`store`/`clock`/`uuid`) was extracted so the four functions cannot drift.
+  The local `GenesisPayload` is gone: Task 3's `CampaignStartedPayload` is
+  the one definition now (invariant 4).
+- **An unknown encounter id now leaves an encounter-less campaign in the
+  log.** `POST /campaigns` writes `campaign_started` before `startEncounter`
+  throws `UnknownEncounterError` into the route's 404 branch. Harmless — the
+  id was never returned to anyone, so it is unreachable — and the log is
+  append-only, so there is nothing to roll back.
+
+### The seed shift, and the one test that noticed
+
+**Every turn's seed moved by one sequence.** `seedFor(rootSeed,
+nextSequence)` is unchanged (ADR-0004 decision 4), but the sequence space
+shifted when genesis became two events, so every roll in every fight is a
+different roll. Determinism is intact and no assertion depends on specific
+dice — but the *length* of a fight does. The e2e socket combat went from
+**6 rounds / 102 events to 10 rounds / 175 events**, measured before and
+after, and started failing vitest's 5s default timeout in about two runs out
+of three under a parallel `pnpm test` (never in isolation). Confirmed as the
+cause by stashing: the same run is clean at Task 4.
+
+Fixed by giving that one test an explicit **30s** timeout. 5s was never a
+bound anyone chose for it — it only ever fit by accident, and it also made
+`waitForProjection`'s own diagnostic (which names the round, the actor and
+every combatant's HP) unreachable past the first round or two, since vitest's
+timer fired first and reported nothing but a line number. Tuning seeds to
+make the fight short again was rejected: the dice decide how long a fight
+runs, and a test should not pin them.
+
+**A note for Task 8.** `apps/web`'s `applyFrame` folds event frames through
+`reduce`, and `encounter_started` now throws on an already-open bracket
+where `session_snapshot` was an inert no-op. Not reachable today — `join`
+answers a fresh client with `campaign_state` at `nextSequence - 1`, which is
+already 1 on a new campaign, so a client never resumes from 0 and never
+receives `encounter_started` as an event frame — but it is a sharp edge on
+exactly the resume path Task 8 Step 1 is about.
+
+**Prettier:** `campaign.ts` was clean at Task 4 and got a path-scoped
+`--write`. `pipeline.test.ts`, `event-store/replay.test.ts` and `events.ts`
+were already nonconformant and were left that way — but the longer
+`GENESIS_SEQUENCE` identifier pushed three `readSince` lines in
+`pipeline.test.ts` past 100 cols, so those three were hand-wrapped rather
+than left as new churn. Each file's remaining deviations were verified to be
+the same hunks as at `HEAD`, by diffing `prettier <file>` against the file
+for both the current and the `git show HEAD:` copy, both written **inside the
+repo** so `.prettierrc`'s 100 cols applies.
 
 ---
 
