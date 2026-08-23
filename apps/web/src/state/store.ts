@@ -9,16 +9,10 @@
 //
 // Pure: `applyFrame` never mutates its input, so React state updates and the
 // fold-parity test both work the obvious way.
+import { z } from "zod";
 import { reduce } from "@ai-dm/schemas";
-import { ActionValidatedPayload, DiceRolledPayload } from "@ai-dm/schemas";
-import type {
-  ActionType,
-  AttackTrace,
-  GameEvent,
-  ServerFrame,
-  SessionState,
-  TurnAffordances,
-} from "@ai-dm/schemas";
+import { ActionType, ActionValidatedPayload, AttackTrace, DiceRolledPayload } from "@ai-dm/schemas";
+import type { GameEvent, ServerFrame, SessionState, TurnAffordances } from "@ai-dm/schemas";
 
 export interface ClientState {
   snapshot: SessionState | null;
@@ -38,15 +32,21 @@ export interface ClientState {
  * `action_validated` + `dice_rolled` + `scene_changed` events. Not part of
  * `SessionState` and not folded by `reduce()` -- purely additive display
  * state, the same category as `narrative` below.
+ *
+ * A zod schema rather than a plain interface because `state/persistence.ts`
+ * writes this to `sessionStorage` and has to validate what it reads back,
+ * and the repo's rule is that a shape is defined once (CLAUDE.md invariant
+ * 4). The type is inferred from it, so the two cannot drift.
  */
-export interface CombatLogTurn {
-  actorId: string;
-  /** `undefined` only when `forfeited` is true -- no action was ever validated. */
-  actionType: ActionType | undefined;
-  movedFeet: number;
-  attacks: AttackTrace[];
-  forfeited: boolean;
-}
+export const CombatLogTurn = z.object({
+  actorId: z.string(),
+  /** Absent only when `forfeited` is true -- no action was ever validated. */
+  actionType: ActionType.optional(),
+  movedFeet: z.number(),
+  attacks: z.array(AttackTrace),
+  forfeited: z.boolean(),
+});
+export type CombatLogTurn = z.infer<typeof CombatLogTurn>;
 
 export const initialClientState: ClientState = {
   snapshot: null,
@@ -155,7 +155,7 @@ function foldCombatLog(
 
 export function applyFrame(state: ClientState, frame: ServerFrame): ClientState {
   switch (frame.type) {
-    case "session_state":
+    case "session_state": {
       // Authoritative on arrival. Affordances computed against an older board
       // go with it — the server sends a fresh set if the player is up. A
       // `session_state` only ever arrives on join or resync, so any
@@ -163,6 +163,19 @@ export function applyFrame(state: ClientState, frame: ServerFrame): ClientState 
       // toast, prior combat-log entries — describes a moment that is now
       // stale; all are cleared with it rather than surviving to render as
       // if they just happened.
+      //
+      // Unless the frame lands on the sequence already folded, which is not
+      // a move to a new moment at all — it is the same one restated. That is
+      // exactly what a reload gets: a join without `resumeFrom` is answered
+      // with the live projection at the newest sequence, and a client that
+      // restored its display state from `state/persistence.ts` is holding a
+      // log and a narration describing precisely that sequence. Clearing
+      // them there would throw away the only copy of history the server does
+      // not project (neither the roll log nor the narration is part of
+      // `SessionState`). The equality is what keeps this honest: the moment
+      // the server's sequence and the client's disagree, the server wins and
+      // both are dropped.
+      const restated = frame.sequence === state.sequence;
       return {
         ...state,
         snapshot: frame.snapshot,
@@ -170,8 +183,11 @@ export function applyFrame(state: ClientState, frame: ServerFrame): ClientState 
         affordances: null,
         lastError: null,
         lastRejection: null,
-        combatLog: [],
+        combatLog: restated ? state.combatLog : [],
+        narrative: restated ? state.narrative : "",
+        narrativeStreamId: restated ? state.narrativeStreamId : null,
       };
+    }
 
     case "event": {
       if (state.snapshot === null) return state;

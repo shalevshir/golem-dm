@@ -10,9 +10,11 @@
 import { StrictMode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, render, screen, waitFor } from "@testing-library/react";
+import type { RenderResult } from "@testing-library/react";
 import { ExecuteTurn, fold } from "@ai-dm/schemas";
 import type { Combatant, GameEvent, SessionState } from "@ai-dm/schemas";
 import { App, SESSION_STORAGE_KEY } from "./App.js";
+import { LOG_STORAGE_KEY } from "./state/persistence.js";
 import { he } from "./i18n.js";
 import { fakeSocket } from "./net/fake-socket.js";
 import type { FakeSocket } from "./net/fake-socket.js";
@@ -69,6 +71,10 @@ const catalogue = {
   ],
 };
 
+/** Narration fixture. No dice expression in it, so `NarrativePane` renders
+ *  it as a single node and `getByText` can match it whole. */
+const NARRATION = "השומר נועץ את חניתו בגובלין.";
+
 let socket: FakeSocket;
 let fetchMock: ReturnType<typeof vi.fn>;
 
@@ -82,8 +88,8 @@ let fetchMock: ReturnType<typeof vi.fn>;
  * `listeners.get("open")` is `undefined` until `connect()` runs), so this
  * fires the real join exactly once, whenever it becomes possible to.
  */
-async function start(options: { skipClick?: boolean } = {}): Promise<void> {
-  render(<App socketFactory={() => socket} wsUrl="ws://test/ws" />);
+async function start(options: { skipClick?: boolean } = {}): Promise<RenderResult> {
+  const rendered = render(<App socketFactory={() => socket} wsUrl="ws://test/ws" />);
   if (options.skipClick !== true) {
     act(() => {
       screen.getByRole("button", { name: he.app.startFight }).click();
@@ -93,6 +99,7 @@ async function start(options: { skipClick?: boolean } = {}): Promise<void> {
     socket.emitOpen();
     expect(socket.sent.length).toBeGreaterThan(0);
   });
+  return rendered;
 }
 
 beforeEach(() => {
@@ -260,6 +267,9 @@ describe("App", () => {
     });
 
     expect(sessionStorage.getItem(SESSION_STORAGE_KEY)).toBeNull();
+    // The roll log goes with the id. A log left behind here would be restored
+    // by the next mount and rendered against the next fight's board.
+    expect(sessionStorage.getItem(LOG_STORAGE_KEY)).toBeNull();
     expect(await screen.findByRole("button", { name: he.app.startFight })).toBeInTheDocument();
   });
 
@@ -282,6 +292,7 @@ describe("App", () => {
     // Without this, every refresh after the fight ends rejoins the same
     // finished session forever — a dead end sitting on the exit criterion.
     expect(sessionStorage.getItem(SESSION_STORAGE_KEY)).toBeNull();
+    expect(sessionStorage.getItem(LOG_STORAGE_KEY)).toBeNull();
   });
 
   it("surfaces an error frame that arrives before the first snapshot instead of hanging on the connecting screen", async () => {
@@ -385,6 +396,116 @@ describe("App", () => {
 
     expect(await screen.findByText(he.log.hit)).toBeInTheDocument();
     expect(screen.getByText(/18/)).toBeInTheDocument();
+  });
+
+  it("restores the roll log and the narration on a remount, not just the board", async () => {
+    // What a page reload actually is, from the component's side: the old tree
+    // is gone, a new one mounts against the same stored session id, and the
+    // join it sends is answered with the live projection. The board comes
+    // back from that projection — but the roll log is folded client-side from
+    // events `SessionState` does not carry, and the narration arrives as
+    // `narrative_token` frames that are not events at all, so neither is in
+    // the answer. Without `state/persistence.ts` both come back empty, which
+    // is exactly what the manual restart test found.
+    const first = await start();
+    const snapshot = snapshotWith([
+      combatant("hero", "party", "alive"),
+      combatant("goblin-a", "hostile", "alive"),
+    ]);
+    act(() => {
+      socket.emitMessage({ type: "session_state", sequence: 0, snapshot });
+      socket.emitMessage({
+        type: "event",
+        event: event(1, "action_validated", {
+          actorId: "hero",
+          turn: {
+            actorId: "hero",
+            mainAction: { actionType: "attack", actionId: "spear", targetId: "goblin-a" },
+            tacticalRationaleEnglish: "Test fixture.",
+          },
+          source: "human",
+        }),
+      });
+      socket.emitMessage({
+        type: "event",
+        event: event(2, "dice_rolled", {
+          actorId: "hero",
+          movedFeet: 0,
+          seed: 42,
+          attacks: [
+            {
+              attackerId: "hero",
+              targetId: "goblin-a",
+              actionId: "spear",
+              outcome: "hit",
+              damage: 6,
+              targetStatusAfter: "alive",
+              attackRoll: { naturalRoll: 18, rolls: [18], total: 21, targetArmorClass: 15 },
+              damageRolls: [{ kind: "dice", notation: "1d6+1", rolls: [5], modifier: 1, total: 6 }],
+            },
+          ],
+        }),
+      });
+      socket.emitMessage({ type: "narrative_token", streamId: "n1", text: NARRATION });
+    });
+    expect(await screen.findByText(he.log.hit)).toBeInTheDocument();
+    expect(screen.getByText(NARRATION)).toBeInTheDocument();
+
+    first.unmount();
+    socket = fakeSocket();
+    await start({ skipClick: true });
+
+    // Still no `resumeFrom`, deliberately. A reloaded client holds no
+    // snapshot, and the tail a `resumeFrom` buys it is a run of bare `event`
+    // frames that `applyFrame` drops while `snapshot` is null — it would hang
+    // on the connecting screen. Asking for the whole projection is the right
+    // request; the log is restored beside it, not fetched.
+    expect(JSON.parse(socket.sent[0] ?? "{}")).toEqual({ type: "join", sessionId: "s1" });
+
+    act(() => {
+      socket.emitMessage({ type: "session_state", sequence: 2, snapshot });
+    });
+
+    expect(await screen.findByText(he.log.hit)).toBeInTheDocument();
+    expect(screen.getByText(/18/)).toBeInTheDocument();
+    expect(screen.getByText(NARRATION)).toBeInTheDocument();
+  });
+
+  it("drops a restored roll log the server's own sequence has moved past", async () => {
+    // The rule that keeps the restored log honest: it is tagged with the
+    // sequence it was folded at, and a projection at any other sequence
+    // describes a board it does not. Reaching this needs events the client
+    // never saw — the server appending a turn after the socket died, which a
+    // kill mid-turn does.
+    sessionStorage.setItem(SESSION_STORAGE_KEY, "s1");
+    sessionStorage.setItem(
+      LOG_STORAGE_KEY,
+      JSON.stringify({
+        sessionId: "s1",
+        sequence: 2,
+        combatLog: [
+          { actorId: "hero", actionType: "dodge", movedFeet: 0, attacks: [], forfeited: false },
+        ],
+        narrative: NARRATION,
+        narrativeStreamId: "n1",
+      }),
+    );
+
+    await start({ skipClick: true });
+    act(() => {
+      socket.emitMessage({
+        type: "session_state",
+        sequence: 9,
+        snapshot: snapshotWith([
+          combatant("hero", "party", "alive"),
+          combatant("goblin-a", "hostile", "alive"),
+        ]),
+      });
+    });
+
+    expect(await screen.findByText(he.log.heading)).toBeInTheDocument();
+    expect(screen.queryByText(he.actions.dodge)).not.toBeInTheDocument();
+    expect(screen.queryByText(NARRATION)).not.toBeInTheDocument();
   });
 
   it("does not carry a dead session's resumeFrom into the next fight", async () => {

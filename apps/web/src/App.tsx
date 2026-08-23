@@ -15,6 +15,11 @@ import type { Connection, ConnectionStatus, WebSocketLike } from "./net/connecti
 import { createSession, fetchCatalogue } from "./net/api.js";
 import { applyFrame, initialClientState } from "./state/store.js";
 import type { ClientState } from "./state/store.js";
+import {
+  clearStoredClientState,
+  restoreClientState,
+  storeClientState,
+} from "./state/persistence.js";
 import { conclusionOf } from "./state/conclusion.js";
 import { buildTurn } from "./turn/build-turn.js";
 import { ActionBar } from "./components/ActionBar.js";
@@ -36,6 +41,10 @@ const ENCOUNTER_ID = "goblin-ambush";
  * Cleared on an `unknown_session` error frame (see the effect below): the
  * server has forgotten the session, so an id that outlives it must not be
  * reused on the next mount either.
+ *
+ * `state/persistence.ts` keeps a second key beside this one, holding the
+ * display state the server's projection does not carry. The two are written
+ * and cleared together — everywhere this key goes, that one goes with it.
  */
 export const SESSION_STORAGE_KEY = "ai-dm:session-id";
 
@@ -46,7 +55,13 @@ export interface AppProps {
 }
 
 export function App(props: AppProps): JSX.Element {
-  const [state, setState] = useState<ClientState>(initialClientState);
+  // Seeded from storage, not from `initialClientState`: a reload has to get
+  // its roll log and its narration back, and neither is in the projection the
+  // join below is answered with. `restoreClientState` returns exactly
+  // `initialClientState` when there is nothing to restore.
+  const [state, setState] = useState<ClientState>(() =>
+    restoreClientState(sessionStorage.getItem(SESSION_STORAGE_KEY)),
+  );
   const [catalogue, setCatalogue] = useState<EncounterCatalogue | null>(null);
   const [status, setStatus] = useState<ConnectionStatus>("connecting");
   // A click is stored together with the affordance set it was made against,
@@ -164,6 +179,7 @@ export function App(props: AppProps): JSX.Element {
   // snapshot and drop every one of them, hanging on "connecting…".
   const resetToStart = useCallback(() => {
     sessionStorage.removeItem(SESSION_STORAGE_KEY);
+    clearStoredClientState();
     connectionRef.current?.close();
     connectionRef.current = null;
     sequenceRef.current = 0;
@@ -206,7 +222,23 @@ export function App(props: AppProps): JSX.Element {
     if (state.snapshot === null) return;
     if (conclusionOf(state.snapshot) === "ongoing") return;
     sessionStorage.removeItem(SESSION_STORAGE_KEY);
+    clearStoredClientState();
   }, [state.snapshot]);
+
+  // The roll log and the narration survive a reload only because they are
+  // written down here: `SessionState` carries neither, so the `session_state`
+  // frame a fresh join is answered with restores the board and nothing else
+  // (`state/persistence.ts` has the full argument).
+  //
+  // Declared after both teardowns above, and that order is load-bearing:
+  // effects run in declaration order, so on the commit where the fight ends
+  // or the session is disowned, the id is already gone by the time this runs
+  // and the guard below stops it writing the log straight back.
+  useEffect(() => {
+    const sessionId = sessionStorage.getItem(SESSION_STORAGE_KEY);
+    if (sessionId === null) return;
+    storeClientState(sessionId, state);
+  }, [state]);
 
   const send = useCallback((message: ClientMessage) => {
     connectionRef.current?.send(message);
