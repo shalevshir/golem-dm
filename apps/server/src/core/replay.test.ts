@@ -14,12 +14,12 @@ import type {
   ExecuteTurn,
   GameEvent,
   ServerFrame,
-  SessionState,
+  CampaignState,
 } from "@ai-dm/schemas";
 import { SNAPSHOT_EVERY, handleCommand } from "./pipeline.js";
 import type { TurnPorts } from "./pipeline.js";
-import { createSession, loadSession } from "./session.js";
-import type { Session } from "./session.js";
+import { createCampaign, loadCampaign } from "./campaign.js";
+import type { Campaign } from "./campaign.js";
 
 const CLOCK = (): string => "2026-08-19T10:00:00.000Z";
 const ENCOUNTER_ID = "goblin-ambush";
@@ -105,7 +105,7 @@ async function drain(stream: AsyncIterable<ServerFrame>): Promise<ServerFrame[]>
 }
 
 interface PlayOptions {
-  sessionId?: string;
+  campaignId?: string;
   rootSeed?: number;
 }
 
@@ -122,11 +122,11 @@ async function playRounds(
   store: EventStore,
   rounds: number,
   options: PlayOptions = {},
-): Promise<Session> {
-  const sessionId = options.sessionId ?? "s1";
+): Promise<Campaign> {
+  const campaignId = options.campaignId ?? "s1";
   const rootSeed = options.rootSeed ?? 42;
-  const session = await createSession({
-    sessionId,
+  const campaign = await createCampaign({
+    campaignId,
     encounterId: ENCOUNTER_ID,
     rootSeed,
     store,
@@ -136,48 +136,48 @@ async function playRounds(
   const ports = portsWith(store);
 
   for (let round = 0; round < rounds; round += 1) {
-    await drain(handleCommand(session, dodgeCommand("hero", `c${String(round)}`), ports));
+    await drain(handleCommand(campaign, dodgeCommand("hero", `c${String(round)}`), ports));
   }
-  return session;
+  return campaign;
 }
 
 /**
- * The genesis `SessionState` a client must fold from — built from its own
+ * The genesis `CampaignState` a client must fold from — built from its own
  * throwaway store and its own uuid counter, so it never shares an object
  * reference with anything `playRounds` produced.
  *
- * C-26 / C-35: `reduce` never writes `sessionId`, `rootSeed`, `encounterId`,
+ * C-26 / C-35: `reduce` never writes `campaignId`, `rootSeed`, `encounterId`,
  * `grid` or `turnOrder`, and Task 8 removed the `state` field that used to
- * ride along in the sequence-0 payload (keeping it aliased live session
+ * ride along in the sequence-0 payload (keeping it aliased live campaign
  * state into the store by reference). The only remaining correct source for
- * "the state `fold` starts from" is the session API itself: `createSession`
- * builds exactly that state, the same way `loadSession` rebuilds it before
+ * "the state `fold` starts from" is the campaign API itself: `createCampaign`
+ * builds exactly that state, the same way `loadCampaign` rebuilds it before
  * folding the rest of a log on top.
  */
-async function genesisStateFor(options: PlayOptions = {}): Promise<SessionState> {
+async function genesisStateFor(options: PlayOptions = {}): Promise<CampaignState> {
   const scratch = createInMemoryEventStore();
-  const session = await createSession({
-    sessionId: options.sessionId ?? "s1",
+  const campaign = await createCampaign({
+    campaignId: options.campaignId ?? "s1",
     encounterId: ENCOUNTER_ID,
     rootSeed: options.rootSeed ?? 42,
     store: scratch,
     clock: CLOCK,
     uuid: uuids(),
   });
-  return session.state;
+  return campaign.state;
 }
 
 describe("replay properties", () => {
   it("folding the log from zero equals the live projection", async () => {
     const store = createInMemoryEventStore();
     const live = await playRounds(store, 3);
-    const reloaded = await loadSession({ sessionId: "s1", store });
+    const reloaded = await loadCampaign({ campaignId: "s1", store });
     expect(reloaded?.state).toEqual(live.state);
   });
 
   it("a reconnect at any sequence leaves the client's fold equal to the server's", async () => {
     // C-21 (blocking): the brief's version obtained "the client's state" by
-    // calling `loadSession` — which always folds the WHOLE log regardless
+    // calling `loadCampaign` — which always folds the WHOLE log regardless
     // of `cut` — then folded a no-op empty array, then folded the tail on
     // top of a state that already included it. That double-application is
     // idempotent for the one field the test checked (`combatants`, a full
@@ -225,14 +225,14 @@ describe("replay properties", () => {
 
   it("a different rootSeed produces a different event stream for the same commands", async () => {
     // C-21 (blocking): the brief's version asserted only
-    // `session.state.rootSeed === 99` right after passing `rootSeed: 99`
+    // `campaign.state.rootSeed === 99` right after passing `rootSeed: 99`
     // in — a tautology about the input that cannot fail regardless of what
     // the pipeline does with it.
     //
     // My first replacement for it was ALSO non-discriminating, for a
     // different reason (review caught it): it compared the full event
     // arrays from `readSince`, which include sequence 0 — whose payload is
-    // `{ encounterId, rootSeed }` (`session.ts`). With rootSeed 42 vs. 99,
+    // `{ encounterId, rootSeed }` (`campaign.ts`). With rootSeed 42 vs. 99,
     // that one event already differs before a single turn plays, so
     // `.not.toEqual` on the whole array passes even if `rootSeed` never
     // reaches `seedFor` at all (e.g. a regression hardcoding
@@ -243,7 +243,7 @@ describe("replay properties", () => {
     // `ports.seedFor(rootSeed, sequence)`'s literal output
     // (`pipeline.ts`'s `enemyTurn`/`structured_action` handling) — which
     // has no sequence-0 freebie to hide behind: it only differs if
-    // `session.state.rootSeed` actually reached `seedFor` for every one of
+    // `campaign.state.rootSeed` actually reached `seedFor` for every one of
     // these turns. Verified by injecting the regression this comment used
     // to only assume: hardcoding `seedFor` in `portsWith` to
     // `(_rootSeed, sequence) => 42 * 1000 + sequence` (ignoring its
@@ -276,7 +276,7 @@ describe("snapshots", () => {
     // (`player_input`, `action_rejected`) landed per attempt instead of a
     // full turn's ~5-6. Fixed in `reduce.ts`'s `scene_changed` /
     // `turn_advanced` case (see this task's report); this asserts what the
-    // property should actually exercise now that a session can play more
+    // property should actually exercise now that a campaign can play more
     // than one round.
     await playRounds(store, 5);
 
@@ -300,10 +300,10 @@ describe("snapshots", () => {
     // unnoticed.
     expect(snapshot.sequence).toBe(SNAPSHOT_EVERY);
 
-    // C-22 / C-35: get the fold's starting state from the session API, not
+    // C-22 / C-35: get the fold's starting state from the campaign API, not
     // from a cast on the genesis event's payload — sequence 0 no longer
     // carries a `state` field (Task 8 removed it to kill the aliasing
-    // hazard; see `session.ts`'s `GenesisPayload`). Reintroducing that field
+    // hazard; see `campaign.ts`'s `GenesisPayload`). Reintroducing that field
     // to make a cast like `(genesis.payload as { state: unknown }).state`
     // work would undo that fix, so this drops the cast entirely.
     const initial = await genesisStateFor();

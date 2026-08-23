@@ -1,4 +1,4 @@
-// Top-level wiring. It owns the session lifecycle and nothing else: the store
+// Top-level wiring. It owns the campaign lifecycle and nothing else: the store
 // folds, the components render, the connection carries frames.
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { JSX } from "react";
@@ -12,7 +12,7 @@ import type {
 } from "@ai-dm/schemas";
 import { connect } from "./net/connection.js";
 import type { Connection, ConnectionStatus, WebSocketLike } from "./net/connection.js";
-import { createSession, fetchCatalogue } from "./net/api.js";
+import { createCampaign, fetchCatalogue } from "./net/api.js";
 import { applyFrame, initialClientState } from "./state/store.js";
 import type { ClientState } from "./state/store.js";
 import {
@@ -33,20 +33,20 @@ const ENCOUNTER_ID = "goblin-ambush";
 
 /**
  * Persisted across a refresh so the exit criterion — "refresh mid-fight
- * without losing the session" — actually holds. Without this, a reload reads
- * no stored id, calls `POST /sessions` again, and starts a brand-new fight;
+ * without losing the campaign" — actually holds. Without this, a reload reads
+ * no stored id, calls `POST /campaigns` again, and starts a brand-new fight;
  * `sessionStorage` (not `localStorage`) is deliberate too, since a fight
  * should not survive into a new tab that never joined it.
  *
- * Cleared on an `unknown_session` error frame (see the effect below): the
- * server has forgotten the session, so an id that outlives it must not be
+ * Cleared on an `unknown_campaign` error frame (see the effect below): the
+ * server has forgotten the campaign, so an id that outlives it must not be
  * reused on the next mount either.
  *
  * `state/persistence.ts` keeps a second key beside this one, holding the
  * display state the server's projection does not carry. The two are written
  * and cleared together — everywhere this key goes, that one goes with it.
  */
-export const SESSION_STORAGE_KEY = "ai-dm:session-id";
+export const CAMPAIGN_STORAGE_KEY = "ai-dm:campaign-id";
 
 export interface AppProps {
   /** Test seam. Production leaves both undefined and the real ones are used. */
@@ -60,7 +60,7 @@ export function App(props: AppProps): JSX.Element {
   // join below is answered with. `restoreClientState` returns exactly
   // `initialClientState` when there is nothing to restore.
   const [state, setState] = useState<ClientState>(() =>
-    restoreClientState(sessionStorage.getItem(SESSION_STORAGE_KEY)),
+    restoreClientState(sessionStorage.getItem(CAMPAIGN_STORAGE_KEY)),
   );
   const [catalogue, setCatalogue] = useState<EncounterCatalogue | null>(null);
   const [status, setStatus] = useState<ConnectionStatus>("connecting");
@@ -85,12 +85,12 @@ export function App(props: AppProps): JSX.Element {
     },
     [state.affordances],
   );
-  // A stored session id means a fight is already in progress: mounting goes
+  // A stored campaign id means a fight is already in progress: mounting goes
   // straight to reconnecting rather than showing the start screen again, or
-  // a refresh mid-fight would look like it lost the session even though
+  // a refresh mid-fight would look like it lost the campaign even though
   // `resumeFrom` below would have recovered it.
   const [started, setStarted] = useState(
-    () => sessionStorage.getItem(SESSION_STORAGE_KEY) !== null,
+    () => sessionStorage.getItem(CAMPAIGN_STORAGE_KEY) !== null,
   );
 
   // `resumeFrom` is read at join time, not captured at connect time — a
@@ -116,7 +116,7 @@ export function App(props: AppProps): JSX.Element {
   // isn't itself.
   const runIdRef = useRef(0);
   // Bumping this re-runs the connect effect: cleanup closes the live socket,
-  // the new run re-reads the SAME stored session id and rejoins with
+  // the new run re-reads the SAME stored campaign id and rejoins with
   // `resumeFrom`. That is a genuine reconnect rather than a new fight, which
   // is what the spec's error table asks for on `internal_error`.
   const [reconnectNonce, setReconnectNonce] = useState(0);
@@ -127,12 +127,12 @@ export function App(props: AppProps): JSX.Element {
     const runId = runIdRef.current;
 
     void (async () => {
-      // Reuse a stored id rather than minting a new one: `createSession` is
+      // Reuse a stored id rather than minting a new one: `createCampaign` is
       // only ever called when this mount is genuinely starting a fresh
       // fight, never on a reconnect.
-      const stored = sessionStorage.getItem(SESSION_STORAGE_KEY);
-      const sessionId = stored ?? (await createSession(ENCOUNTER_ID));
-      if (stored === null) sessionStorage.setItem(SESSION_STORAGE_KEY, sessionId);
+      const stored = sessionStorage.getItem(CAMPAIGN_STORAGE_KEY);
+      const campaignId = stored ?? (await createCampaign(ENCOUNTER_ID));
+      if (stored === null) sessionStorage.setItem(CAMPAIGN_STORAGE_KEY, campaignId);
       if (runIdRef.current !== runId) return;
 
       const fetched = await fetchCatalogue(ENCOUNTER_ID);
@@ -142,7 +142,7 @@ export function App(props: AppProps): JSX.Element {
       setCatalogue(fetched);
 
       connectionRef.current = connect({
-        sessionId,
+        campaignId,
         ...(props.wsUrl === undefined ? {} : { url: props.wsUrl }),
         ...(props.socketFactory === undefined ? {} : { socketFactory: props.socketFactory }),
         onFrame: (frame: ServerFrame) => {
@@ -165,20 +165,20 @@ export function App(props: AppProps): JSX.Element {
   }, [started, reconnectNonce, props.wsUrl, props.socketFactory]);
 
   // The one teardown that gets back to a clean start screen: drop the stored
-  // session id, close whatever connection is live, and reset every piece of
+  // campaign id, close whatever connection is live, and reset every piece of
   // state a fresh mount would otherwise read as "still in progress". Used by
-  // the automatic `unknown_session` recovery below — the session is gone, so
+  // the automatic `unknown_campaign` recovery below — the campaign is gone, so
   // there is nothing to resume and nothing to weigh.
   //
   // `sequenceRef` is part of "every piece": it is not React state, so it
-  // survives this reset unless cleared by hand, and the next session's join
-  // would otherwise carry a dead session's `resumeFrom`. Today that is
+  // survives this reset unless cleared by hand, and the next campaign's join
+  // would otherwise carry a dead campaign's `resumeFrom`. Today that is
   // harmless only by accident (a fresh log has just sequence 0, so the
-  // server falls back to a full `session_state`); if that fallback ever
+  // server falls back to a full `campaign_state`); if that fallback ever
   // changes, the client would get bare `event` frames against a null
   // snapshot and drop every one of them, hanging on "connecting…".
   const resetToStart = useCallback(() => {
-    sessionStorage.removeItem(SESSION_STORAGE_KEY);
+    sessionStorage.removeItem(CAMPAIGN_STORAGE_KEY);
     clearStoredClientState();
     connectionRef.current?.close();
     connectionRef.current = null;
@@ -190,9 +190,9 @@ export function App(props: AppProps): JSX.Element {
 
   // `internal_error`: the spec's error table says "Surface, and offer
   // reconnect", and reconnect is meant literally. Both producers
-  // (`SequenceConflictError`/`SessionMismatchError` on a failed append) leave
-  // the session ALIVE and resumable, and an `error` frame does not close the
-  // socket — so tearing the session down would throw away a fight the server
+  // (`SequenceConflictError`/`CampaignMismatchError` on a failed append) leave
+  // the campaign ALIVE and resumable, and an `error` frame does not close the
+  // socket — so tearing the campaign down would throw away a fight the server
   // is still perfectly willing to continue. This keeps the stored id and
   // `sequenceRef` intact and just re-runs the connect effect, which rejoins
   // and resumes. The error is cleared because the reconnect IS the response
@@ -202,42 +202,42 @@ export function App(props: AppProps): JSX.Element {
     setReconnectNonce((previous) => previous + 1);
   }, []);
 
-  // `unknown_session`: the server has forgotten this session (error table,
+  // `unknown_campaign`: the server has forgotten this campaign (error table,
   // design doc `## Error handling`). The stored id must not outlive it, and
   // the only sane recovery is back to the start screen — there is nothing
   // left here to resume. Automatic, unlike `internal_error`'s player-
-  // triggered control below: there is nothing to weigh here, the session is
+  // triggered control below: there is nothing to weigh here, the campaign is
   // simply gone.
   useEffect(() => {
-    if (state.lastError?.code !== "unknown_session") return;
+    if (state.lastError?.code !== "unknown_campaign") return;
     resetToStart();
   }, [state.lastError, resetToStart]);
 
   // Once the fight is over, the stored id must not outlive it either —
-  // otherwise a later refresh rejoins a session that has already ended,
+  // otherwise a later refresh rejoins a campaign that has already ended,
   // with no path back to the start screen short of clearing storage by
   // hand. The live view still shows the victory/defeat screen normally;
   // this only affects what a subsequent mount reads.
   useEffect(() => {
     if (state.snapshot === null) return;
     if (conclusionOf(state.snapshot) === "ongoing") return;
-    sessionStorage.removeItem(SESSION_STORAGE_KEY);
+    sessionStorage.removeItem(CAMPAIGN_STORAGE_KEY);
     clearStoredClientState();
   }, [state.snapshot]);
 
   // The roll log and the narration survive a reload only because they are
-  // written down here: `SessionState` carries neither, so the `session_state`
+  // written down here: `CampaignState` carries neither, so the `campaign_state`
   // frame a fresh join is answered with restores the board and nothing else
   // (`state/persistence.ts` has the full argument).
   //
   // Declared after both teardowns above, and that order is load-bearing:
   // effects run in declaration order, so on the commit where the fight ends
-  // or the session is disowned, the id is already gone by the time this runs
+  // or the campaign is disowned, the id is already gone by the time this runs
   // and the guard below stops it writing the log straight back.
   useEffect(() => {
-    const sessionId = sessionStorage.getItem(SESSION_STORAGE_KEY);
-    if (sessionId === null) return;
-    storeClientState(sessionId, state);
+    const campaignId = sessionStorage.getItem(CAMPAIGN_STORAGE_KEY);
+    if (campaignId === null) return;
+    storeClientState(campaignId, state);
   }, [state]);
 
   const send = useCallback((message: ClientMessage) => {
@@ -245,7 +245,7 @@ export function App(props: AppProps): JSX.Element {
   }, []);
 
   // Shared by both the pre- and post-snapshot renders below: an `error` or
-  // `rejected` frame can arrive before the first `session_state` (e.g. an
+  // `rejected` frame can arrive before the first `campaign_state` (e.g. an
   // `internal_error` on join), so `ErrorBanner` is not exclusive to the
   // post-snapshot view either.
   const dismissError = useCallback(() => {
@@ -291,8 +291,8 @@ export function App(props: AppProps): JSX.Element {
 
   if (state.snapshot === null || catalogue === null) {
     // `ErrorBanner` renders here too: an `error` frame that is not
-    // `unknown_session` (`internal_error`, `malformed_message`) can arrive
-    // on join, before any `session_state` — without this, the player would
+    // `unknown_campaign` (`internal_error`, `malformed_message`) can arrive
+    // on join, before any `campaign_state` — without this, the player would
     // be stuck reading the "connecting…" status forever with no explanation.
     return (
       <main>

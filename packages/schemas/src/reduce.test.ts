@@ -2,10 +2,10 @@ import { describe, expect, it } from "vitest";
 import { fold, reduce } from "./reduce.js";
 import { ActionEconomy, Combatant } from "./world.js";
 import type { GameEvent } from "./events.js";
-import type { SessionState } from "./protocol.js";
+import type { CampaignState } from "./protocol.js";
 
-const base: SessionState = {
-  sessionId: "s1",
+const base: CampaignState = {
+  campaignId: "s1",
   rootSeed: 7,
   encounterId: "e1",
   grid: { width: 2, height: 1, tiles: [["normal", "normal"]] },
@@ -23,7 +23,7 @@ function event(
 ): GameEvent {
   return {
     eventId: `00000000-0000-4000-8000-${String(sequence).padStart(12, "0")}`,
-    sessionId: "s1",
+    campaignId: "s1",
     sequence,
     timestamp: "2026-08-19T10:00:00.000Z",
     type,
@@ -96,7 +96,7 @@ describe("reduce", () => {
   });
 
   it("replaces combatants from a state delta, round-tripping the full payload", () => {
-    const withStaleCombatant: SessionState = {
+    const withStaleCombatant: CampaignState = {
       ...base,
       combatants: Combatant.array().parse([rawCombatant({ combatantId: "stale" })]),
     };
@@ -125,7 +125,7 @@ describe("reduce", () => {
   // `applyTurn` sets `actionEconomy: plan.economyAfter` on whoever just
   // acted, spending it, and nothing used to clear it again — so a
   // combatant's second-ever turn was rejected `action_already_used`
-  // forever, and no session could ever complete a second round (see this
+  // forever, and no campaign could ever complete a second round (see this
   // task's report). `startTurn()` is the SRD's "fresh economy for a new
   // turn" — mirrors `tools/sim/src/engine/encounter.ts`'s reset at the same
   // logical moment.
@@ -138,7 +138,7 @@ describe("reduce", () => {
   };
 
   it("refreshes the action economy of whoever's turn is beginning", () => {
-    const withSpentActors: SessionState = {
+    const withSpentActors: CampaignState = {
       ...base,
       combatants: Combatant.array().parse([
         rawCombatant({ combatantId: "hero", actionEconomy: SPENT_ECONOMY }),
@@ -158,7 +158,7 @@ describe("reduce", () => {
   });
 
   it("refreshes the wrapped-to actor's economy when a round rolls over", () => {
-    const atEndWithSpentActors: SessionState = {
+    const atEndWithSpentActors: CampaignState = {
       ...base,
       currentActorIndex: 1,
       combatants: Combatant.array().parse([
@@ -218,7 +218,7 @@ describe("reduce", () => {
   // `combatants` array and fresh combatant objects rather than writing
   // through the ones the caller passed in.
   it("never mutates the combatants given to a turn-advancing scene_changed reduce", () => {
-    const withActors: SessionState = {
+    const withActors: CampaignState = {
       ...base,
       combatants: Combatant.array().parse([
         rawCombatant({ combatantId: "hero", actionEconomy: SPENT_ECONOMY }),

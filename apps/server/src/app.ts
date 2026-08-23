@@ -5,11 +5,11 @@ import type { FastifyInstance } from "fastify";
 import websocket from "@fastify/websocket";
 import type { TurnPorts } from "./core/pipeline.js";
 import { registerHttpRoutes } from "./transport/http.js";
-import type { SessionRegistry } from "./transport/http.js";
+import type { CampaignRegistry } from "./transport/http.js";
 import { registerWebSocketRoute } from "./transport/ws.js";
 
 export interface BuildAppInput {
-  registry: SessionRegistry;
+  registry: CampaignRegistry;
   ports: TurnPorts;
   logLevel?: string;
 }

@@ -9,15 +9,15 @@
 // — death saves are implemented but not driven by the encounter pipeline
 // (RULES_REFERENCE.md §8's gap). Defeat is a normal ending here, not an
 // error state.
-import type { SessionState } from "@ai-dm/schemas";
+import type { CampaignState } from "@ai-dm/schemas";
 
 export type Conclusion = "ongoing" | "victory" | "defeat";
 
-export function conclusionOf(snapshot: SessionState): Conclusion {
+export function conclusionOf(snapshot: CampaignState): Conclusion {
   const living = snapshot.combatants.filter((each) => each.status === "alive");
   const factions = new Set(living.map((each) => each.faction));
   if (factions.size > 1) return "ongoing";
-  // An empty board is a session that has not started, not a finished fight.
+  // An empty board is a campaign that has not started, not a finished fight.
   if (living.length === 0) return snapshot.combatants.length === 0 ? "ongoing" : "defeat";
   return factions.has("party") ? "victory" : "defeat";
 }

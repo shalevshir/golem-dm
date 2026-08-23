@@ -23,7 +23,7 @@
 //      its `livingFactions.size < 2` check with `currentActorIndex` still
 //      pointing at a hostile. No terminal event is emitted, and the next
 //      player `structured_action` comes back `not_your_turn`. Conclusion is
-//      therefore read from the server's own projection (`loadSession`)
+//      therefore read from the server's own projection (`loadCampaign`)
 //      after every command, never inferred from a socket frame that would
 //      never arrive.
 //   3. C-38 — `EncounterDefinition.maxRounds` is data nothing reads; there
@@ -52,12 +52,12 @@ import {
 import { createInMemoryEventStore } from "@ai-dm/memory";
 import type { EventStore } from "@ai-dm/memory";
 import { ServerFrame, fold } from "@ai-dm/schemas";
-import type { GameEvent, SessionState } from "@ai-dm/schemas";
+import type { GameEvent, CampaignState } from "@ai-dm/schemas";
 import { buildApp } from "./app.js";
 import type { TurnPorts } from "./core/pipeline.js";
-import { loadSession } from "./core/session.js";
-import type { Session } from "./core/session.js";
-import { createSessionRegistry } from "./transport/http.js";
+import { loadCampaign } from "./core/campaign.js";
+import type { Campaign } from "./core/campaign.js";
+import { createCampaignRegistry } from "./transport/http.js";
 
 let running: FastifyInstance | null = null;
 // Every socket this file opens, across both tests, so `afterEach` can force
@@ -125,7 +125,7 @@ async function startServer(): Promise<{ app: FastifyInstance; url: string; store
     turnTimeoutMs: 10_000,
     conditionNamesHebrew: new Map([["prone", "שרוע"]]),
   };
-  const registry = createSessionRegistry({
+  const registry = createCampaignRegistry({
     store,
     uuid,
     clock: () => "2026-08-19T10:00:00.000Z",
@@ -140,13 +140,13 @@ async function startServer(): Promise<{ app: FastifyInstance; url: string; store
   return { app, url: `ws://127.0.0.1:${String(address.port)}/ws`, store };
 }
 
-async function createSessionOver(app: FastifyInstance): Promise<string> {
+async function createCampaignOver(app: FastifyInstance): Promise<string> {
   const response = await app.inject({
     method: "POST",
-    url: "/sessions",
+    url: "/campaigns",
     payload: { encounterId: "goblin-ambush" },
   });
-  return (JSON.parse(response.body) as { sessionId: string }).sessionId;
+  return (JSON.parse(response.body) as { campaignId: string }).campaignId;
 }
 
 function connect(url: string): Promise<WebSocket> {
@@ -249,56 +249,56 @@ class FrameLog {
 async function joinAndAck(
   socket: WebSocket,
   log: FrameLog,
-  sessionId: string,
+  campaignId: string,
   resumeFrom?: number,
 ): Promise<ServerFrame> {
   const before = log.frames.length;
-  send(socket, { type: "join", sessionId, ...(resumeFrom === undefined ? {} : { resumeFrom }) });
+  send(socket, { type: "join", campaignId, ...(resumeFrom === undefined ? {} : { resumeFrom }) });
   await log.waitFor((frames) => frames.length > before, "the join acknowledgement");
   const ack = log.frames[before];
   if (ack === undefined) throw new Error("join ack vanished immediately after resolving");
   return ack;
 }
 
-function livingFactions(state: SessionState): ReadonlySet<string> {
+function livingFactions(state: CampaignState): ReadonlySet<string> {
   return new Set(
     state.combatants.filter((combatant) => combatant.status === "alive").map((c) => c.faction),
   );
 }
 
 /**
- * Polls the server's own projection (`loadSession`, folding the real event
+ * Polls the server's own projection (`loadCampaign`, folding the real event
  * log) until `predicate` holds. C-37: after the hero dies the pipeline
  * wedges without emitting a terminal event, so conclusion has to be read
  * from the store, never inferred from a socket frame that will not arrive.
  *
  * `predicate` must itself check for progress (e.g. `nextSequence` past some
  * baseline) — this only polls, it does not know what "before" looked like.
- * A predicate that describes a state the session can already be resting in
+ * A predicate that describes a state the campaign can already be resting in
  * (e.g. "it is the hero's turn", which is also true of the untouched
  * initial state) resolves immediately without ever confirming a command was
  * even processed.
  */
 async function waitForProjection(
   store: EventStore,
-  sessionId: string,
-  predicate: (session: Session) => boolean,
+  campaignId: string,
+  predicate: (campaign: Campaign) => boolean,
   label: string,
-): Promise<Session> {
+): Promise<Campaign> {
   const deadline = Date.now() + WAIT_TIMEOUT_MS;
   for (;;) {
-    const session = await loadSession({ sessionId, store });
-    if (session === null)
-      throw new Error(`Session ${sessionId} disappeared while waiting for ${label}.`);
-    if (predicate(session)) return session;
+    const campaign = await loadCampaign({ campaignId, store });
+    if (campaign === null)
+      throw new Error(`Campaign ${campaignId} disappeared while waiting for ${label}.`);
+    if (predicate(campaign)) return campaign;
     if (Date.now() > deadline) {
-      const combatants = session.state.combatants
+      const combatants = campaign.state.combatants
         .map((c) => `${c.combatantId}=${String(c.currentHp)}hp/${c.status}`)
         .join(", ");
-      const actor = session.state.turnOrder[session.state.currentActorIndex] ?? "none";
+      const actor = campaign.state.turnOrder[campaign.state.currentActorIndex] ?? "none";
       throw new Error(
         `Timed out after ${String(WAIT_TIMEOUT_MS)}ms waiting for ${label}. ` +
-          `Last projection: round ${String(session.state.round)}, up next ${actor}, ` +
+          `Last projection: round ${String(campaign.state.round)}, up next ${actor}, ` +
           `combatants [${combatants}].`,
       );
     }
@@ -323,7 +323,7 @@ describe("end to end", () => {
   // Break scenario, assertion by assertion (all below the `waitFor`/
   // `waitForProjection` loop, which itself goes red on any hang or on a
   // pipeline that never lets one faction win — see the loop's own comment):
-  //   - `ack.type !== "session_state"`: join not wired to the registry, or
+  //   - `ack.type !== "campaign_state"`: join not wired to the registry, or
   //     answering everything with a generic error.
   //   - `hero.status !== "dead"` / `hero.currentHp !== 0`: the death-vs-
   //     unconscious branch (C-31) regressed, or damage stopped clamping at 0.
@@ -342,12 +342,12 @@ describe("end to end", () => {
   //     reordered or double-delivered frames.
   it("plays a full combat to a conclusion over the socket", async () => {
     const { app, url, store } = await startServer();
-    const sessionId = await createSessionOver(app);
+    const campaignId = await createCampaignOver(app);
 
     const socket = await connect(url);
     const log = new FrameLog(socket);
-    const ack = await joinAndAck(socket, log, sessionId);
-    expect(ack.type).toBe("session_state");
+    const ack = await joinAndAck(socket, log, campaignId);
+    expect(ack.type).toBe("campaign_state");
 
     // C-38: nothing under apps/server/src or packages/rules-engine/src
     // enforces EncounterDefinition.maxRounds — this constant is the ONLY
@@ -358,9 +358,9 @@ describe("end to end", () => {
     // roughly 6-7 rounds; 20 still gives about 3x headroom without letting a
     // genuinely wedged pipeline spin unbounded.
     const MAX_HERO_COMMANDS = 20;
-    let concluded: Session | undefined;
-    let tracked = await loadSession({ sessionId, store });
-    if (tracked === null) throw new Error(`Session ${sessionId} not found right after creation`);
+    let concluded: Campaign | undefined;
+    let tracked = await loadCampaign({ campaignId, store });
+    if (tracked === null) throw new Error(`Campaign ${campaignId} not found right after creation`);
 
     for (let turn = 0; turn < MAX_HERO_COMMANDS; turn += 1) {
       const beforeSequence = tracked.nextSequence;
@@ -372,13 +372,13 @@ describe("end to end", () => {
       // waiting for "back to the hero, or nobody left to fight" here is
       // waiting for exactly one round, never a partial one. The
       // `nextSequence > beforeSequence` guard is required, not cosmetic: the
-      // session is already resting at "it's the hero's turn" before any
+      // campaign is already resting at "it's the hero's turn" before any
       // command lands (currentActorIndex starts at 0), so without it this
       // would resolve instantly on turn 0, before the command was even
       // processed.
-      const session = await waitForProjection(
+      const campaign = await waitForProjection(
         store,
-        sessionId,
+        campaignId,
         (candidate) => {
           if (candidate.nextSequence <= beforeSequence) return false;
           const alive = livingFactions(candidate.state);
@@ -388,10 +388,10 @@ describe("end to end", () => {
         },
         `hero command ${String(turn)} to resolve`,
       );
-      tracked = session;
+      tracked = campaign;
 
-      if (livingFactions(session.state).size < 2) {
-        concluded = session;
+      if (livingFactions(campaign.state).size < 2) {
+        concluded = campaign;
         break;
       }
     }
@@ -428,7 +428,7 @@ describe("end to end", () => {
     // failure mode: dice_rolled fires on every turn including a Dodge, so
     // a bare event count proves nothing; length alone would also pass on a
     // stream of nothing but `error` frames).
-    const events = await store.readSince(sessionId, -1);
+    const events = await store.readSince(campaignId, -1);
     expect(events.some((event) => event.type === "dice_rolled")).toBe(true);
     expect(events.some((event) => event.type === "state_delta_applied")).toBe(true);
 
@@ -470,17 +470,17 @@ describe("end to end", () => {
   //     sequence checks and the exact `min(secondSeqs) === cut + 1` check.
   it("resumes a mid-fight reconnect identically to the server's own projection", async () => {
     const { app, url, store } = await startServer();
-    const sessionId = await createSessionOver(app);
+    const campaignId = await createCampaignOver(app);
 
     const firstSocket = await connect(url);
     const firstLog = new FrameLog(firstSocket);
-    const ack = await joinAndAck(firstSocket, firstLog, sessionId);
-    if (ack.type !== "session_state") throw new Error(`Expected session_state, got ${ack.type}`);
-    const clientState: SessionState = ack.snapshot;
+    const ack = await joinAndAck(firstSocket, firstLog, campaignId);
+    if (ack.type !== "campaign_state") throw new Error(`Expected campaign_state, got ${ack.type}`);
+    const clientState: CampaignState = ack.snapshot;
 
-    const beforeRound = await loadSession({ sessionId, store });
+    const beforeRound = await loadCampaign({ campaignId, store });
     if (beforeRound === null)
-      throw new Error(`Session ${sessionId} not found right after creation`);
+      throw new Error(`Campaign ${campaignId} not found right after creation`);
     const beforeSequence = beforeRound.nextSequence;
     send(firstSocket, heroDodge("t1"));
 
@@ -522,7 +522,7 @@ describe("end to end", () => {
     // round — both goblins' turns — to finish appending.
     const afterRound = await waitForProjection(
       store,
-      sessionId,
+      campaignId,
       (candidate) => {
         if (candidate.nextSequence <= cut + 1) return false;
         const alive = livingFactions(candidate.state);
@@ -550,7 +550,7 @@ describe("end to end", () => {
     // A second client resumes from what the first one had.
     const secondSocket = await connect(url);
     const secondLog = new FrameLog(secondSocket);
-    send(secondSocket, { type: "join", sessionId, resumeFrom: cut });
+    send(secondSocket, { type: "join", campaignId, resumeFrom: cut });
 
     // Proves the second socket received real content, not merely SOME
     // frame: its highest event sequence must reach the exact point the
@@ -579,7 +579,7 @@ describe("end to end", () => {
     // No snapshot exists yet (SNAPSHOT_EVERY is 50; one round is nowhere
     // close), so `join`'s snapshot-fallback branch (C-16) does not fire —
     // every frame the second client gets back is a plain `event` replay of
-    // exactly what it missed, never a resent session_state or an error.
+    // exactly what it missed, never a resent campaign_state or an error.
     // Task 4: when the round this join catches up on ends back on the
     // hero's own turn (with the hero alive), `join` also pushes one
     // trailing `turn_affordances` frame after the replayed events — the one
@@ -601,8 +601,8 @@ describe("end to end", () => {
     // event either socket actually delivered, reproduces the server's own
     // projection exactly.
     const reconstructed = fold(clientState, [...firstEvents, ...secondEvents]);
-    const serverProjection = await loadSession({ sessionId, store });
-    if (serverProjection === null) throw new Error("session disappeared from the store");
+    const serverProjection = await loadCampaign({ campaignId, store });
+    if (serverProjection === null) throw new Error("campaign disappeared from the store");
     expect(reconstructed).toEqual(serverProjection.state);
 
     secondSocket.close();

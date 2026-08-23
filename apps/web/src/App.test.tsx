@@ -1,28 +1,28 @@
-// The top-level wiring test: session lifecycle, reconnect, fold parity
+// The top-level wiring test: campaign lifecycle, reconnect, fold parity
 // through the whole component, and ending detection from the projection.
 //
 // The fake socket (`net/fake-socket.ts`, shared with `connection.test.ts`)
 // never fires "open" on its own — a real `WebSocket` fires it asynchronously,
 // but this stand-in only does what a test tells it to. So every helper below
 // that needs a join to land calls `socket.emitOpen()` itself, inside
-// `waitFor` where the timing after `createSession`/`fetchCatalogue` resolve
+// `waitFor` where the timing after `createCampaign`/`fetchCatalogue` resolve
 // is not otherwise observable from outside the component.
 import { StrictMode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, render, screen, waitFor } from "@testing-library/react";
 import type { RenderResult } from "@testing-library/react";
 import { ExecuteTurn, fold } from "@ai-dm/schemas";
-import type { Combatant, GameEvent, SessionState } from "@ai-dm/schemas";
-import { App, SESSION_STORAGE_KEY } from "./App.js";
+import type { Combatant, GameEvent, CampaignState } from "@ai-dm/schemas";
+import { App, CAMPAIGN_STORAGE_KEY } from "./App.js";
 import { LOG_STORAGE_KEY } from "./state/persistence.js";
 import { he } from "./i18n.js";
 import { fakeSocket } from "./net/fake-socket.js";
 import type { FakeSocket } from "./net/fake-socket.js";
 import { combatant } from "./state/combatant-fixture.js";
 
-function snapshotWith(combatants: Combatant[]): SessionState {
+function snapshotWith(combatants: Combatant[]): CampaignState {
   return {
-    sessionId: "s1",
+    campaignId: "s1",
     rootSeed: 3,
     encounterId: "goblin-ambush",
     grid: {
@@ -45,7 +45,7 @@ function event(
 ): GameEvent {
   return {
     eventId: `00000000-0000-4000-8000-${String(sequence).padStart(12, "0")}`,
-    sessionId: "s1",
+    campaignId: "s1",
     sequence,
     timestamp: "2026-08-19T10:00:00.000Z",
     type,
@@ -82,7 +82,7 @@ let fetchMock: ReturnType<typeof vi.fn>;
  * Renders and, unless `skipClick`, presses the start button. Then polls
  * `socket.emitOpen()` inside `waitFor` until the `connect()` effect has
  * actually registered the socket's listeners (after the mocked
- * `createSession`/`fetchCatalogue` promises settle) — at which point the
+ * `createCampaign`/`fetchCatalogue` promises settle) — at which point the
  * first `emitOpen()` call finally fires the "open" listener and the join
  * goes out. Earlier calls are silent no-ops (`fake-socket.ts`'s
  * `listeners.get("open")` is `undefined` until `connect()` runs), so this
@@ -110,7 +110,7 @@ beforeEach(() => {
     return Promise.resolve({
       ok: true,
       json: (): Promise<unknown> =>
-        Promise.resolve(init?.method === "POST" ? { sessionId: "s1" } : catalogue),
+        Promise.resolve(init?.method === "POST" ? { campaignId: "s1" } : catalogue),
     } as Response);
   });
   vi.stubGlobal("fetch", fetchMock);
@@ -133,7 +133,7 @@ afterEach(() => {
 describe("App", () => {
   it("re-joins with the highest folded sequence after a drop", async () => {
     await start();
-    expect(JSON.parse(socket.sent[0] ?? "{}")).toEqual({ type: "join", sessionId: "s1" });
+    expect(JSON.parse(socket.sent[0] ?? "{}")).toEqual({ type: "join", campaignId: "s1" });
 
     const genesis = snapshotWith([
       combatant("hero", "party", "alive"),
@@ -141,7 +141,7 @@ describe("App", () => {
     ]);
 
     act(() => {
-      socket.emitMessage({ type: "session_state", sequence: 0, snapshot: genesis });
+      socket.emitMessage({ type: "campaign_state", sequence: 0, snapshot: genesis });
       socket.emitMessage({
         type: "event",
         event: event(1, "player_input", { clientMessageId: "m1" }),
@@ -203,7 +203,7 @@ describe("App", () => {
     ];
 
     act(() => {
-      socket.emitMessage({ type: "session_state", sequence: 0, snapshot: genesis });
+      socket.emitMessage({ type: "campaign_state", sequence: 0, snapshot: genesis });
       for (const each of log) socket.emitMessage({ type: "event", event: each });
     });
 
@@ -229,7 +229,7 @@ describe("App", () => {
     await start();
     act(() => {
       socket.emitMessage({
-        type: "session_state",
+        type: "campaign_state",
         sequence: 9,
         snapshot: snapshotWith([
           combatant("hero", "party", "dead"),
@@ -242,44 +242,44 @@ describe("App", () => {
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
 
-  it("reuses a session id from sessionStorage instead of creating a new one", async () => {
-    // Without this, a browser refresh mid-fight calls POST /sessions and
-    // starts a brand-new session — the exit criterion ("refresh mid-fight
-    // without losing the session") fails outright.
-    sessionStorage.setItem(SESSION_STORAGE_KEY, "s1");
+  it("reuses a campaign id from sessionStorage instead of creating a new one", async () => {
+    // Without this, a browser refresh mid-fight calls POST /campaigns and
+    // starts a brand-new campaign — the exit criterion ("refresh mid-fight
+    // without losing the campaign") fails outright.
+    sessionStorage.setItem(CAMPAIGN_STORAGE_KEY, "s1");
 
     await start({ skipClick: true });
 
     expect(screen.queryByRole("button", { name: he.app.startFight })).not.toBeInTheDocument();
-    expect(JSON.parse(socket.sent[0] ?? "{}")).toEqual({ type: "join", sessionId: "s1" });
+    expect(JSON.parse(socket.sent[0] ?? "{}")).toEqual({ type: "join", campaignId: "s1" });
     expect(fetchMock).not.toHaveBeenCalledWith(
-      "/sessions",
+      "/campaigns",
       expect.objectContaining({ method: "POST" }),
     );
   });
 
-  it("clears the stored session id and returns to the start screen on unknown_session", async () => {
+  it("clears the stored campaign id and returns to the start screen on unknown_campaign", async () => {
     await start();
-    expect(sessionStorage.getItem(SESSION_STORAGE_KEY)).toBe("s1");
+    expect(sessionStorage.getItem(CAMPAIGN_STORAGE_KEY)).toBe("s1");
 
     act(() => {
-      socket.emitMessage({ type: "error", code: "unknown_session", message: "gone" });
+      socket.emitMessage({ type: "error", code: "unknown_campaign", message: "gone" });
     });
 
-    expect(sessionStorage.getItem(SESSION_STORAGE_KEY)).toBeNull();
+    expect(sessionStorage.getItem(CAMPAIGN_STORAGE_KEY)).toBeNull();
     // The roll log goes with the id. A log left behind here would be restored
     // by the next mount and rendered against the next fight's board.
     expect(sessionStorage.getItem(LOG_STORAGE_KEY)).toBeNull();
     expect(await screen.findByRole("button", { name: he.app.startFight })).toBeInTheDocument();
   });
 
-  it("clears the stored session id once the fight concludes, so a later refresh doesn't rejoin a finished session", async () => {
+  it("clears the stored campaign id once the fight concludes, so a later refresh doesn't rejoin a finished campaign", async () => {
     await start();
-    expect(sessionStorage.getItem(SESSION_STORAGE_KEY)).toBe("s1");
+    expect(sessionStorage.getItem(CAMPAIGN_STORAGE_KEY)).toBe("s1");
 
     act(() => {
       socket.emitMessage({
-        type: "session_state",
+        type: "campaign_state",
         sequence: 9,
         snapshot: snapshotWith([
           combatant("hero", "party", "dead"),
@@ -290,14 +290,14 @@ describe("App", () => {
 
     expect(await screen.findByText(he.app.defeat)).toBeInTheDocument();
     // Without this, every refresh after the fight ends rejoins the same
-    // finished session forever — a dead end sitting on the exit criterion.
-    expect(sessionStorage.getItem(SESSION_STORAGE_KEY)).toBeNull();
+    // finished campaign forever — a dead end sitting on the exit criterion.
+    expect(sessionStorage.getItem(CAMPAIGN_STORAGE_KEY)).toBeNull();
     expect(sessionStorage.getItem(LOG_STORAGE_KEY)).toBeNull();
   });
 
   it("surfaces an error frame that arrives before the first snapshot instead of hanging on the connecting screen", async () => {
     // internal_error/malformed_message can arrive on join, before any
-    // session_state — unlike unknown_session there is no recovery effect for
+    // campaign_state — unlike unknown_campaign there is no recovery effect for
     // these, so ErrorBanner is the only way the player ever finds out.
     await start();
 
@@ -321,7 +321,7 @@ describe("App", () => {
 
     act(() => {
       socket.emitMessage({
-        type: "session_state",
+        type: "campaign_state",
         sequence: 0,
         snapshot: snapshotWith([
           combatant("hero", "party", "alive"),
@@ -353,7 +353,7 @@ describe("App", () => {
     await start();
     act(() => {
       socket.emitMessage({
-        type: "session_state",
+        type: "campaign_state",
         sequence: 0,
         snapshot: snapshotWith([
           combatant("hero", "party", "alive"),
@@ -400,10 +400,10 @@ describe("App", () => {
 
   it("restores the roll log and the narration on a remount, not just the board", async () => {
     // What a page reload actually is, from the component's side: the old tree
-    // is gone, a new one mounts against the same stored session id, and the
+    // is gone, a new one mounts against the same stored campaign id, and the
     // join it sends is answered with the live projection. The board comes
     // back from that projection — but the roll log is folded client-side from
-    // events `SessionState` does not carry, and the narration arrives as
+    // events `CampaignState` does not carry, and the narration arrives as
     // `narrative_token` frames that are not events at all, so neither is in
     // the answer. Without `state/persistence.ts` both come back empty, which
     // is exactly what the manual restart test found.
@@ -413,7 +413,7 @@ describe("App", () => {
       combatant("goblin-a", "hostile", "alive"),
     ]);
     act(() => {
-      socket.emitMessage({ type: "session_state", sequence: 0, snapshot });
+      socket.emitMessage({ type: "campaign_state", sequence: 0, snapshot });
       socket.emitMessage({
         type: "event",
         event: event(1, "action_validated", {
@@ -460,10 +460,10 @@ describe("App", () => {
     // frames that `applyFrame` drops while `snapshot` is null — it would hang
     // on the connecting screen. Asking for the whole projection is the right
     // request; the log is restored beside it, not fetched.
-    expect(JSON.parse(socket.sent[0] ?? "{}")).toEqual({ type: "join", sessionId: "s1" });
+    expect(JSON.parse(socket.sent[0] ?? "{}")).toEqual({ type: "join", campaignId: "s1" });
 
     act(() => {
-      socket.emitMessage({ type: "session_state", sequence: 2, snapshot });
+      socket.emitMessage({ type: "campaign_state", sequence: 2, snapshot });
     });
 
     expect(await screen.findByText(he.log.hit)).toBeInTheDocument();
@@ -477,11 +477,11 @@ describe("App", () => {
     // describes a board it does not. Reaching this needs events the client
     // never saw — the server appending a turn after the socket died, which a
     // kill mid-turn does.
-    sessionStorage.setItem(SESSION_STORAGE_KEY, "s1");
+    sessionStorage.setItem(CAMPAIGN_STORAGE_KEY, "s1");
     sessionStorage.setItem(
       LOG_STORAGE_KEY,
       JSON.stringify({
-        sessionId: "s1",
+        campaignId: "s1",
         sequence: 2,
         combatLog: [
           { actorId: "hero", actionType: "dodge", movedFeet: 0, attacks: [], forfeited: false },
@@ -494,7 +494,7 @@ describe("App", () => {
     await start({ skipClick: true });
     act(() => {
       socket.emitMessage({
-        type: "session_state",
+        type: "campaign_state",
         sequence: 9,
         snapshot: snapshotWith([
           combatant("hero", "party", "alive"),
@@ -508,18 +508,18 @@ describe("App", () => {
     expect(screen.queryByText(NARRATION)).not.toBeInTheDocument();
   });
 
-  it("does not carry a dead session's resumeFrom into the next fight", async () => {
+  it("does not carry a dead campaign's resumeFrom into the next fight", async () => {
     // `sequenceRef` is a ref, not React state, so `resetToStart` clearing
-    // every `useState` leaves it holding the sequence of the session that
+    // every `useState` leaves it holding the sequence of the campaign that
     // just went away. The next fight's join would then resume from it.
     // Harmless today only by accident — a fresh log holds just sequence 0,
-    // so the server falls back to a full `session_state` — which makes this
+    // so the server falls back to a full `campaign_state` — which makes this
     // exactly the kind of latent coupling worth pinning rather than
     // rediscovering when that fallback changes.
     await start();
     act(() => {
       socket.emitMessage({
-        type: "session_state",
+        type: "campaign_state",
         sequence: 7,
         snapshot: snapshotWith([
           combatant("hero", "party", "alive"),
@@ -529,7 +529,7 @@ describe("App", () => {
     });
 
     act(() => {
-      socket.emitMessage({ type: "error", code: "unknown_session", message: "gone" });
+      socket.emitMessage({ type: "error", code: "unknown_campaign", message: "gone" });
     });
     expect(await screen.findByRole("button", { name: he.app.startFight })).toBeInTheDocument();
 
@@ -543,21 +543,21 @@ describe("App", () => {
       expect(socket.sent.length).toBeGreaterThan(0);
     });
     // A brand-new fight starts from the beginning: no resumeFrom at all.
-    expect(JSON.parse(socket.sent[0] ?? "{}")).toEqual({ type: "join", sessionId: "s1" });
+    expect(JSON.parse(socket.sent[0] ?? "{}")).toEqual({ type: "join", campaignId: "s1" });
   });
 
-  it("reconnects to the same session on internal_error instead of discarding the fight", async () => {
+  it("reconnects to the same campaign on internal_error instead of discarding the fight", async () => {
     // Spec's error table: `internal_error` → "Surface, and offer reconnect",
     // and reconnect is meant literally. Both faults that raise this code
-    // (SequenceConflictError/SessionMismatchError on a failed append) leave
-    // the session alive and resumable, so a control that cleared the stored
+    // (SequenceConflictError/CampaignMismatchError on a failed append) leave
+    // the campaign alive and resumable, so a control that cleared the stored
     // id would throw away a fight the server is still willing to continue.
     // What this pins is the difference: the id SURVIVES, and a fresh join
     // goes out carrying the sequence already folded.
     await start();
     act(() => {
       socket.emitMessage({
-        type: "session_state",
+        type: "campaign_state",
         sequence: 4,
         snapshot: snapshotWith([
           combatant("hero", "party", "alive"),
@@ -579,18 +579,18 @@ describe("App", () => {
     });
 
     // The whole point of the finding: not a teardown.
-    expect(sessionStorage.getItem(SESSION_STORAGE_KEY)).toBe("s1");
+    expect(sessionStorage.getItem(CAMPAIGN_STORAGE_KEY)).toBe("s1");
     expect(screen.queryByRole("button", { name: he.app.startFight })).not.toBeInTheDocument();
 
     await waitFor(() => {
       socket.emitOpen();
       const joins = socket.sent
         .map(
-          (each) => JSON.parse(each) as { type: string; sessionId?: string; resumeFrom?: number },
+          (each) => JSON.parse(each) as { type: string; campaignId?: string; resumeFrom?: number },
         )
         .filter((each) => each.type === "join");
       expect(joins).toHaveLength(joinsBefore + 1);
-      expect(joins.at(-1)).toEqual({ type: "join", sessionId: "s1", resumeFrom: 4 });
+      expect(joins.at(-1)).toEqual({ type: "join", campaignId: "s1", resumeFrom: 4 });
     });
   });
 
@@ -605,7 +605,7 @@ describe("App", () => {
 
     act(() => {
       socket.emitMessage({
-        type: "session_state",
+        type: "campaign_state",
         sequence: 0,
         snapshot: snapshotWith([
           combatant("hero", "party", "alive"),
@@ -664,7 +664,7 @@ describe("App", () => {
     await start();
     act(() => {
       socket.emitMessage({
-        type: "session_state",
+        type: "campaign_state",
         sequence: 0,
         snapshot: snapshotWith([
           combatant("hero", "party", "alive"),
@@ -704,7 +704,7 @@ describe("App", () => {
     await start();
     act(() => {
       socket.emitMessage({
-        type: "session_state",
+        type: "campaign_state",
         sequence: 0,
         snapshot: snapshotWith([
           combatant("hero", "party", "alive"),
@@ -752,7 +752,7 @@ describe("App", () => {
     // StrictMode double-invokes an effect (mount -> cleanup -> mount) only
     // around a component's INITIAL mount, not on a later re-run triggered by
     // a dependency change — so this has to start `started` true from the
-    // very first render (a stored session id, exactly like a real refresh
+    // very first render (a stored campaign id, exactly like a real refresh
     // mid-fight) rather than mounting idle and clicking the start button
     // afterward, or the effect's "real" (non-early-return) body would only
     // ever run once and the bug this guards against would go unexercised.
@@ -762,7 +762,7 @@ describe("App", () => {
     // reset to false by the SECOND mount before the FIRST mount's still
     // -pending async IIFE ever reads it, so both runs reach `connect()` —
     // the socket factory call count is the observable proxy for that.
-    sessionStorage.setItem(SESSION_STORAGE_KEY, "s1");
+    sessionStorage.setItem(CAMPAIGN_STORAGE_KEY, "s1");
     const sockets: FakeSocket[] = [];
     const factory = vi.fn((): FakeSocket => {
       const created = fakeSocket();

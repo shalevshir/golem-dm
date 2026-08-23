@@ -4,10 +4,10 @@ import { connect } from "./connection.js";
 import { fakeSocket } from "./fake-socket.js";
 
 const snapshotFrame: ServerFrame = {
-  type: "session_state",
+  type: "campaign_state",
   sequence: 0,
   snapshot: {
-    sessionId: "s1",
+    campaignId: "s1",
     rootSeed: 1,
     encounterId: "goblin-ambush",
     grid: { width: 1, height: 1, tiles: [["normal"]] },
@@ -27,7 +27,7 @@ describe("connect", () => {
   it("sends a join as soon as the socket opens", () => {
     const socket = fakeSocket();
     connect({
-      sessionId: "s1",
+      campaignId: "s1",
       onFrame: () => undefined,
       onStatus: () => undefined,
       resumeFrom: () => undefined,
@@ -35,7 +35,7 @@ describe("connect", () => {
     });
 
     socket.emitOpen();
-    expect(JSON.parse(socket.sent[0] ?? "{}")).toEqual({ type: "join", sessionId: "s1" });
+    expect(JSON.parse(socket.sent[0] ?? "{}")).toEqual({ type: "join", campaignId: "s1" });
   });
 
   it("re-joins with resumeFrom read fresh at reconnect time, not captured once", () => {
@@ -46,7 +46,7 @@ describe("connect", () => {
     const sockets: ReturnType<typeof fakeSocket>[] = [];
     // A plain mutable value, not a constant thunk: it changes between the
     // first join and the reconnect, the same way the store's folded
-    // sequence actually changes while a session is live. A `connect` that
+    // sequence actually changes while a campaign is live. A `connect` that
     // captured `resumeFrom()` once — at `connect()` time, or once per
     // `open()` call rather than inside the "open" listener — is
     // behaviourally identical here (no frames arrive during the reconnect
@@ -54,7 +54,7 @@ describe("connect", () => {
     // connection attempt, not captured once at `connect()`.
     let sequence: number | undefined = undefined;
     connect({
-      sessionId: "s1",
+      campaignId: "s1",
       onFrame: () => undefined,
       onStatus: () => undefined,
       resumeFrom: () => sequence,
@@ -67,7 +67,7 @@ describe("connect", () => {
 
     expect(sockets).toHaveLength(1);
     sockets[0]?.emitOpen();
-    expect(JSON.parse(sockets[0]?.sent[0] ?? "{}")).toEqual({ type: "join", sessionId: "s1" });
+    expect(JSON.parse(sockets[0]?.sent[0] ?? "{}")).toEqual({ type: "join", campaignId: "s1" });
 
     // The store folds events after the first join lands; a later drop must
     // resume from what has actually been folded by then.
@@ -82,7 +82,7 @@ describe("connect", () => {
 
     expect(JSON.parse(sockets[1]?.sent[0] ?? "{}")).toEqual({
       type: "join",
-      sessionId: "s1",
+      campaignId: "s1",
       resumeFrom: 7,
     });
   });
@@ -91,7 +91,7 @@ describe("connect", () => {
     const onFrame = vi.fn();
     const socket = fakeSocket();
     connect({
-      sessionId: "s1",
+      campaignId: "s1",
       onFrame,
       onStatus: () => undefined,
       resumeFrom: () => undefined,
@@ -103,7 +103,7 @@ describe("connect", () => {
     expect(onFrame).toHaveBeenCalledWith(snapshotFrame);
 
     // A frame that does not satisfy `ServerFrame` must never reach the store.
-    socket.emitMessage({ type: "session_state", sequence: -1 });
+    socket.emitMessage({ type: "campaign_state", sequence: -1 });
     expect(onFrame).toHaveBeenCalledTimes(1);
   });
 
@@ -111,7 +111,7 @@ describe("connect", () => {
     const onStatus = vi.fn();
     const socket = fakeSocket();
     const connection = connect({
-      sessionId: "s1",
+      campaignId: "s1",
       onFrame: () => undefined,
       onStatus,
       resumeFrom: () => undefined,
@@ -133,7 +133,7 @@ describe("connect", () => {
     const onStatus = vi.fn();
     const socket = fakeSocket();
     const connection = connect({
-      sessionId: "s1",
+      campaignId: "s1",
       onFrame: () => undefined,
       onStatus,
       resumeFrom: () => undefined,
@@ -155,7 +155,7 @@ describe("connect", () => {
     // `clearTimeout` deleted would still build a second socket here.
     const sockets: ReturnType<typeof fakeSocket>[] = [];
     const connection = connect({
-      sessionId: "s1",
+      campaignId: "s1",
       onFrame: () => undefined,
       onStatus,
       resumeFrom: () => undefined,

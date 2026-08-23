@@ -16,13 +16,13 @@ describe("generated migration", () => {
   it("creates both tables", () => {
     const sql = migrationSql();
     expect(sql).toContain(`CREATE TABLE "game_events"`);
-    expect(sql).toContain(`CREATE TABLE "session_snapshots"`);
+    expect(sql).toContain(`CREATE TABLE "campaign_snapshots"`);
   });
 
-  it("gives game_events a composite primary key on (session_id, sequence)", () => {
+  it("gives game_events a composite primary key on (campaign_id, sequence)", () => {
     // This is the conflict semantics: it is what makes a duplicate sequence
     // — including one inside a single multi-row INSERT — a 23505.
-    expect(migrationSql()).toContain(`PRIMARY KEY("session_id","sequence")`);
+    expect(migrationSql()).toContain(`PRIMARY KEY("campaign_id","sequence")`);
   });
 
   it("stores event_id and timestamp as text", () => {

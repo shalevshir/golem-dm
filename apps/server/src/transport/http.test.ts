@@ -4,13 +4,13 @@ import { createInMemoryEventStore } from "@ai-dm/memory";
 import type { EventStore } from "@ai-dm/memory";
 import { EncounterCatalogue } from "@ai-dm/schemas";
 import { encounterCatalogue } from "../encounters/index.js";
-import { createSessionRegistry, registerHttpRoutes } from "./http.js";
-import type { SessionRegistry } from "./http.js";
+import { createCampaignRegistry, registerHttpRoutes } from "./http.js";
+import type { CampaignRegistry } from "./http.js";
 
 function appWith() {
   const store = createInMemoryEventStore();
   let n = 0;
-  const registry = createSessionRegistry({
+  const registry = createCampaignRegistry({
     store,
     uuid: () => {
       n += 1;
@@ -24,23 +24,23 @@ function appWith() {
   return { app, registry, store };
 }
 
-describe("POST /sessions", () => {
-  it("creates a session and returns its id", async () => {
+describe("POST /campaigns", () => {
+  it("creates a campaign and returns its id", async () => {
     const { app } = appWith();
     const response = await app.inject({
       method: "POST",
-      url: "/sessions",
+      url: "/campaigns",
       payload: { encounterId: "goblin-ambush" },
     });
     expect(response.statusCode).toBe(201);
-    expect(JSON.parse(response.body)).toMatchObject({ sessionId: expect.any(String) as string });
+    expect(JSON.parse(response.body)).toMatchObject({ campaignId: expect.any(String) as string });
   });
 
   it("rejects an unknown encounter with 404", async () => {
     const { app } = appWith();
     const response = await app.inject({
       method: "POST",
-      url: "/sessions",
+      url: "/campaigns",
       payload: { encounterId: "nope" },
     });
     expect(response.statusCode).toBe(404);
@@ -48,19 +48,19 @@ describe("POST /sessions", () => {
 
   it("rejects a body with no encounterId with 400", async () => {
     const { app } = appWith();
-    const response = await app.inject({ method: "POST", url: "/sessions", payload: {} });
+    const response = await app.inject({ method: "POST", url: "/campaigns", payload: {} });
     expect(response.statusCode).toBe(400);
   });
 
-  it("makes the created session retrievable from the registry", async () => {
+  it("makes the created campaign retrievable from the registry", async () => {
     const { app, registry } = appWith();
     const response = await app.inject({
       method: "POST",
-      url: "/sessions",
+      url: "/campaigns",
       payload: { encounterId: "goblin-ambush" },
     });
-    const { sessionId } = JSON.parse(response.body) as { sessionId: string };
-    expect(await registry.get(sessionId)).not.toBeNull();
+    const { campaignId } = JSON.parse(response.body) as { campaignId: string };
+    expect(await registry.get(campaignId)).not.toBeNull();
   });
 
   it(
@@ -72,7 +72,7 @@ describe("POST /sessions", () => {
       // UnknownEncounterError` would misroute this to 404. The message is
       // deliberately chosen to collide with that regex.
       const app = Fastify();
-      const registry: SessionRegistry = {
+      const registry: CampaignRegistry = {
         create: () => Promise.reject(new Error("Unknown encounter that is really a bug")),
         get: () => Promise.resolve(null),
         tryBegin: () => true,
@@ -83,7 +83,7 @@ describe("POST /sessions", () => {
       registerHttpRoutes(app, registry);
       const response = await app.inject({
         method: "POST",
-        url: "/sessions",
+        url: "/campaigns",
         payload: { encounterId: "goblin-ambush" },
       });
       expect(response.statusCode).toBe(500);
@@ -91,19 +91,19 @@ describe("POST /sessions", () => {
   );
 });
 
-describe("SessionRegistry", () => {
-  // The `live` cache is what lets two WS connections onto the same session
-  // (Task 14) share one mutable `Session` object rather than each folding its
+describe("CampaignRegistry", () => {
+  // The `live` cache is what lets two WS connections onto the same campaign
+  // (Task 14) share one mutable `Campaign` object rather than each folding its
   // own copy — `nextSequence` lives on that object and the pipeline advances
-  // it in place. `registry.get` returning a *non-null* session proves nothing
-  // about that: `loadSession` also returns a (different, freshly-folded)
-  // non-null `Session` by reading the log straight through. Only object
+  // it in place. `registry.get` returning a *non-null* campaign proves nothing
+  // about that: `loadCampaign` also returns a (different, freshly-folded)
+  // non-null `Campaign` by reading the log straight through. Only object
   // identity distinguishes "served from cache" from "silently re-derived
   // every time".
-  it("caches the created session, so a later get returns the identical object", async () => {
+  it("caches the created campaign, so a later get returns the identical object", async () => {
     const { registry } = appWith();
     const created = await registry.create("goblin-ambush");
-    const fetched = await registry.get(created.state.sessionId);
+    const fetched = await registry.get(created.state.campaignId);
     expect(fetched).toBe(created);
   });
 
@@ -111,15 +111,15 @@ describe("SessionRegistry", () => {
     const { registry, store } = appWith();
     const created = await registry.create("goblin-ambush");
     const readSince = vi.spyOn(store, "readSince");
-    await registry.get(created.state.sessionId);
+    await registry.get(created.state.campaignId);
     expect(readSince).not.toHaveBeenCalled();
   });
 
   // CRITICAL-1 unit coverage: `tryBegin`/`end` are the actual mutual-exclusion
-  // primitive `ws.ts` builds its per-session guard on — see
+  // primitive `ws.ts` builds its per-campaign guard on — see
   // `ws.test.ts`'s "CRITICAL-1" test for the end-to-end proof over real
   // sockets that this closes the corrupted-log hazard.
-  it("tryBegin claims a session's in-flight slot exactly once until end releases it", () => {
+  it("tryBegin claims a campaign's in-flight slot exactly once until end releases it", () => {
     const { registry } = appWith();
     expect(registry.tryBegin("s1")).toBe(true);
     expect(registry.tryBegin("s1")).toBe(false);
@@ -127,7 +127,7 @@ describe("SessionRegistry", () => {
     expect(registry.tryBegin("s1")).toBe(true);
   });
 
-  it("tracks in-flight slots independently per session id", () => {
+  it("tracks in-flight slots independently per campaign id", () => {
     const { registry } = appWith();
     expect(registry.tryBegin("s1")).toBe(true);
     expect(registry.tryBegin("s2")).toBe(true);
@@ -136,17 +136,17 @@ describe("SessionRegistry", () => {
   });
 });
 
-describe("SessionRegistry.get", () => {
-  it("folds a session once when two joins race", async () => {
+describe("CampaignRegistry.get", () => {
+  it("folds a campaign once when two joins race", async () => {
     const { registry, store } = appWith();
     const created = await registry.create("goblin-ambush");
-    const sessionId = created.state.sessionId;
+    const campaignId = created.state.campaignId;
 
     // A second registry over the same store is what a restarted process
     // looks like: nothing in `live`, everything in the log. The gate holds
     // the fold open so both `get` calls are genuinely in flight at once —
     // which against Postgres is just a network round trip, and `join` sits
-    // outside the session lock by design (ws.ts).
+    // outside the campaign lock by design (ws.ts).
     let reads = 0;
     let release = (): void => {};
     const gate = new Promise<void>((resolve) => {
@@ -160,19 +160,19 @@ describe("SessionRegistry.get", () => {
         return store.readSince(id, afterSequence);
       },
     };
-    const restarted = createSessionRegistry({
+    const restarted = createCampaignRegistry({
       store: slow,
       uuid: () => "00000000-0000-4000-8000-000000000099",
       clock: () => "2026-08-19T10:00:00.000Z",
       seed: () => 42,
     });
 
-    const both = Promise.all([restarted.get(sessionId), restarted.get(sessionId)]);
+    const both = Promise.all([restarted.get(campaignId), restarted.get(campaignId)]);
     release();
     const [first, second] = await both;
 
     expect(first).not.toBeNull();
-    // One object, not two: two Sessions would each carry their own
+    // One object, not two: two Campaigns would each carry their own
     // nextSequence and both keep appending to the same log.
     expect(first).toBe(second);
     expect(reads).toBe(1);

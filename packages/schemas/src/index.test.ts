@@ -145,7 +145,7 @@ describe("GameEvent", () => {
   it("parses a well-formed log entry", () => {
     const event = GameEvent.parse({
       eventId: "3f1a1c40-0f3e-4a1b-9d1e-2c9a7b6d5e4f",
-      sessionId: "sess-1",
+      campaignId: "sess-1",
       sequence: 0,
       timestamp: "2026-08-17T09:00:00.000Z",
       type: "dice_rolled",
@@ -158,7 +158,7 @@ describe("GameEvent", () => {
     expect(() =>
       GameEvent.parse({
         eventId: "not-a-uuid",
-        sessionId: "sess-1",
+        campaignId: "sess-1",
         sequence: 0,
         timestamp: "2026-08-17T09:00:00.000Z",
         type: "dice_rolled",

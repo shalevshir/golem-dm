@@ -1,19 +1,19 @@
 import { describe, expect, it } from "vitest";
-import type { GameEvent, SessionState } from "@ai-dm/schemas";
-import { SequenceConflictError, SessionMismatchError } from "./port.js";
+import type { GameEvent, CampaignState } from "@ai-dm/schemas";
+import { SequenceConflictError, CampaignMismatchError } from "./port.js";
 import type { EventStore } from "./port.js";
 
 let counter = 0;
-/** A session id no other test case in this process has used. */
-function freshSessionId(): string {
+/** A campaign id no other test case in this process has used. */
+function freshCampaignId(): string {
   counter += 1;
   return `contract-${String(counter)}-${String(Date.now())}`;
 }
 
-function event(sessionId: string, sequence: number): GameEvent {
+function event(campaignId: string, sequence: number): GameEvent {
   return {
     eventId: `00000000-0000-4000-8000-${String(sequence).padStart(12, "0")}`,
-    sessionId,
+    campaignId,
     sequence,
     timestamp: "2026-08-19T10:00:00.000Z",
     type: "player_input",
@@ -27,9 +27,9 @@ function event(sessionId: string, sequence: number): GameEvent {
   };
 }
 
-function stateFor(sessionId: string): SessionState {
+function stateFor(campaignId: string): CampaignState {
   return {
-    sessionId,
+    campaignId,
     rootSeed: 1,
     encounterId: "e1",
     grid: { width: 1, height: 1, tiles: [["normal"]] },
@@ -52,7 +52,7 @@ export function describeEventStoreContract(label: string, makeStore: () => Event
   describe(label, () => {
     it("reads back what it appended, in sequence order", async () => {
       const store = makeStore();
-      const s = freshSessionId();
+      const s = freshCampaignId();
       await store.append(s, [event(s, 0), event(s, 1)]);
       const read = await store.readSince(s, -1);
       expect(read.map((each) => each.sequence)).toEqual([0, 1]);
@@ -60,7 +60,7 @@ export function describeEventStoreContract(label: string, makeStore: () => Event
 
     it("reads back the whole event, payload included", async () => {
       const store = makeStore();
-      const s = freshSessionId();
+      const s = freshCampaignId();
       const appended = event(s, 0);
       await store.append(s, [appended]);
       expect(await store.readSince(s, -1)).toEqual([appended]);
@@ -68,25 +68,25 @@ export function describeEventStoreContract(label: string, makeStore: () => Event
 
     it("reads only events after the given sequence", async () => {
       const store = makeStore();
-      const s = freshSessionId();
+      const s = freshCampaignId();
       await store.append(s, [event(s, 0), event(s, 1), event(s, 2)]);
       expect((await store.readSince(s, 0)).map((each) => each.sequence)).toEqual([1, 2]);
     });
 
-    it("returns an empty list for an unknown session", async () => {
-      expect(await makeStore().readSince(freshSessionId(), -1)).toEqual([]);
+    it("returns an empty list for an unknown campaign", async () => {
+      expect(await makeStore().readSince(freshCampaignId(), -1)).toEqual([]);
     });
 
-    it("returns an empty list past the tail of a known session", async () => {
+    it("returns an empty list past the tail of a known campaign", async () => {
       const store = makeStore();
-      const s = freshSessionId();
+      const s = freshCampaignId();
       await store.append(s, [event(s, 0), event(s, 1)]);
       expect(await store.readSince(s, 99)).toEqual([]);
     });
 
     it("returns a fresh array from readSince, not a live reference", async () => {
       const store = makeStore();
-      const s = freshSessionId();
+      const s = freshCampaignId();
       await store.append(s, [event(s, 0)]);
       const first = await store.readSince(s, -1);
       first.push(event(s, 99));
@@ -95,56 +95,56 @@ export function describeEventStoreContract(label: string, makeStore: () => Event
 
     it("accepts an empty batch", async () => {
       const store = makeStore();
-      const s = freshSessionId();
+      const s = freshCampaignId();
       await expect(store.append(s, [])).resolves.toBeUndefined();
       expect(await store.readSince(s, -1)).toEqual([]);
     });
 
     it("rejects a duplicate sequence", async () => {
       const store = makeStore();
-      const s = freshSessionId();
+      const s = freshCampaignId();
       await store.append(s, [event(s, 0)]);
       await expect(store.append(s, [event(s, 0)])).rejects.toBeInstanceOf(SequenceConflictError);
     });
 
     it("rejects a duplicate sequence within the same batch", async () => {
       const store = makeStore();
-      const s = freshSessionId();
+      const s = freshCampaignId();
       await expect(store.append(s, [event(s, 0), event(s, 0)])).rejects.toBeInstanceOf(
         SequenceConflictError,
       );
       expect(await store.readSince(s, -1)).toEqual([]);
     });
 
-    it("rejects an event whose own sessionId disagrees with the append target", async () => {
+    it("rejects an event whose own campaignId disagrees with the append target", async () => {
       const store = makeStore();
-      const s = freshSessionId();
-      const other = freshSessionId();
+      const s = freshCampaignId();
+      const other = freshCampaignId();
       await expect(
-        store.append(s, [{ ...event(s, 0), sessionId: other }]),
-      ).rejects.toBeInstanceOf(SessionMismatchError);
-      // Neither the target session nor the event's own session gained a
+        store.append(s, [{ ...event(s, 0), campaignId: other }]),
+      ).rejects.toBeInstanceOf(CampaignMismatchError);
+      // Neither the target campaign nor the event's own campaign gained a
       // record — a rejected batch must leave no trace on either side.
       expect(await store.readSince(s, -1)).toEqual([]);
       expect(await store.readSince(other, -1)).toEqual([]);
     });
 
-    it("checks sessionId before sequence, in batch order", async () => {
+    it("checks campaignId before sequence, in batch order", async () => {
       const store = makeStore();
-      const s = freshSessionId();
-      const other = freshSessionId();
+      const s = freshCampaignId();
+      const other = freshCampaignId();
       await store.append(s, [event(s, 0)]);
       // Event 0 conflicts; event 1 mismatches. The conflict is reached
       // first, so that is the error — the precedence `findAppendConflict`
       // exists to pin down.
       await expect(
-        store.append(s, [event(s, 0), { ...event(s, 1), sessionId: other }]),
+        store.append(s, [event(s, 0), { ...event(s, 1), campaignId: other }]),
       ).rejects.toBeInstanceOf(SequenceConflictError);
     });
 
     it("appends a batch atomically — a conflict anywhere writes nothing", async () => {
       const store = makeStore();
-      const s = freshSessionId();
+      const s = freshCampaignId();
       await store.append(s, [event(s, 0)]);
       await expect(store.append(s, [event(s, 1), event(s, 0)])).rejects.toBeInstanceOf(
         SequenceConflictError,
@@ -154,22 +154,22 @@ export function describeEventStoreContract(label: string, makeStore: () => Event
       expect((await store.readSince(s, -1)).map((each) => each.sequence)).toEqual([0]);
     });
 
-    it("keeps sessions isolated", async () => {
+    it("keeps campaigns isolated", async () => {
       const store = makeStore();
-      const s = freshSessionId();
-      const other = freshSessionId();
+      const s = freshCampaignId();
+      const other = freshCampaignId();
       await store.append(s, [event(s, 0)]);
       await store.append(other, [event(other, 0)]);
       expect(await store.readSince(s, -1)).toHaveLength(1);
     });
 
     it("has no snapshot until one is written", async () => {
-      expect(await makeStore().latestSnapshot(freshSessionId())).toBeNull();
+      expect(await makeStore().latestSnapshot(freshCampaignId())).toBeNull();
     });
 
     it("returns the newest snapshot, state included", async () => {
       const store = makeStore();
-      const s = freshSessionId();
+      const s = freshCampaignId();
       const newer = { ...stateFor(s), round: 4 };
       await store.putSnapshot(s, 50, stateFor(s));
       await store.putSnapshot(s, 100, newer);
@@ -181,7 +181,7 @@ export function describeEventStoreContract(label: string, makeStore: () => Event
 
     it("ignores a snapshot whose sequence does not improve on the current one", async () => {
       const store = makeStore();
-      const s = freshSessionId();
+      const s = freshCampaignId();
       await store.putSnapshot(s, 100, stateFor(s));
       await store.putSnapshot(s, 50, { ...stateFor(s), round: 4 });
       expect(await store.latestSnapshot(s)).toEqual({ sequence: 100, state: stateFor(s) });
@@ -189,22 +189,22 @@ export function describeEventStoreContract(label: string, makeStore: () => Event
 
     it("ignores a snapshot at the sequence already stored", async () => {
       const store = makeStore();
-      const s = freshSessionId();
+      const s = freshCampaignId();
       await store.putSnapshot(s, 100, stateFor(s));
       await store.putSnapshot(s, 100, { ...stateFor(s), round: 9 });
       expect(await store.latestSnapshot(s)).toEqual({ sequence: 100, state: stateFor(s) });
     });
 
-    it("keeps snapshots isolated per session", async () => {
+    it("keeps snapshots isolated per campaign", async () => {
       const store = makeStore();
-      const s = freshSessionId();
+      const s = freshCampaignId();
       await store.putSnapshot(s, 50, stateFor(s));
-      expect(await store.latestSnapshot(freshSessionId())).toBeNull();
+      expect(await store.latestSnapshot(freshCampaignId())).toBeNull();
     });
 
     it("does not expose the stored snapshot state to a caller's mutation", async () => {
       const store = makeStore();
-      const s = freshSessionId();
+      const s = freshCampaignId();
       await store.putSnapshot(s, 50, stateFor(s));
 
       const first = await store.latestSnapshot(s);
@@ -218,10 +218,10 @@ export function describeEventStoreContract(label: string, makeStore: () => Event
 
     it("does not let a caller mutate the state it handed to putSnapshot", async () => {
       const store = makeStore();
-      const s = freshSessionId();
+      const s = freshCampaignId();
       const state = stateFor(s);
       await store.putSnapshot(s, 50, state);
-      // `pipeline.ts` passes its live `session.state` here and keeps
+      // `pipeline.ts` passes its live `campaign.state` here and keeps
       // mutating it afterwards, so a store holding that object by reference
       // would silently rewrite a snapshot that was already taken.
       state.round = 99;
@@ -231,7 +231,7 @@ export function describeEventStoreContract(label: string, makeStore: () => Event
 
     it("does not expose stored events to a caller's mutation", async () => {
       const store = makeStore();
-      const s = freshSessionId();
+      const s = freshCampaignId();
       await store.append(s, [event(s, 0)]);
 
       const first = await store.readSince(s, -1);
@@ -246,7 +246,7 @@ export function describeEventStoreContract(label: string, makeStore: () => Event
 
     it("does not let a caller mutate an event it handed to append", async () => {
       const store = makeStore();
-      const s = freshSessionId();
+      const s = freshCampaignId();
       const appended = event(s, 0);
       await store.append(s, [appended]);
       // The mirror of the `putSnapshot` case above, and the direction that
@@ -268,7 +268,7 @@ export function describeEventStoreContract(label: string, makeStore: () => Event
     // same thing, and a future divergence breaks a test rather than a deploy.
     it("drops a payload key whose value is undefined", async () => {
       const store = makeStore();
-      const s = freshSessionId();
+      const s = freshCampaignId();
       await store.append(s, [
         { ...event(s, 0), payload: { note: "kept", missing: undefined } },
       ]);
@@ -284,7 +284,7 @@ export function describeEventStoreContract(label: string, makeStore: () => Event
 
     it("stores NaN as null in a payload", async () => {
       const store = makeStore();
-      const s = freshSessionId();
+      const s = freshCampaignId();
       await store.append(s, [{ ...event(s, 0), payload: { roll: Number.NaN } }]);
 
       const stored = (await store.readSince(s, -1))[0];
@@ -293,7 +293,7 @@ export function describeEventStoreContract(label: string, makeStore: () => Event
 
     it("stores a Date in a payload as its ISO string", async () => {
       const store = makeStore();
-      const s = freshSessionId();
+      const s = freshCampaignId();
       const when = new Date("2026-08-19T10:00:00.000Z");
       await store.append(s, [{ ...event(s, 0), payload: { when } }]);
 

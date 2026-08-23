@@ -21,11 +21,11 @@ import { buildApp } from "./app.js";
 import { loadConfig } from "./config.js";
 import type { MetricsPort } from "./core/pipeline.js";
 import { loadConditions } from "./encounters/index.js";
-import { createSessionRegistry } from "./transport/http.js";
+import { createCampaignRegistry } from "./transport/http.js";
 
 const config = loadConfig(process.env);
 
-// Chosen before `buildApp`, because both `createSessionRegistry` and `ports`
+// Chosen before `buildApp`, because both `createCampaignRegistry` and `ports`
 // need it — which is also why the boot log below goes through `logHolder`
 // rather than `app.log`, which does not exist yet.
 const postgresHandle: PostgresEventStoreHandle | null =
@@ -100,7 +100,7 @@ const metrics: MetricsPort = {
     // about to start rejecting appends too — which is exactly why this must
     // not be silent.
     logHolder.current?.warn(
-      { sessionId: record.sessionId, sequence: record.sequence, err: record.error },
+      { campaignId: record.campaignId, sequence: record.sequence, err: record.error },
       "snapshot_write_failed",
     );
   },
@@ -108,7 +108,7 @@ const metrics: MetricsPort = {
 
 const app = buildApp({
   logLevel: config.logLevel,
-  registry: createSessionRegistry({
+  registry: createCampaignRegistry({
     store,
     uuid: randomUUID,
     clock,
@@ -150,14 +150,14 @@ logHolder.current = app.log;
 if (postgresHandle === null) {
   // A valid configuration, and a lossy one. The only thing distinguishing a
   // deliberate dev run from a misconfigured deploy is this line.
-  app.log.warn("event log: in-memory — sessions are lost on restart");
+  app.log.warn("event log: in-memory — campaigns are lost on restart");
 } else {
   app.log.info("event log: postgres");
 }
 
 // Named at boot, not just per-turn: a missing/invalid key for this exact
 // provider is otherwise only diagnosable from a turn that quietly fell back,
-// which could be minutes into the first session. This line makes the
+// which could be minutes into the first campaign. This line makes the
 // configured provider/model the first thing an operator checks.
 app.log.info(
   {

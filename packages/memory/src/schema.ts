@@ -3,12 +3,12 @@
 // output, never hand-edited (packages/memory/CLAUDE.md: "Schema changes only
 // via generated migrations").
 import { integer, jsonb, pgTable, primaryKey, text, timestamp } from "drizzle-orm/pg-core";
-import type { SessionState } from "@ai-dm/schemas";
+import type { CampaignState } from "@ai-dm/schemas";
 
 export const gameEvents = pgTable(
   "game_events",
   {
-    sessionId: text("session_id").notNull(),
+    campaignId: text("campaign_id").notNull(),
     sequence: integer("sequence").notNull(),
     // `text`, not `uuid`: `z.string().uuid()` is case-insensitive while
     // Postgres's uuid type normalizes to lowercase, so an uppercase eventId
@@ -29,12 +29,12 @@ export const gameEvents = pgTable(
   },
   // The conflict semantics. Because it is one constraint, a duplicate within
   // a single multi-row INSERT violates it too.
-  (table) => [primaryKey({ columns: [table.sessionId, table.sequence] })],
+  (table) => [primaryKey({ columns: [table.campaignId, table.sequence] })],
 );
 
-export const sessionSnapshots = pgTable("session_snapshots", {
-  sessionId: text("session_id").primaryKey(),
+export const campaignSnapshots = pgTable("campaign_snapshots", {
+  campaignId: text("campaign_id").primaryKey(),
   sequence: integer("sequence").notNull(),
-  state: jsonb("state").$type<SessionState>().notNull(),
+  state: jsonb("state").$type<CampaignState>().notNull(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 });

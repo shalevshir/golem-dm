@@ -59,12 +59,12 @@ describe("client state persistence", () => {
     expect(restoreClientState("s1")).toEqual(initialClientState);
   });
 
-  it("returns the initial state when there is no session to restore into", () => {
+  it("returns the initial state when there is no campaign to restore into", () => {
     storeClientState("s1", played);
     expect(restoreClientState(null)).toEqual(initialClientState);
   });
 
-  it("discards a log left behind by a different session", () => {
+  it("discards a log left behind by a different campaign", () => {
     // Both keys are written and cleared together, so this should be
     // unreachable — which is exactly why it is worth pinning: the failure it
     // guards against is a log folded from one fight being shown against
@@ -80,7 +80,7 @@ describe("client state persistence", () => {
 
     sessionStorage.setItem(
       LOG_STORAGE_KEY,
-      JSON.stringify({ sessionId: "s1", sequence: "twelve" }),
+      JSON.stringify({ campaignId: "s1", sequence: "twelve" }),
     );
     expect(restoreClientState("s1")).toEqual(initialClientState);
     expect(warn).toHaveBeenCalled();

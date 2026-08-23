@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import type { SessionState, TurnAffordances } from "@ai-dm/schemas";
+import type { CampaignState, TurnAffordances } from "@ai-dm/schemas";
 import { combatant as buildCombatant } from "../state/combatant-fixture.js";
 import { Grid } from "./Grid.js";
 
@@ -12,8 +12,8 @@ function combatant(id: string, position: [number, number]) {
   return buildCombatant(id, id === "hero" ? "party" : "hostile", "alive", { position });
 }
 
-const snapshot: SessionState = {
-  sessionId: "s1",
+const snapshot: CampaignState = {
+  campaignId: "s1",
   rootSeed: 1,
   encounterId: "goblin-ambush",
   grid: {

@@ -1,5 +1,5 @@
 // The projection. State is a fold of the event log and nothing else
-// (invariant 3), so this function is the only place a `SessionState` changes
+// (invariant 3), so this function is the only place a `CampaignState` changes
 // shape — and it is pure, total and never mutates its input.
 //
 // It lives in `@ai-dm/schemas` rather than in `apps/server` so that client and
@@ -21,7 +21,7 @@
 import { z } from "zod";
 import { Combatant, ActionEconomy } from "./world.js";
 import type { GameEvent } from "./events.js";
-import type { SessionState } from "./protocol.js";
+import type { CampaignState } from "./protocol.js";
 
 // The task brief's "Interfaces" preview names this pair `SessionStartedPayload`
 // and `TurnAdvancedPayload`, but `GameEvent.type` has no `session_started` or
@@ -35,7 +35,7 @@ export const PlayerInputPayload = z.object({ clientMessageId: z.string() });
 export const StateDeltaAppliedPayload = z.object({ combatants: z.array(Combatant) });
 export const SceneChangedPayload = z.object({ kind: z.string() });
 
-export function reduce(state: SessionState, event: GameEvent): SessionState {
+export function reduce(state: CampaignState, event: GameEvent): CampaignState {
   switch (event.type) {
     case "player_input": {
       const { clientMessageId } = PlayerInputPayload.parse(event.payload);
@@ -95,6 +95,6 @@ export function reduce(state: SessionState, event: GameEvent): SessionState {
   }
 }
 
-export function fold(state: SessionState, events: readonly GameEvent[]): SessionState {
+export function fold(state: CampaignState, events: readonly GameEvent[]): CampaignState {
   return events.reduce(reduce, state);
 }

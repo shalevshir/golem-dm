@@ -19,7 +19,7 @@ function readJson(dir: string, file: string): unknown {
 }
 
 // Parsed once. The files never change at runtime, and re-parsing them per
-// session would be pure waste.
+// campaign would be pure waste.
 let cached: SrdGear | undefined;
 
 export function loadGear(): SrdGear {

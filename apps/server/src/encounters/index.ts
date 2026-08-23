@@ -1,4 +1,4 @@
-// The encounters a session can be created from. Data, not logic: a definition
+// The encounters a campaign can be created from. Data, not logic: a definition
 // is validated by `buildEncounter`, which throws rather than producing a
 // half-valid world.
 import { buildEncounter } from "@ai-dm/rules-engine";
@@ -92,7 +92,7 @@ export function buildEncounterById(encounterId: string): BuiltEncounter {
  * The static per-encounter facts a client needs to label what it draws:
  * display names, max HP and faction. Static is the point — this is fetched
  * once over HTTP and cached, rather than re-sent on a socket that already
- * carries a `SessionState` growing without bound (C-30). The shape itself
+ * carries a `CampaignState` growing without bound (C-30). The shape itself
  * lives in `@ai-dm/schemas` (`EncounterCatalogue`), not here — it is the one
  * response body a browser client also parses, so invariant 4 puts it in the
  * shared package rather than a hand-rolled interface duplicated on each end.

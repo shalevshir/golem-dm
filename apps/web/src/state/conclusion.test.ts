@@ -1,11 +1,11 @@
 import { describe, expect, it } from "vitest";
-import type { Combatant, SessionState } from "@ai-dm/schemas";
+import type { Combatant, CampaignState } from "@ai-dm/schemas";
 import { conclusionOf } from "./conclusion.js";
 import { combatant } from "./combatant-fixture.js";
 
-function stateWith(combatants: Combatant[]): SessionState {
+function stateWith(combatants: Combatant[]): CampaignState {
   return {
-    sessionId: "s1",
+    campaignId: "s1",
     rootSeed: 1,
     encounterId: "goblin-ambush",
     grid: { width: 1, height: 1, tiles: [["normal"]] },

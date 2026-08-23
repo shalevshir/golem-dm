@@ -8,7 +8,7 @@
 // logged, or miss one that was.
 //
 // `clock`, `uuid` and `seedFor` are ports, not globals. That is what lets a
-// test assert an exact event stream, and what makes a replayed session
+// test assert an exact event stream, and what makes a replayed campaign
 // reproduce the fight rather than a new one.
 //
 // `join`, `free_text` and the player's own `structured_action` (Task 9) are
@@ -33,7 +33,7 @@ import type {
 import {
   EventStoreUnavailableError,
   SequenceConflictError,
-  SessionMismatchError,
+  CampaignMismatchError,
 } from "@ai-dm/memory";
 import type { EventStore } from "@ai-dm/memory";
 import { reduce } from "@ai-dm/schemas";
@@ -44,8 +44,8 @@ import type {
   NarrationSource,
   ServerFrame,
 } from "@ai-dm/schemas";
-import { NARRATION_WINDOW, worldFor } from "./session.js";
-import type { Session } from "./session.js";
+import { NARRATION_WINDOW, worldFor } from "./campaign.js";
+import type { Campaign } from "./campaign.js";
 
 /** `apps/server/CLAUDE.md`: snapshot every 50 events. */
 export const SNAPSHOT_EVERY = 50;
@@ -131,7 +131,7 @@ export interface NarrativeTurnMetrics {
 
 /** A `putSnapshot` rejection, contained inside `emit` — see `MetricsPort`. */
 export interface SnapshotFailureRecord {
-  sessionId: string;
+  campaignId: string;
   /** The log sequence the failed snapshot would have reflected. */
   sequence: number;
   /** Whatever the store rejected with; `EventStoreUnavailableError` in practice. */
@@ -294,13 +294,13 @@ function endsComplete(text: string): boolean {
 }
 
 export async function* handleCommand(
-  session: Session,
+  campaign: Campaign,
   command: ClientMessage,
   ports: TurnPorts,
 ): AsyncIterable<ServerFrame> {
   /**
    * Append one event and yield its frame. The single place either happens.
-   * Mutates the session in step so a later stage in the same turn reads the
+   * Mutates the campaign in step so a later stage in the same turn reads the
    * state the earlier stage produced.
    */
   async function* emit(
@@ -309,8 +309,8 @@ export async function* handleCommand(
   ): AsyncIterable<ServerFrame> {
     const event: GameEvent = {
       eventId: ports.uuid(),
-      sessionId: session.state.sessionId,
-      sequence: session.nextSequence,
+      campaignId: campaign.state.campaignId,
+      sequence: campaign.nextSequence,
       timestamp: ports.clock(),
       type,
       payload,
@@ -324,21 +324,21 @@ export async function* handleCommand(
     // exactly the append-without-yield window this function exists to rule
     // out. `reduce` is pure, so computing it early costs nothing and
     // changes no behaviour for event types it treats as a no-op.
-    const next = reduce(session.state, event);
+    const next = reduce(campaign.state, event);
 
-    await ports.store.append(session.state.sessionId, [event]);
-    session.nextSequence += 1;
-    session.state = next;
+    await ports.store.append(campaign.state.campaignId, [event]);
+    campaign.nextSequence += 1;
+    campaign.state = next;
     yield { type: "event", event };
 
     if (event.sequence > 0 && event.sequence % SNAPSHOT_EVERY === 0) {
-      // A cache, never authority: `loadSession` folds the log regardless.
+      // A cache, never authority: `loadCampaign` folds the log regardless.
       // Deliberately after the yield — nothing downstream reads it within
       // the same turn, so it must not sit inside the append-and-yield
       // window either.
       //
       // And its own `try`, so a cache write can never end a turn. The append
-      // above already succeeded and `session.state`/`nextSequence` already
+      // above already succeeded and `campaign.state`/`nextSequence` already
       // moved, so the turn's outer catch — whose whole justification is that
       // a failure there left the state untouched — is false on this path.
       // Letting an `EventStoreUnavailableError` from here reach it would
@@ -352,7 +352,7 @@ export async function* handleCommand(
       // `clientMessageId` is dropped forever. A missing snapshot costs a
       // longer replay on the next reconnect and nothing else.
       try {
-        await ports.store.putSnapshot(session.state.sessionId, event.sequence, session.state);
+        await ports.store.putSnapshot(campaign.state.campaignId, event.sequence, campaign.state);
       } catch (error) {
         // Reported, not swallowed: a store that has stopped accepting
         // snapshots is usually about to stop accepting appends, and this is
@@ -361,7 +361,7 @@ export async function* handleCommand(
         // transport's decision (`MetricsPort`'s doc comment), and tests that
         // supply no metrics port simply see the failure contained.
         ports.metrics?.recordSnapshotFailure?.({
-          sessionId: session.state.sessionId,
+          campaignId: campaign.state.campaignId,
           sequence: event.sequence,
           error,
         });
@@ -386,11 +386,11 @@ export async function* handleCommand(
     const input = buildNarrationBrief({
       actorId,
       effect,
-      combatants: session.state.combatants,
-      statBlocks: session.built.statBlocks,
+      combatants: campaign.state.combatants,
+      statBlocks: campaign.built.statBlocks,
       conditionNamesHebrew: ports.conditionNamesHebrew,
-      sceneEnglish: session.sceneEnglish,
-      recentNarrations: session.recentNarrations,
+      sceneEnglish: campaign.sceneEnglish,
+      recentNarrations: campaign.recentNarrations,
     });
 
     // `ports.clock()`, never a bare `Date.now()`: this codebase injects its
@@ -461,7 +461,7 @@ export async function* handleCommand(
       promptVersion: NARRATIVE_PROMPT_VERSION,
     });
 
-    session.recentNarrations = [...session.recentNarrations, text].slice(-NARRATION_WINDOW);
+    campaign.recentNarrations = [...campaign.recentNarrations, text].slice(-NARRATION_WINDOW);
   }
 
   /**
@@ -481,8 +481,8 @@ export async function* handleCommand(
    * still resolves within `ports.turnTimeoutMs` total, not up to 2x it.
    */
   async function* enemyTurn(actorId: string): AsyncIterable<ServerFrame> {
-    const world = worldFor(session);
-    const statBlock = session.built.statBlocks.get(actorId);
+    const world = worldFor(campaign);
+    const statBlock = campaign.built.statBlocks.get(actorId);
     const deadline = Date.now() + ports.turnTimeoutMs;
     const controller = new AbortController();
     const timer = setTimeout(
@@ -499,7 +499,7 @@ export async function* handleCommand(
         world,
         actorId,
         availableActions: statBlock === undefined ? [] : availableActionsFor(statBlock),
-        turnOrder: session.state.turnOrder,
+        turnOrder: campaign.state.turnOrder,
         abortSignal: controller.signal,
       });
     } finally {
@@ -545,13 +545,13 @@ export async function* handleCommand(
 
     yield* emit("action_validated", { actorId, turn: proposal.turn, source: proposal.source });
 
-    const seed = ports.seedFor(session.state.rootSeed, session.nextSequence);
+    const seed = ports.seedFor(campaign.state.rootSeed, campaign.nextSequence);
     const { world: after, effect } = applyTurn({
       world,
       actorId,
       turn: proposal.turn,
       plan: proposal.plan,
-      context: { statBlocks: session.built.statBlocks },
+      context: { statBlocks: campaign.built.statBlocks },
       rng: seeded(seed),
     });
 
@@ -579,11 +579,11 @@ export async function* handleCommand(
    * purely so a defect in that math or in `reduce` cannot hang the pipeline.
    */
   async function* runEnemyTurns(): AsyncIterable<ServerFrame> {
-    for (let guard = 0; guard <= session.state.turnOrder.length; guard += 1) {
-      const actorId = session.state.turnOrder[session.state.currentActorIndex];
+    for (let guard = 0; guard <= campaign.state.turnOrder.length; guard += 1) {
+      const actorId = campaign.state.turnOrder[campaign.state.currentActorIndex];
       if (actorId === undefined) return;
 
-      const combatant = session.state.combatants.find((each) => each.combatantId === actorId);
+      const combatant = campaign.state.combatants.find((each) => each.combatantId === actorId);
       if (combatant === undefined) return;
       if (combatant.faction === "party") return;
 
@@ -594,7 +594,7 @@ export async function* handleCommand(
       }
 
       const livingFactions = new Set(
-        session.state.combatants
+        campaign.state.combatants
           .filter((each) => each.status === "alive")
           .map((each) => each.faction),
       );
@@ -625,13 +625,13 @@ export async function* handleCommand(
   // `yield*`-ing it from the async `handleCommand` generator works the same
   // either way.
   function* playerAffordances(): Iterable<ServerFrame> {
-    const actorId = session.state.turnOrder[session.state.currentActorIndex];
+    const actorId = campaign.state.turnOrder[campaign.state.currentActorIndex];
     if (actorId === undefined) return;
 
-    const actor = session.state.combatants.find((each) => each.combatantId === actorId);
+    const actor = campaign.state.combatants.find((each) => each.combatantId === actorId);
     if (actor === undefined || actor.faction !== "party" || actor.status !== "alive") return;
 
-    const statBlock = session.built.statBlocks.get(actorId);
+    const statBlock = campaign.built.statBlocks.get(actorId);
     if (statBlock === undefined) return;
 
     // Review round 1, item 5: the spread comes first and the explicit
@@ -640,9 +640,9 @@ export async function* handleCommand(
     // either name — previously the spread came last and would have
     // silently clobbered them.
     yield {
-      ...affordancesFor(worldFor(session), actorId, statBlock),
+      ...affordancesFor(worldFor(campaign), actorId, statBlock),
       type: "turn_affordances",
-      forSequence: session.nextSequence - 1,
+      forSequence: campaign.nextSequence - 1,
     };
   }
 
@@ -660,20 +660,20 @@ export async function* handleCommand(
         async function* joinFrames(
           command: Extract<ClientMessage, { type: "join" }>,
         ): AsyncIterable<ServerFrame> {
-          const sessionId = session.state.sessionId;
+          const campaignId = campaign.state.campaignId;
 
           if (command.resumeFrom === undefined) {
             // Nothing to resume from: hand back the live projection wholesale.
             yield {
-              type: "session_state",
-              sequence: session.nextSequence - 1,
-              snapshot: session.state,
+              type: "campaign_state",
+              sequence: campaign.nextSequence - 1,
+              snapshot: campaign.state,
             };
             return;
           }
 
           // C-16 / spec §Reconnect: "without resumeFrom, or when it predates
-          // the retained log: session_state at the newest snapshot, then the
+          // the retained log: campaign_state at the newest snapshot, then the
           // events since [the snapshot]." A resumeFrom older than the newest
           // snapshot is exactly the case a store that eventually prunes old
           // events would no longer be able to serve directly.
@@ -682,31 +682,31 @@ export async function* handleCommand(
           // "older than the newest snapshot" is being used as a stand-in for
           // "predates the retained log" rather than a direct read of a
           // retention floor. That means a client only 3 events behind a
-          // snapshot at sequence 50 still gets a whole `SessionState` resent
+          // snapshot at sequence 50 still gets a whole `CampaignState` resent
           // instead of 3 events — correct, but wasteful, and per C-30 that
-          // payload only grows over a session's lifetime. Gate this on a real
+          // payload only grows over a campaign's lifetime. Gate this on a real
           // retention floor once the store has one.
-          const snapshot = await ports.store.latestSnapshot(sessionId);
+          const snapshot = await ports.store.latestSnapshot(campaignId);
           if (snapshot !== null && command.resumeFrom < snapshot.sequence) {
-            yield { type: "session_state", sequence: snapshot.sequence, snapshot: snapshot.state };
-            for (const event of await ports.store.readSince(sessionId, snapshot.sequence)) {
+            yield { type: "campaign_state", sequence: snapshot.sequence, snapshot: snapshot.state };
+            for (const event of await ports.store.readSince(campaignId, snapshot.sequence)) {
               yield { type: "event", event };
             }
             return;
           }
 
-          const tail = await ports.store.readSince(sessionId, command.resumeFrom);
+          const tail = await ports.store.readSince(campaignId, command.resumeFrom);
           if (tail.length === 0) {
             // IMPORTANT-2: `resumeFrom` already at (or past) the newest
             // sequence — a client that missed nothing. `join` must have
             // exactly one guaranteed response so "you're caught up" is never
             // indistinguishable from a dropped join; the natural choice is the
-            // same `session_state` frame a resumeFrom-less join gets, at the
+            // same `campaign_state` frame a resumeFrom-less join gets, at the
             // current projection.
             yield {
-              type: "session_state",
-              sequence: session.nextSequence - 1,
-              snapshot: session.state,
+              type: "campaign_state",
+              sequence: campaign.nextSequence - 1,
+              snapshot: campaign.state,
             };
             return;
           }
@@ -740,9 +740,9 @@ export async function* handleCommand(
         // second turn. It must run before anything else, including the
         // turn-order check: by the time a duplicate arrives, the turn it
         // named may already have moved on to someone else.
-        if (session.state.appliedClientMessageIds.includes(command.clientMessageId)) return;
+        if (campaign.state.appliedClientMessageIds.includes(command.clientMessageId)) return;
 
-        const currentActorId = session.state.turnOrder[session.state.currentActorIndex];
+        const currentActorId = campaign.state.turnOrder[campaign.state.currentActorIndex];
         if (currentActorId !== command.actorId) {
           yield {
             type: "error",
@@ -760,7 +760,7 @@ export async function* handleCommand(
         // clientMessageId. Appending player_input first would mark it
         // permanently applied and the dedupe check above would silently
         // drop every retry.
-        const world = worldFor(session);
+        const world = worldFor(campaign);
         const actor = world.combatants.find((each) => each.combatantId === command.actorId);
         if (actor === undefined) {
           yield {
@@ -817,13 +817,13 @@ export async function* handleCommand(
           source: "human",
         });
 
-        const seed = ports.seedFor(session.state.rootSeed, session.nextSequence);
+        const seed = ports.seedFor(campaign.state.rootSeed, campaign.nextSequence);
         const { world: after, effect } = applyTurn({
           world,
           actorId: command.actorId,
           turn: command.turn,
           plan: validation.plan,
-          context: { statBlocks: session.built.statBlocks },
+          context: { statBlocks: campaign.built.statBlocks },
           rng: seeded(seed),
         });
 
@@ -848,7 +848,7 @@ export async function* handleCommand(
 
       default: {
         // Exhaustiveness guard: `reduce` gets this for free by returning
-        // `SessionState` (a missing case fails to compile), but this
+        // `CampaignState` (a missing case fails to compile), but this
         // function returns `void` via `yield`, so a fourth `ClientMessage`
         // member would otherwise compile and silently yield zero frames
         // instead of failing loudly. `command` is `never` here as long as
@@ -860,17 +860,17 @@ export async function* handleCommand(
     }
   } catch (error) {
     // C-29: the store throws three error classes on a failed append or read
-    // (SequenceConflictError, SessionMismatchError, EventStoreUnavailableError).
+    // (SequenceConflictError, CampaignMismatchError, EventStoreUnavailableError).
     // None has a dedicated ServerErrorCode, so all fold onto internal_error.
     // Because this sits outside `emit`, a failed append never bumps
-    // `nextSequence` or mutates `session.state` — the append-and-yield
+    // `nextSequence` or mutates `campaign.state` — the append-and-yield
     // invariant holds by never letting either half happen without the other.
     // Anything else still rethrows: a programmer error must not be swallowed
     // into a frame, which is why the store wraps its own failures in a class
     // rather than this catching everything.
     if (
       error instanceof SequenceConflictError ||
-      error instanceof SessionMismatchError ||
+      error instanceof CampaignMismatchError ||
       error instanceof EventStoreUnavailableError
     ) {
       const clientMessageId = clientMessageIdOf(command);
@@ -881,7 +881,7 @@ export async function* handleCommand(
         message: error.message,
       };
       // Same reasoning as the rejection path: a failed append leaves
-      // `session.state` untouched (that is the whole point of doing this
+      // `campaign.state` untouched (that is the whole point of doing this
       // outside `emit`), so the turn did not advance and control is still
       // wherever it was. If that is the player, they must get a fresh
       // affordance set — the frames `emit` already streamed before the

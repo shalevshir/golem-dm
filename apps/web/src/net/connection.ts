@@ -31,7 +31,7 @@ export interface WebSocketLike {
 export type ConnectionStatus = "connecting" | "open" | "reconnecting" | "closed";
 
 export interface ConnectInput {
-  sessionId: string;
+  campaignId: string;
   url?: string;
   onFrame: (frame: ServerFrame) => void;
   onStatus: (status: ConnectionStatus) => void;
@@ -79,8 +79,8 @@ export function connect(input: ConnectInput): Connection {
       const from = input.resumeFrom();
       send(
         from === undefined
-          ? { type: "join", sessionId: input.sessionId }
-          : { type: "join", sessionId: input.sessionId, resumeFrom: from },
+          ? { type: "join", campaignId: input.campaignId }
+          : { type: "join", campaignId: input.campaignId, resumeFrom: from },
       );
     });
 

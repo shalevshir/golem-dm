@@ -6,20 +6,20 @@ import { ClientMessage } from "@ai-dm/schemas";
 import type { ServerFrame } from "@ai-dm/schemas";
 import { handleCommand } from "../core/pipeline.js";
 import type { TurnPorts } from "../core/pipeline.js";
-import type { Session } from "../core/session.js";
-import type { SessionRegistry } from "./http.js";
+import type { Campaign } from "../core/campaign.js";
+import type { CampaignRegistry } from "./http.js";
 
 export interface WebSocketRouteInput {
-  registry: SessionRegistry;
+  registry: CampaignRegistry;
   ports: TurnPorts;
 }
 
 export function registerWebSocketRoute(app: FastifyInstance, input: WebSocketRouteInput): void {
   app.get("/ws", { websocket: true }, (socket) => {
-    // One socket, one session (ADR 0002 is solo play), bound by `join`.
-    let session: Session | null = null;
+    // One socket, one campaign (ADR 0002 is solo play), bound by `join`.
+    let campaign: Campaign | null = null;
     // Per-SOCKET ordering guard only — see the two-guard comment in the
-    // message handler below for why a per-session lock (via `registry`) is
+    // message handler below for why a per-campaign lock (via `registry`) is
     // also required and this alone is not the CRITICAL-1 fix.
     let localBusy = false;
 
@@ -72,34 +72,34 @@ export function registerWebSocketRoute(app: FastifyInstance, input: WebSocketRou
         //    in one TCP read (e.g. a client that pipelines `join`
         //    immediately followed by its first action) as two synchronous
         //    `message` events. Without this, the second event's handler
-        //    could reach `session === null` before the first event's own
-        //    `await input.registry.get` below had resumed and `session` was
+        //    could reach `campaign === null` before the first event's own
+        //    `await input.registry.get` below had resumed and `campaign` was
         //    ever assigned — misreporting a legitimate pipelined action as
-        //    `unknown_session` (review finding, task 14 round 2). Rejected
+        //    `unknown_campaign` (review finding, task 14 round 2). Rejected
         //    with `turn_in_progress`, not queued — see point 2.
         //
-        // 2. The `SessionRegistry`'s per-SESSION lock (CRITICAL-1). Sessions
+        // 2. The `CampaignRegistry`'s per-CAMPAIGN lock (CRITICAL-1). Campaigns
         //    are deliberately shared across sockets — `http.ts`'s `live`
-        //    cache is what lets two WS connections onto the same session
-        //    (Task 14) alias one mutable `Session` object, with
+        //    cache is what lets two WS connections onto the same campaign
+        //    (Task 14) alias one mutable `Campaign` object, with
         //    `nextSequence` advanced on it in place — so `localBusy` alone
-        //    cannot prevent two different sockets bound to the same session
+        //    cannot prevent two different sockets bound to the same campaign
         //    from each passing their own turn-order check while the other's
         //    turn is still resolving. Claimed ONLY for mutating commands
         //    (`structured_action`/`free_text`) — see the `join` exclusion
-        //    just below for why. `sessionId` below reads `session?.state.
-        //    sessionId`, which is `undefined` whenever this socket has not
-        //    yet bound a session — including a stray non-join sent before
+        //    just below for why. `campaignId` below reads `campaign?.state.
+        //    campaignId`, which is `undefined` whenever this socket has not
+        //    yet bound a campaign — including a stray non-join sent before
         //    any `join` at all, a case guard 1 does NOT rule out (it only
         //    serializes messages on this socket; it does not require the
-        //    first one to have been a `join`). When `sessionId` is
+        //    first one to have been a `join`). When `campaignId` is
         //    `undefined` no lock is consulted, and control falls through to
-        //    the `session === null` ("send a join message first") branch
+        //    the `campaign === null` ("send a join message first") branch
         //    further down.
         //
-        // `join` is deliberately EXCLUDED from the session lock (post-review
+        // `join` is deliberately EXCLUDED from the campaign lock (post-review
         // fix): `pipeline.ts`'s `join` branch is read-only — it calls
-        // `latestSnapshot`/`readSince` and yields `session_state`/`event`
+        // `latestSnapshot`/`readSince` and yields `campaign_state`/`event`
         // frames, never `emit`, so it cannot itself duplicate a turn, which
         // is the only hazard this lock exists to prevent. Claiming it for
         // `join` was a regression: C-36a keeps a turn's `handleCommand`
@@ -107,7 +107,7 @@ export function registerWebSocketRoute(app: FastifyInstance, input: WebSocketRou
         // sweep (each budgeted `turnTimeoutMs`) even after the originating
         // socket has disappeared — so a client that drops mid-turn and
         // reconnects could have its own `join` rejected with
-        // `turn_in_progress` instead of getting the `session_state` restore
+        // `turn_in_progress` instead of getting the `campaign_state` restore
         // the spec's §Reconnect and `protocol.ts`'s `JoinMessage`
         // doc-comment both promise.
         //
@@ -119,9 +119,9 @@ export function registerWebSocketRoute(app: FastifyInstance, input: WebSocketRou
           turnInProgress();
           return;
         }
-        const sessionId = command.type === "join" ? undefined : session?.state.sessionId;
-        const claimedSessionLock = sessionId !== undefined && input.registry.tryBegin(sessionId);
-        if (sessionId !== undefined && !claimedSessionLock) {
+        const campaignId = command.type === "join" ? undefined : campaign?.state.campaignId;
+        const claimedCampaignLock = campaignId !== undefined && input.registry.tryBegin(campaignId);
+        if (campaignId !== undefined && !claimedCampaignLock) {
           turnInProgress();
           return;
         }
@@ -129,20 +129,24 @@ export function registerWebSocketRoute(app: FastifyInstance, input: WebSocketRou
         localBusy = true;
         try {
           if (command.type === "join") {
-            const found = await input.registry.get(command.sessionId);
+            const found = await input.registry.get(command.campaignId);
             if (found === null) {
               send({
                 type: "error",
-                code: "unknown_session",
-                message: `No session ${command.sessionId}. Create one with POST /sessions.`,
+                code: "unknown_campaign",
+                message: `No campaign ${command.campaignId}. Create one with POST /campaigns.`,
               });
               return;
             }
-            session = found;
+            campaign = found;
           }
 
-          if (session === null) {
-            send({ type: "error", code: "unknown_session", message: "Send a join message first." });
+          if (campaign === null) {
+            send({
+              type: "error",
+              code: "unknown_campaign",
+              message: "Send a join message first.",
+            });
             return;
           }
 
@@ -152,10 +156,10 @@ export function registerWebSocketRoute(app: FastifyInstance, input: WebSocketRou
           // turn; abandoning the iterator mid-turn (which a `break` would
           // do) would leave the rest of that turn unwritten. `send` above
           // is what makes it safe to keep pulling after the socket closes.
-          for await (const frame of handleCommand(session, command, input.ports)) send(frame);
+          for await (const frame of handleCommand(campaign, command, input.ports)) send(frame);
         } catch (error) {
           // The log is already consistent — `emit` appends before it yields —
-          // so the socket reporting a failure does not leave a torn session.
+          // so the socket reporting a failure does not leave a torn campaign.
           // Also covers a `registry.get` failure (e.g. a corrupt log):
           // previously that `await` sat outside this `try`, so it could
           // reject the whole async handler as an unhandled rejection
@@ -167,15 +171,15 @@ export function registerWebSocketRoute(app: FastifyInstance, input: WebSocketRou
           });
         } finally {
           localBusy = false;
-          // Release the SESSION lock last — after the drain above has fully
-          // finished (or thrown) — never earlier. `claimedSessionLock` is
-          // only ever `true` for a mutating command whose `session` was
+          // Release the CAMPAIGN lock last — after the drain above has fully
+          // finished (or thrown) — never earlier. `claimedCampaignLock` is
+          // only ever `true` for a mutating command whose `campaign` was
           // already bound when the lock was claimed (see the guard-2
           // comment above), so this only fires on the one path that could
           // have held it: the full `handleCommand` drain, success or
           // failure. `join` never reaches here with anything to release —
           // it never claims the lock at all (excluded above).
-          if (sessionId !== undefined && claimedSessionLock) input.registry.end(sessionId);
+          if (campaignId !== undefined && claimedCampaignLock) input.registry.end(campaignId);
         }
       })();
     });

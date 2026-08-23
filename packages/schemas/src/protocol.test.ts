@@ -5,24 +5,24 @@ import {
   EncounterCatalogue,
   MAX_FREE_TEXT_LENGTH,
   ServerFrame,
-  SessionCreated,
-  SessionState,
+  CampaignCreated,
+  CampaignState,
   TurnAffordances,
 } from "./protocol.js";
 
 describe("ClientMessage", () => {
   it("accepts a join with no resumeFrom", () => {
-    const parsed = ClientMessage.parse({ type: "join", sessionId: "s1" });
+    const parsed = ClientMessage.parse({ type: "join", campaignId: "s1" });
     expect(parsed.type).toBe("join");
   });
 
   it("accepts a join that resumes from a sequence", () => {
-    const parsed = ClientMessage.parse({ type: "join", sessionId: "s1", resumeFrom: 12 });
+    const parsed = ClientMessage.parse({ type: "join", campaignId: "s1", resumeFrom: 12 });
     expect(parsed).toMatchObject({ resumeFrom: 12 });
   });
 
   it("rejects a negative resumeFrom", () => {
-    expect(() => ClientMessage.parse({ type: "join", sessionId: "s1", resumeFrom: -1 })).toThrow();
+    expect(() => ClientMessage.parse({ type: "join", campaignId: "s1", resumeFrom: -1 })).toThrow();
   });
 
   it("accepts a structured action carrying a full ExecuteTurn", () => {
@@ -232,21 +232,21 @@ describe("EncounterCatalogue", () => {
   });
 });
 
-describe("SessionCreated", () => {
-  it("parses a valid POST /sessions response", () => {
-    const parsed = SessionCreated.parse({ sessionId: "s1" });
-    expect(parsed.sessionId).toBe("s1");
+describe("CampaignCreated", () => {
+  it("parses a valid POST /campaigns response", () => {
+    const parsed = CampaignCreated.parse({ campaignId: "s1" });
+    expect(parsed.campaignId).toBe("s1");
   });
 
-  it("rejects a response missing sessionId", () => {
-    expect(() => SessionCreated.parse({})).toThrow();
+  it("rejects a response missing campaignId", () => {
+    expect(() => CampaignCreated.parse({})).toThrow();
   });
 });
 
-describe("SessionState", () => {
+describe("CampaignState", () => {
   it("requires the fields a projection is folded into", () => {
-    const state = SessionState.parse({
-      sessionId: "s1",
+    const state = CampaignState.parse({
+      campaignId: "s1",
       rootSeed: 7,
       encounterId: "goblin-ambush",
       grid: { width: 1, height: 1, tiles: [["normal"]] },

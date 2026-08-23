@@ -34,13 +34,13 @@ describe("ErrorBanner", () => {
   it("renders a known error code in Hebrew", () => {
     render(
       <ErrorBanner
-        error={{ code: "unknown_session", message: "gone" }}
+        error={{ code: "unknown_campaign", message: "gone" }}
         rejection={null}
         onDismiss={() => undefined}
         onReconnect={() => undefined}
       />,
     );
-    expect(screen.getByText(he.errors.unknown_session)).toBeInTheDocument();
+    expect(screen.getByText(he.errors.unknown_campaign)).toBeInTheDocument();
   });
 
   it("falls back to the raw code for one it does not know", () => {
@@ -132,7 +132,7 @@ describe("ErrorBanner", () => {
 
   it("offers a reconnect control on internal_error, and not on other codes", async () => {
     // Spec's error table: `internal_error` → "Surface, and offer reconnect".
-    // Every other code either has its own recovery path (`unknown_session`
+    // Every other code either has its own recovery path (`unknown_campaign`
     // resets automatically) or genuinely needs no reconnect, so the control
     // is scoped to this one code rather than shown for every error.
     const onReconnect = vi.fn();
@@ -149,7 +149,7 @@ describe("ErrorBanner", () => {
 
     rerender(
       <ErrorBanner
-        error={{ code: "unknown_session", message: "gone" }}
+        error={{ code: "unknown_campaign", message: "gone" }}
         rejection={null}
         onDismiss={() => undefined}
         onReconnect={onReconnect}

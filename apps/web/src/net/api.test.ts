@@ -3,7 +3,7 @@
 // prove it: a malformed body must throw, not fall through as an
 // incorrectly-typed value.
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { createSession, fetchCatalogue } from "./api.js";
+import { createCampaign, fetchCatalogue } from "./api.js";
 
 interface StubbedResponse {
   ok: boolean;
@@ -79,19 +79,19 @@ describe("fetchCatalogue", () => {
   });
 });
 
-describe("createSession", () => {
-  it("returns the session id from a valid body", async () => {
-    stubFetch({ ok: true, body: { sessionId: "s1" } });
-    await expect(createSession("goblin-ambush")).resolves.toBe("s1");
+describe("createCampaign", () => {
+  it("returns the campaign id from a valid body", async () => {
+    stubFetch({ ok: true, body: { campaignId: "s1" } });
+    await expect(createCampaign("goblin-ambush")).resolves.toBe("s1");
   });
 
-  it("rejects a body missing sessionId rather than returning undefined", async () => {
+  it("rejects a body missing campaignId rather than returning undefined", async () => {
     stubFetch({ ok: true, body: {} });
-    await expect(createSession("goblin-ambush")).rejects.toThrow();
+    await expect(createCampaign("goblin-ambush")).rejects.toThrow();
   });
 
   it("throws on a non-OK response instead of parsing the error body", async () => {
     stubFetch({ ok: false, status: 500, body: { error: "boom" } });
-    await expect(createSession("goblin-ambush")).rejects.toThrow(/500/);
+    await expect(createCampaign("goblin-ambush")).rejects.toThrow(/500/);
   });
 });

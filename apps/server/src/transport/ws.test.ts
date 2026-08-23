@@ -13,8 +13,8 @@ import type { EventStore } from "@ai-dm/memory";
 import { ServerFrame } from "@ai-dm/schemas";
 import { buildApp } from "../app.js";
 import type { TurnPorts } from "../core/pipeline.js";
-import { loadSession } from "../core/session.js";
-import { createSessionRegistry } from "./http.js";
+import { loadCampaign } from "../core/campaign.js";
+import { createCampaignRegistry } from "./http.js";
 import type { FastifyInstance } from "fastify";
 
 let running: FastifyInstance | null = null;
@@ -63,7 +63,7 @@ async function startServer(overrides?: { narrative?: NarrativePort }) {
     turnTimeoutMs: 10_000,
     conditionNamesHebrew: new Map([["prone", "שרוע"]]),
   };
-  const registry = createSessionRegistry({
+  const registry = createCampaignRegistry({
     store,
     uuid,
     clock: () => "2026-08-19T10:00:00.000Z",
@@ -148,7 +148,7 @@ function framesUntil(
  * surface as vitest's generic timeout instead of a message naming what
  * never arrived.
  */
-function joinAndWaitForAck(socket: WebSocket, sessionId: string): Promise<void> {
+function joinAndWaitForAck(socket: WebSocket, campaignId: string): Promise<void> {
   return new Promise((resolve, reject) => {
     const timer = setTimeout(() => {
       cleanup();
@@ -169,7 +169,7 @@ function joinAndWaitForAck(socket: WebSocket, sessionId: string): Promise<void> 
     }
     socket.on("message", onMessage);
     socket.on("error", onError);
-    socket.send(JSON.stringify({ type: "join", sessionId }));
+    socket.send(JSON.stringify({ type: "join", campaignId }));
   });
 }
 
@@ -177,7 +177,7 @@ function joinAndWaitForAck(socket: WebSocket, sessionId: string): Promise<void> 
  * Delays every stream by `delayMs` before handing off to the real
  * deterministic narrative — long enough to hold `handleCommand` suspended
  * inside `narrate()` (pipeline.ts) for the window a test needs to send a
- * second command while the first is still "in flight" for its session.
+ * second command while the first is still "in flight" for its campaign.
  */
 function delayedNarrative(delayMs: number): NarrativePort {
   const real = createDeterministicNarrative();
@@ -195,15 +195,15 @@ function delayedNarrative(delayMs: number): NarrativePort {
  * a shared test-support module) until a full round has resolved: either the
  * turn order is back to the hero, or one faction has been wiped out.
  */
-async function waitForRoundSettled(store: EventStore, sessionId: string): Promise<void> {
+async function waitForRoundSettled(store: EventStore, campaignId: string): Promise<void> {
   const deadline = Date.now() + FRAME_TIMEOUT_MS;
   for (;;) {
-    const session = await loadSession({ sessionId, store });
-    if (session === null) throw new Error(`Session ${sessionId} disappeared while polling.`);
+    const campaign = await loadCampaign({ campaignId, store });
+    if (campaign === null) throw new Error(`Campaign ${campaignId} disappeared while polling.`);
     const alive = new Set(
-      session.state.combatants.filter((c) => c.status === "alive").map((c) => c.faction),
+      campaign.state.combatants.filter((c) => c.status === "alive").map((c) => c.faction),
     );
-    const backToHero = session.state.turnOrder[session.state.currentActorIndex] === "hero";
+    const backToHero = campaign.state.turnOrder[campaign.state.currentActorIndex] === "hero";
     if (alive.size < 2 || backToHero) return;
     if (Date.now() > deadline) {
       throw new Error(`Round never settled within ${String(FRAME_TIMEOUT_MS)}ms.`);
@@ -212,43 +212,43 @@ async function waitForRoundSettled(store: EventStore, sessionId: string): Promis
   }
 }
 
-async function createSessionOver(app: FastifyInstance): Promise<string> {
+async function createCampaignOver(app: FastifyInstance): Promise<string> {
   const response = await app.inject({
     method: "POST",
-    url: "/sessions",
+    url: "/campaigns",
     payload: { encounterId: "goblin-ambush" },
   });
-  return (JSON.parse(response.body) as { sessionId: string }).sessionId;
+  return (JSON.parse(response.body) as { campaignId: string }).campaignId;
 }
 
 describe("websocket transport", () => {
   // Break scenario: `registerWebSocketRoute` returning nothing but a bare
-  // `session_state` echo (or never wiring `join` to the registry at all)
+  // `campaign_state` echo (or never wiring `join` to the registry at all)
   // still needs SOME response for this to fail — this asserts the frame
-  // is specifically `session_state`, so a handler that answered every
+  // is specifically `campaign_state`, so a handler that answered every
   // message with a generic `error` frame, or that hung and never replied,
   // both turn this red rather than green.
-  it("answers a join with a session_state snapshot", async () => {
+  it("answers a join with a campaign_state snapshot", async () => {
     const { app, url } = await startServer();
-    const sessionId = await createSessionOver(app);
+    const campaignId = await createCampaignOver(app);
     const socket = await connect(url);
-    const pending = framesUntil(socket, (frame) => frame.type === "session_state");
-    socket.send(JSON.stringify({ type: "join", sessionId }));
+    const pending = framesUntil(socket, (frame) => frame.type === "campaign_state");
+    socket.send(JSON.stringify({ type: "join", campaignId }));
     const frames = await pending;
-    expect(frames[0]).toMatchObject({ type: "session_state" });
+    expect(frames[0]).toMatchObject({ type: "campaign_state" });
     socket.close();
   });
 
-  // Break scenario: a handler that let an unknown sessionId fall through to
-  // `handleCommand` (which assumes a bound `Session`) would throw or hang
-  // instead of answering `unknown_session` — this fails red either way,
+  // Break scenario: a handler that let an unknown campaignId fall through to
+  // `handleCommand` (which assumes a bound `Campaign`) would throw or hang
+  // instead of answering `unknown_campaign` — this fails red either way,
   // rather than passing on any non-empty response.
-  it("errors on an unknown session rather than closing the socket", async () => {
+  it("errors on an unknown campaign rather than closing the socket", async () => {
     const { url } = await startServer();
     const socket = await connect(url);
     const pending = framesUntil(socket, (frame) => frame.type === "error");
-    socket.send(JSON.stringify({ type: "join", sessionId: "nope" }));
-    expect((await pending)[0]).toMatchObject({ code: "unknown_session" });
+    socket.send(JSON.stringify({ type: "join", campaignId: "nope" }));
+    expect((await pending)[0]).toMatchObject({ code: "unknown_campaign" });
     socket.close();
   });
 
@@ -287,10 +287,10 @@ describe("websocket transport", () => {
   // cannot satisfy by accident.
   it("plays a turn and streams its events and narrative", async () => {
     const { app, url } = await startServer();
-    const sessionId = await createSessionOver(app);
+    const campaignId = await createCampaignOver(app);
     const socket = await connect(url);
 
-    await joinAndWaitForAck(socket, sessionId);
+    await joinAndWaitForAck(socket, campaignId);
 
     const pending = framesUntil(
       socket,
@@ -334,10 +334,10 @@ describe("websocket transport", () => {
   // and keeps appending regardless.
   it("keeps appending the enemy sweep after the client closes mid-turn (C-36a)", async () => {
     const { app, url, store } = await startServer();
-    const sessionId = await createSessionOver(app);
+    const campaignId = await createCampaignOver(app);
     const socket = await connect(url);
 
-    await joinAndWaitForAck(socket, sessionId);
+    await joinAndWaitForAck(socket, campaignId);
 
     // Close the instant the player's OWN scene_changed arrives — strictly
     // before goblin-a's turn starts.
@@ -368,7 +368,7 @@ describe("websocket transport", () => {
     // second in this in-memory setup, but nothing here should assume a
     // fixed delay.
     const sawEnemyTurn = async (): Promise<boolean> => {
-      const events = await store.readSince(sessionId, -1);
+      const events = await store.readSince(campaignId, -1);
       return events.some(
         (event) => event.type === "action_validated" && event.payload["actorId"] === "goblin-a",
       );
@@ -386,13 +386,13 @@ describe("websocket transport", () => {
     }
   });
 
-  // CRITICAL-1: the in-flight guard must be scoped to the SESSION, not the
-  // socket. Sessions are shared across sockets on purpose (`http.ts`'s
-  // `live` cache — two WS connections onto the same session, Task 14), and
-  // `nextSequence`/`session.state` live on that one shared `Session` object,
+  // CRITICAL-1: the in-flight guard must be scoped to the CAMPAIGN, not the
+  // socket. Campaigns are shared across sockets on purpose (`http.ts`'s
+  // `live` cache — two WS connections onto the same campaign, Task 14), and
+  // `nextSequence`/`campaign.state` live on that one shared `Campaign` object,
   // advanced in place. A guard that lives per-socket (a `let busy = false`
   // closed over inside `app.get("/ws", ...)`) cannot see a second socket's
-  // in-flight command at all, so two sockets bound to the same session can
+  // in-flight command at all, so two sockets bound to the same campaign can
   // each pass their own turn-order check while the first turn is still
   // resolving — playing the same actor's turn twice and running two enemy
   // sweeps for one round, all at valid, distinct sequences, so nothing ever
@@ -403,7 +403,7 @@ describe("websocket transport", () => {
   // `action_validated`/`dice_rolled`/`state_delta_applied` have already been
   // appended and `currentActorIndex` still points at the hero (turn_advanced
   // is the LAST event of a turn) — exactly the window the finding describes.
-  // Socket B, joined to the SAME session, sends its own hero action inside
+  // Socket B, joined to the SAME campaign, sends its own hero action inside
   // that window.
   //
   // Break scenario: against the per-socket `busy` flag this branch replaces,
@@ -412,14 +412,14 @@ describe("websocket transport", () => {
   // A already passed — it gets played as a real turn instead of
   // `turn_in_progress`, and the log ends up with two `player_input` events
   // for "hero" in the same round.
-  it("rejects a same-session command from a SECOND socket while the first is mid-turn, without duplicating the turn in the log (CRITICAL-1)", async () => {
+  it("rejects a same-campaign command from a SECOND socket while the first is mid-turn, without duplicating the turn in the log (CRITICAL-1)", async () => {
     const { app, url, store } = await startServer({ narrative: delayedNarrative(400) });
-    const sessionId = await createSessionOver(app);
+    const campaignId = await createCampaignOver(app);
 
     const socketA = await connect(url);
-    await joinAndWaitForAck(socketA, sessionId);
+    await joinAndWaitForAck(socketA, campaignId);
     const socketB = await connect(url);
-    await joinAndWaitForAck(socketB, sessionId);
+    await joinAndWaitForAck(socketB, campaignId);
 
     // Socket A starts a hero turn. Wait for ITS OWN player_input event before
     // sending B's command — proof that A is now committed mid-turn (past
@@ -443,7 +443,7 @@ describe("websocket transport", () => {
     );
     await aPlayerInput;
 
-    // Socket B, bound to the SAME session, tries to play a hero turn of its
+    // Socket B, bound to the SAME campaign, tries to play a hero turn of its
     // own while A's is still resolving (A is inside the 400ms narrate delay).
     const bRejection = framesUntil(socketB, (frame) => frame.type === "error");
     socketB.send(
@@ -463,9 +463,9 @@ describe("websocket transport", () => {
 
     // Let A's turn (and the enemy sweep it triggers) finish appending before
     // inspecting the log.
-    await waitForRoundSettled(store, sessionId);
+    await waitForRoundSettled(store, campaignId);
 
-    const events = await store.readSince(sessionId, -1);
+    const events = await store.readSince(campaignId, -1);
     const heroPlayerInputs = events.filter(
       (event) => event.type === "player_input" && event.payload["actorId"] === "hero",
     );
@@ -485,9 +485,9 @@ describe("websocket transport", () => {
   // stale click would land against a changed board).
   it("rejects a second command on the SAME socket while the first is still resolving", async () => {
     const { app, url } = await startServer({ narrative: delayedNarrative(400) });
-    const sessionId = await createSessionOver(app);
+    const campaignId = await createCampaignOver(app);
     const socket = await connect(url);
-    await joinAndWaitForAck(socket, sessionId);
+    await joinAndWaitForAck(socket, campaignId);
 
     const playerInput = framesUntil(
       socket,
@@ -536,27 +536,27 @@ describe("websocket transport", () => {
     socket.close();
   });
 
-  // Post-review regression fix: `join` must NOT compete for the per-session
+  // Post-review regression fix: `join` must NOT compete for the per-campaign
   // lock. `join` (pipeline.ts) is read-only — latestSnapshot/readSince,
-  // yielding session_state/event frames, never `emit` — so it cannot itself
+  // yielding campaign_state/event frames, never `emit` — so it cannot itself
   // duplicate a turn, the only hazard CRITICAL-1's lock exists to prevent.
   // Claiming the lock for `join` regressed the spec's own §Reconnect
   // requirement: C-36a keeps a turn's `handleCommand` draining — lock held —
   // for the whole hero turn plus the entire enemy sweep even after the
   // originating socket is gone, so a client that drops mid-turn and
   // reconnects would have its OWN `join` rejected with `turn_in_progress`
-  // instead of getting the `session_state` restore `protocol.ts`'s
+  // instead of getting the `campaign_state` restore `protocol.ts`'s
   // `JoinMessage` doc-comment promises.
   //
-  // Break scenario: a handler that still claims the session lock for `join`
+  // Break scenario: a handler that still claims the campaign lock for `join`
   // answers socket B's join with `error { code: "turn_in_progress" }`
-  // instead of `session_state` while socket A's turn is still resolving.
-  it("lets a SECOND socket join and get its session_state restore while a turn is in flight on the first socket", async () => {
+  // instead of `campaign_state` while socket A's turn is still resolving.
+  it("lets a SECOND socket join and get its campaign_state restore while a turn is in flight on the first socket", async () => {
     const { app, url, store } = await startServer({ narrative: delayedNarrative(400) });
-    const sessionId = await createSessionOver(app);
+    const campaignId = await createCampaignOver(app);
 
     const socketA = await connect(url);
-    await joinAndWaitForAck(socketA, sessionId);
+    await joinAndWaitForAck(socketA, campaignId);
 
     // Socket A starts a hero turn and gets stuck in narrate()'s 400ms delay.
     // Wait for A's own player_input event first — proof the lock (if `join`
@@ -579,22 +579,22 @@ describe("websocket transport", () => {
     );
     await aPlayerInput;
 
-    // A SECOND, brand-new socket joins the SAME session while A's turn is
+    // A SECOND, brand-new socket joins the SAME campaign while A's turn is
     // still in flight.
     const socketB = await connect(url);
     const bJoinReply = framesUntil(
       socketB,
-      (frame) => frame.type === "session_state" || frame.type === "error",
+      (frame) => frame.type === "campaign_state" || frame.type === "error",
     );
-    socketB.send(JSON.stringify({ type: "join", sessionId }));
+    socketB.send(JSON.stringify({ type: "join", campaignId }));
     const bFrames = await bJoinReply;
 
-    // Must be the session_state restore, not turn_in_progress.
-    expect(bFrames.at(-1)).toMatchObject({ type: "session_state" });
+    // Must be the campaign_state restore, not turn_in_progress.
+    expect(bFrames.at(-1)).toMatchObject({ type: "campaign_state" });
 
     // Let A's turn (and the enemy sweep) finish before the test ends, so
     // nothing keeps writing to the store after the sockets close.
-    await waitForRoundSettled(store, sessionId);
+    await waitForRoundSettled(store, campaignId);
 
     socketA.close();
     socketB.close();

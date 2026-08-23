@@ -17,8 +17,8 @@ export interface ErrorBannerProps {
    * The spec's error table lists `internal_error` as "surface, and offer
    * reconnect" — dismiss alone leaves the player on a dead screen, since an
    * `error` frame does not close the socket and nothing else ever retries.
-   * Genuinely a reconnect, not a restart: the session survives the faults
-   * that raise this code, so `App`'s handler rejoins the same session id
+   * Genuinely a reconnect, not a restart: the campaign survives the faults
+   * that raise this code, so `App`'s handler rejoins the same campaign id
    * from the sequence already folded rather than discarding the fight.
    */
   onReconnect: () => void;

@@ -2,7 +2,7 @@ import type { GameEvent } from "@ai-dm/schemas";
 import type { EventSnapshot, EventStore } from "./port.js";
 import { findAppendConflict } from "./validate.js";
 
-interface SessionLog {
+interface CampaignLog {
   events: GameEvent[];
   snapshot: EventSnapshot | null;
 }
@@ -26,13 +26,13 @@ function storedCopy<T>(value: T): T {
 }
 
 export function createInMemoryEventStore(): EventStore {
-  const logs = new Map<string, SessionLog>();
+  const logs = new Map<string, CampaignLog>();
 
-  function logFor(sessionId: string): SessionLog {
-    const existing = logs.get(sessionId);
+  function logFor(campaignId: string): CampaignLog {
+    const existing = logs.get(campaignId);
     if (existing !== undefined) return existing;
-    const created: SessionLog = { events: [], snapshot: null };
-    logs.set(sessionId, created);
+    const created: CampaignLog = { events: [], snapshot: null };
+    logs.set(campaignId, created);
     return created;
   }
 
@@ -42,24 +42,24 @@ export function createInMemoryEventStore(): EventStore {
     // `Promise.resolve(...)` or `Promise.reject(...)` directly rather than
     // being declared `async` with nothing to await (see
     // @typescript-eslint/require-await).
-    append(sessionId, events) {
+    append(campaignId, events) {
       // Read the existing events without creating a map entry for an
-      // unknown session — `logFor` (which does create one) is only called
+      // unknown campaign — `logFor` (which does create one) is only called
       // once validation has fully passed, below. Otherwise a rejected batch
-      // against a session nobody has written to yet would leave an empty
+      // against a campaign nobody has written to yet would leave an empty
       // log record behind: not observable through the four public methods,
       // but not "literally unchanged" either, and a rolled-back SQL INSERT
       // would leave nothing.
-      const existingEvents = logs.get(sessionId)?.events ?? [];
+      const existingEvents = logs.get(campaignId)?.events ?? [];
       const taken = new Set(existingEvents.map((each) => each.sequence));
 
       // Validate the whole batch before mutating anything — that is what
       // makes this atomic, and what the Postgres store gets from its
       // transaction.
-      const conflict = findAppendConflict(sessionId, events, taken);
+      const conflict = findAppendConflict(campaignId, events, taken);
       if (conflict !== null) return Promise.reject(conflict);
 
-      const log = logFor(sessionId);
+      const log = logFor(campaignId);
       // Copied on the way in, not retained by reference: the Postgres store
       // serializes to jsonb inside `append`, so the caller's object stops
       // mattering the moment the call returns. Keeping the caller's own
@@ -71,9 +71,9 @@ export function createInMemoryEventStore(): EventStore {
       return Promise.resolve();
     },
 
-    readSince(sessionId, afterSequence) {
+    readSince(campaignId, afterSequence) {
       const events =
-        logs.get(sessionId)?.events.filter((each) => each.sequence > afterSequence) ?? [];
+        logs.get(campaignId)?.events.filter((each) => each.sequence > afterSequence) ?? [];
       // A deep copy, not just a fresh array: the Postgres store parses rows
       // into new objects, so a caller that mutates a returned event must see
       // the same nothing happen in both stores. Cost is one clone per
@@ -81,18 +81,18 @@ export function createInMemoryEventStore(): EventStore {
       return Promise.resolve(events.map(storedCopy));
     },
 
-    latestSnapshot(sessionId) {
-      const snapshot = logs.get(sessionId)?.snapshot ?? null;
+    latestSnapshot(campaignId) {
+      const snapshot = logs.get(campaignId)?.snapshot ?? null;
       // `{ ...snapshot }` used to be enough for the array, but `state` is an
       // object the caller could reach into. Same reasoning as `readSince`.
       return Promise.resolve(snapshot === null ? null : storedCopy(snapshot));
     },
 
-    putSnapshot(sessionId, sequence, state) {
-      const log = logFor(sessionId);
+    putSnapshot(campaignId, sequence, state) {
+      const log = logFor(campaignId);
       if (log.snapshot === null || log.snapshot.sequence < sequence) {
         // Cloned on the way in too: `pipeline.ts` hands us its live
-        // `session.state` and keeps mutating it after this returns. Same
+        // `campaign.state` and keeps mutating it after this returns. Same
         // JSON-lossy copy as `append`, for the same reason — `state` lands in
         // a jsonb column on the other side.
         log.snapshot = { sequence, state: storedCopy(state) };

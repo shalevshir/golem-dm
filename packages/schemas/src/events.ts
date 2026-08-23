@@ -5,11 +5,11 @@ import { DiceNotation } from "./primitives.js";
 
 /**
  * Append-only game event log entry. The event stream is the source of truth;
- * world state is a projection. Enables replay, undo, and session restore.
+ * world state is a projection. Enables replay, undo, and campaign restore.
  */
 export const GameEvent = z.object({
   eventId: z.string().uuid(),
-  sessionId: z.string(),
+  campaignId: z.string(),
   sequence: z.number().int().min(0),
   timestamp: z.string().datetime(),
   type: z.enum([
@@ -144,7 +144,7 @@ export type AttackTrace = z.infer<typeof AttackTrace>;
 
 /**
  * Payload for the `dice_rolled` event. `reduce()` still no-ops this event
- * type (it does not change `SessionState`) — this schema exists so the web
+ * type (it does not change `CampaignState`) — this schema exists so the web
  * client's combat log (a client-only display feature, not state) can safely
  * parse what the engine already computed. `movedFeet` is the turn's total
  * movement distance, already accounting for terrain cost.

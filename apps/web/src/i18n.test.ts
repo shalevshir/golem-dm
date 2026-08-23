@@ -3,8 +3,8 @@ import { actionLabel, errorMessage, he, rejectionMessage } from "./i18n.js";
 
 describe("i18n", () => {
   it("renders a known server error code in Hebrew", () => {
-    expect(errorMessage("unknown_session")).toBe(he.errors.unknown_session);
-    expect(errorMessage("unknown_session")).not.toBe("unknown_session");
+    expect(errorMessage("unknown_campaign")).toBe(he.errors.unknown_campaign);
+    expect(errorMessage("unknown_campaign")).not.toBe("unknown_campaign");
   });
 
   it("falls back to the raw code for an unknown error code", () => {
