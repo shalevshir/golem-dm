@@ -51,14 +51,17 @@ So the plan splits the change along the axis a reviewer actually reads: **Task 2
 
 No code. The number every later task is measured against.
 
-- [ ] **Step 1: Confirm the branch and the tree**
+- [ ] **Step 1: Cut a branch and confirm the tree**
+
+The §4.7 docs merged to `main` as `10ea06c`. Work from a branch off current `main`, not `main` itself:
 
 ```bash
-git rev-parse --abbrev-ref HEAD    # expect: narrative-foundation-design (or a branch off it)
 git status --short                  # expect: clean apart from untracked .claude/
+git log --oneline -1 -- docs/superpowers/plans/2026-08-23-campaign-state-split.md
+git switch -c step-11-campaign-state-split main
 ```
 
-If the tree is dirty with someone else's work, stop. This plan renames 36 files and will not merge cleanly with a concurrent edit.
+If the tree is dirty with someone else's work, stop. This plan renames 36 files and will not merge cleanly with a concurrent edit — and `main` has been moving under this work: `41c778b` landed an unrelated conditions/rules-digest fix between the plan being written and executed. Measure the baseline yourself in Step 2 rather than trusting any count quoted elsewhere.
 
 - [ ] **Step 2: Measure**
 
