@@ -395,10 +395,15 @@ Other deviations from the step list, each deliberate:
   and `packages/memory` cannot reach the catalogue to help.
 - **`encounter_resolved` throws when no bracket is open.** The spec only
   named the `encounter_started` direction; this is the same corrupt-log class
-  and refuses for the same reason. No `encounterId`-match check was added —
-  the open/closed invariant is the one `EncounterState | null` encodes, and
-  `resolveEncounter` takes the id from the open encounter rather than from
-  its caller, so a mismatch has no producer.
+  and refuses for the same reason. **Superseded in part by `fd6716d`:** this
+  originally shipped with no `encounterId`-match check, on the reasoning that
+  `resolveEncounter` takes the id from the open encounter so a mismatch has no
+  producer. Review overturned that, correctly — `reduce` is the fold for
+  *arbitrary* logs, which is the same argument this task uses to justify
+  keeping the overlap guard in `reduce` rather than in the server. One bracket
+  was checked and the other was not. `encounter_resolved` now parses
+  `EncounterResolvedPayload` and refuses an id that differs from the open
+  encounter's; `encounter_started` parses its payload too.
 - **The pipeline's refusal uses `not_your_turn`**, per the spec's "existing
   code where one fits". It fits precisely: `state/conclusion.ts` already
   documents that every command after a fight ends is answered `not_your_turn`
@@ -456,6 +461,55 @@ answers a fresh client with `campaign_state` at `nextSequence - 1`, which is
 already 1 on a new campaign, so a client never resumes from 0 and never
 receives `encounter_started` as an event frame — but it is a sharp edge on
 exactly the resume path Task 8 Step 1 is about.
+
+**Corrected by review (`fd6716d`).** The framing above names only half the
+hazard, and the rarer half. The *silent* case is worse: a client folding
+`encounter_started` onto `encounter: null` gets `state` back unchanged — no
+throw — so its `snapshot.encounter` stays null while the server has a board,
+and `App.tsx` renders its "not ready yet" placeholder indefinitely on a live
+socket. A `try`/`catch` around `applyFrame`, the obvious shape for Task 8's
+guard, catches none of it. `reduce.ts`'s header now records that `fold` alone
+can no longer project a campaign log across a bracket, and that `loadCampaign`
+is the only complete projector — the file previously claimed the opposite.
+
+### Review of Task 5, and the fixes it produced
+
+A full review of `40fbb0b` ran before Task 6 and found nine defects, fixed in
+`fd6716d` and `12d4136`. Three changed behaviour; six were comments or test
+names that overclaimed. Beyond the two corrections folded into the notes
+above:
+
+- **`POST /campaigns` no longer writes an orphan row on an unknown encounter
+  id.** Task 5 moved `encounterId` off `createCampaign`, so sequence 0 was
+  appended *before* anything validated the id — a 404 left a permanently
+  unreachable campaign in an append-only log, where before Task 5 it wrote
+  nothing. `create` now calls `encounterById` (a pure catalogue lookup, no
+  I/O) first. The note calling that row "harmless" is withdrawn: harmless per
+  request, but it converted a pure validation failure into a durable write.
+- **`resolveEncounter`'s payload goes through `EncounterResolvedPayload`**
+  rather than an object literal — invariant 4, and it was the only one of the
+  three bracket payloads carrying free-form data.
+- **`builtOf`'s disagreement guard and the append-throws-after-guard property
+  now have tests that can fail.** Both were unreachable from the suite;
+  `builtOf`'s guard is the stated justification for deleting `sceneEnglish`,
+  so it needed one.
+- **One new test could not fail and was repaired in `12d4136`.** The
+  malformed-`encounter_started`-payload case folded against a fixture with a
+  bracket open, and that guard throws regardless of payload validity, so a
+  bare `.toThrow()` passed even with the parse deleted. It now folds against
+  `encounter: null`. Note the asymmetry that made this subtle:
+  `encounter_resolved`'s guard fires when the bracket is *closed*, so its
+  sibling test discriminates against an open-bracket fixture as written.
+  Opposite polarity, same switch.
+- **`loadCampaign`'s per-encounter rebuild cost is now documented** — one
+  `readFileSync`+parse per `encounter_started` in the log on every cold load,
+  and campaigns becoming unloadable if an encounter is ever retired. Not
+  memoized: the intermediate builds are *not* wasted, since each one's
+  `initialEncounterState` seeds the fold for that encounter's own events.
+
+Counts after both fix commits: **1266 passed / 29 skipped over 90 files**
+without a database, **1295 passed / 0 skipped** with one. Typecheck and eslint
+exit 0.
 
 **Prettier:** `campaign.ts` was clean at Task 4 and got a path-scoped
 `--write`. `pipeline.test.ts`, `event-store/replay.test.ts` and `events.ts`
