@@ -260,8 +260,16 @@ describe("reduce", () => {
   });
 
   it("throws on an encounter_started payload that fails to parse", () => {
+    // Deliberately NOT `base`: `base` already has a bracket open, and
+    // `encounter_started`'s already-open guard throws unconditionally
+    // whenever one is — so a bare `.toThrow()` against `base` would pass
+    // even with the `.parse()` call deleted outright, discriminating
+    // nothing (verified: stubbing out the parse call and rerunning left
+    // this test green). Only a state where that guard does NOT fire
+    // isolates what this test claims to pin.
+    const noBracketOpen: CampaignState = { ...base, encounter: null };
     const missingEncounterId = event(14, "encounter_started", {});
-    expect(() => reduce(base, missingEncounterId)).toThrow();
+    expect(() => reduce(noBracketOpen, missingEncounterId)).toThrow();
   });
 
   it("throws on an encounter_resolved payload that fails to parse", () => {

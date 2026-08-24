@@ -151,8 +151,8 @@ export function reduce(state: CampaignState, event: GameEvent): CampaignState {
       const { encounterId } = EncounterStartedPayload.parse(event.payload);
       if (state.encounter !== null) {
         throw new Error(
-          `encounter_started at sequence ${String(event.sequence)} for encounter ` +
-            `${encounterId} with encounter ${state.encounter.encounterId} already open`,
+          `encounter_started at sequence ${String(event.sequence)} names encounter ` +
+            `${encounterId}, but encounter ${state.encounter.encounterId} is already open`,
         );
       }
       return state;

@@ -172,9 +172,14 @@ export function registerHttpRoutes(app: FastifyInstance, registry: CampaignRegis
     try {
       campaign = await registry.create(body.data.encounterId);
     } catch (error) {
-      // `buildEncounterById` throws `UnknownEncounterError` for an id the
-      // catalogue does not know — that is the only case that is a 404.
-      // Everything else it can throw (ENOENT from a missing SRD file, a
+      // `registry.create` throws `UnknownEncounterError` for an id the
+      // catalogue does not know — that is the only case that is a 404. Since
+      // Fix 2, that error comes from `encounterById`'s guard at the top of
+      // `create`, which runs before anything is written; `startEncounter`'s
+      // own `buildEncounterById` call further down can throw the same error
+      // type in principle, but by the time it runs the id has already
+      // cleared that guard, so it is unreachable in practice. Everything
+      // else `registry.create` can throw (ENOENT from a missing SRD file, a
       // ZodError from an invalid one, or any of `buildEncounter`'s own
       // validation errors) is a genuine server fault and must not be
       // reported to the client as "not found".
