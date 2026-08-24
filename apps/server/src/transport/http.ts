@@ -7,7 +7,7 @@ import { z } from "zod";
 import type { EventStore } from "@ai-dm/memory";
 import { createCampaign, loadCampaign, startEncounter } from "../core/campaign.js";
 import type { Campaign } from "../core/campaign.js";
-import { encounterCatalogue, UnknownEncounterError } from "../encounters/index.js";
+import { encounterById, encounterCatalogue, UnknownEncounterError } from "../encounters/index.js";
 
 const CreateCampaignBody = z.object({ encounterId: z.string().min(1) });
 
@@ -72,6 +72,20 @@ export function createCampaignRegistry(input: CampaignRegistryInput): CampaignRe
 
   return {
     async create(encounterId) {
+      // Validated before anything is written, deliberately separate from and
+      // earlier than `startEncounter`'s own `buildEncounterById` call below.
+      // `createCampaign` appends `campaign_started` unconditionally — it has
+      // no way to refuse an id it is never given — so an unknown id must be
+      // caught before that append or it leaves a durable, permanently
+      // orphaned `game_events` row for a campaign id that is never returned
+      // to anyone (the append-only log has no way to take it back out).
+      // `encounterById` is the pure, in-memory half of `buildEncounterById`
+      // (a `CATALOGUE.get`, no file I/O) — cheap enough to call here purely
+      // for the guard and again inside `startEncounter` for the real build,
+      // rather than threading a `BuiltEncounter` across the two calls for
+      // one avoided lookup.
+      encounterById(encounterId);
+
       const campaignId = input.uuid();
       const campaign = await createCampaign({
         campaignId,
@@ -89,13 +103,11 @@ export function createCampaignRegistry(input: CampaignRegistryInput): CampaignRe
       // `live` holds the started one either way; it is awaited before the set
       // so a half-started campaign is never reachable through `get`.
       //
-      // `buildEncounterById` runs inside `startEncounter`, which is what
-      // keeps `UnknownEncounterError` reaching the route's 404 branch. The
-      // sequence-0 `campaign_started` is already in the log when it throws:
-      // an unknown id therefore leaves an encounter-less campaign behind
-      // rather than nothing at all. Harmless — it is unreachable, since its
-      // id was never returned to anyone — and the log is append-only, so
-      // there is nothing to roll back.
+      // The id is already known good by the time this runs — the guard above
+      // ran first — so `buildEncounterById`'s own `UnknownEncounterError`
+      // here is unreachable in practice. It stays because this call is what
+      // actually builds the `BuiltEncounter` (stat blocks, scene card,
+      // combat world) the guard above never needed to.
       await startEncounter({
         campaign,
         encounterId,

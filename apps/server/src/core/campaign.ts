@@ -27,6 +27,7 @@ import type { EventStore } from "@ai-dm/memory";
 import type { BuiltEncounter, CombatWorld } from "@ai-dm/rules-engine";
 import {
   CampaignStartedPayload,
+  EncounterResolvedPayload,
   EncounterStartedPayload,
   NarrativeEmittedPayload,
   reduce,
@@ -55,9 +56,18 @@ export interface Campaign {
    * since it is what `reduce` folds) before consulting this at all, then
    * refuses a `built` describing a different encounter. The three functions
    * that write the bracket — `createCampaign`, `startEncounter`,
-   * `resolveEncounter` — each set both halves in one place, and
-   * `loadCampaign` derives this one from the folded projection, so there is
-   * no path that can set one without the other.
+   * `resolveEncounter` — each set both halves in one place.
+   *
+   * That is not the whole set of writers, though: `pipeline.ts`'s `emit`
+   * assigns `campaign.state = next` for every event it appends and never
+   * touches `built` at all, so it is a fourth path that CAN set one without
+   * the other — it just doesn't today, because no `emit` call site passes a
+   * bracket event. `emit` is the natural home for the `encounter_resolved`
+   * that §4.7's step 4 will eventually append there, and the day it does,
+   * `built` would go stale exactly at that call. `builtOf`'s guard above is
+   * what catches that the moment anything reads the board afterward — that
+   * is the design working as intended, not a hole this comment is papering
+   * over.
    *
    * There is deliberately no separate `sceneEnglish` field: it was exactly
    * `built.sceneEnglish`, and a second copy would be a second thing to keep
@@ -259,7 +269,11 @@ export async function resolveEncounter(input: ResolveEncounterInput): Promise<Ca
     campaignId,
     sequence: campaign.nextSequence,
     type: "encounter_resolved",
-    payload: { encounterId, outcome: input.outcome, survivorIds: [...input.survivorIds] },
+    payload: EncounterResolvedPayload.parse({
+      encounterId,
+      outcome: input.outcome,
+      survivorIds: [...input.survivorIds],
+    }),
   });
 
   // As in `startEncounter`: fold first so a refused event is never appended.
@@ -313,6 +327,27 @@ export async function loadCampaign(input: {
   // bracket whose contents only the catalogue can rebuild. `reduce` still
   // sees every event — it holds the bracket invariants — and this loop only
   // supplies the two things it cannot reach.
+  //
+  // Two real costs this carries that the split does not otherwise name:
+  //
+  // - `buildEncounterById` re-reads and re-parses SRD files on every call,
+  //   with no memoization (`encounters/index.ts`). A campaign with N
+  //   resolved fights therefore does N blocking `readFileSync` + zod passes
+  //   on the event loop for every cold `registry.get`, even though only the
+  //   final `built` survives past this loop. That is NOT N-1 wasted builds,
+  //   though: each intermediate one is still needed while it runs, because
+  //   its `initialEncounterState` is what seeds the fold for that
+  //   encounter's own events (the combatants `state_delta_applied` mutates,
+  //   the turn order `scene_changed` walks) before the next
+  //   `encounter_resolved` discards it. Memoizing the catalogue lookup would
+  //   still be a legitimate follow-up; it is out of scope for this commit.
+  // - Load success is coupled to the catalogue's entire history, not just
+  //   its current contents: retiring or renaming an encounter id makes every
+  //   campaign that ever fought it permanently unloadable, because
+  //   `UnknownEncounterError` propagates straight out of `buildEncounterById`
+  //   here with nothing to catch it. A catalogue that only ever grows never
+  //   hits this; one that prunes or renames needs an answer this loop does
+  //   not have.
   for (const event of events.slice(1)) {
     state = reduce(state, event);
     if (event.type === "encounter_started") {

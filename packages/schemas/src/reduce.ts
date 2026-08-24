@@ -2,11 +2,34 @@
 // (invariant 3), so this function is the only place a `CampaignState` changes
 // shape — and it is pure, total and never mutates its input.
 //
-// It lives in `@ai-dm/schemas` rather than in `apps/server` so that client and
-// server run the SAME fold, not two that must agree. `apps/web` may depend on
-// this package and only this package (invariant 5); an equivalent-but-separate
-// client fold was the alternative, and the drift it invites is exactly what
-// this placement removes. `apps/server/src/core/` imports it from here.
+// It lives in `@ai-dm/schemas` so that `apps/web` — which may depend on this
+// package and only this package (invariant 5) — has a fold to run at all.
+// Since the campaign/encounter split, though, this function alone is no
+// longer the whole projection: the server's is `reduce` PLUS a catalogue
+// substitution (`apps/server/src/core/campaign.ts`'s `loadCampaign`, the
+// `encounter_started` branch of its loop, which rebuilds the board `reduce`
+// cannot fill — see the comment on that case below), while the client
+// (`apps/web/src/state/store.ts`'s `applyFrame`) runs `reduce` alone, with no
+// catalogue to substitute from. `fold` therefore can no longer project a
+// campaign log across a bracket by itself; `loadCampaign` is the only
+// complete projector today.
+//
+// The gap this opens is silent, not a throw: a client that folds
+// `encounter_started` onto `encounter: null` gets `state` back unchanged —
+// no error — so its `snapshot.encounter` stays null while the server's own
+// projection has a board. `apps/web/src/App.tsx` then renders its "not ready
+// yet" placeholder branch (`state.snapshot === null || encounter === null ||
+// catalogue === null`) indefinitely, on a live socket that is otherwise
+// working fine.
+//
+// Unreachable today: a client never resumes from sequence 0 — `POST
+// /campaigns` always starts the one encounter before any client joins, so a
+// join always lands after `encounter_started` and receives it folded into
+// the `campaign_state` snapshot, never as a live `event` frame. §4.7's step
+// 4, which separates campaign creation from starting a fight, is what makes
+// this reachable, and it is the point at which `apps/web` needs its own
+// answer (either a catalogue fetch alongside `reduce`, or giving up on
+// `fold` projecting a bracket at all).
 //
 // Nothing here may import a Node built-in, or `apps/web`'s bundle breaks — and
 // nothing here may import `@ai-dm/rules-engine`, which would invert the
@@ -20,6 +43,7 @@
 // better than folding a half-understood event into state.
 import { z } from "zod";
 import { Combatant, ActionEconomy } from "./world.js";
+import { EncounterStartedPayload, EncounterResolvedPayload } from "./events.js";
 import type { GameEvent } from "./events.js";
 import type { CampaignState } from "./protocol.js";
 
@@ -118,12 +142,17 @@ export function reduce(state: CampaignState, event: GameEvent): CampaignState {
     // genesis rather than reading a persisted `state` field. The check still
     // belongs here, because `state.encounter` is this function's field and a
     // strictly non-overlapping bracket is what makes it a nullable field
-    // rather than a map.
+    // rather than a map. The payload is parsed here too, so the file's own
+    // rule above ("every payload this cares about is parsed here rather than
+    // cast") holds for both bracket events, not just the one that closes —
+    // `encounterId` is reported in the already-open error below for the same
+    // reason `encounter_resolved`'s mismatch error names both ids.
     case "encounter_started": {
+      const { encounterId } = EncounterStartedPayload.parse(event.payload);
       if (state.encounter !== null) {
         throw new Error(
-          `encounter_started at sequence ${String(event.sequence)} with encounter ` +
-            `${state.encounter.encounterId} already open`,
+          `encounter_started at sequence ${String(event.sequence)} for encounter ` +
+            `${encounterId} with encounter ${state.encounter.encounterId} already open`,
         );
       }
       return state;
@@ -138,9 +167,25 @@ export function reduce(state: CampaignState, event: GameEvent): CampaignState {
     // a combat event outside one, and throws for the same reason: the
     // resulting projection would be indistinguishable from a legitimate one.
     case "encounter_resolved": {
+      const { encounterId } = EncounterResolvedPayload.parse(event.payload);
       if (state.encounter === null) {
         throw new Error(
           `encounter_resolved at sequence ${String(event.sequence)} with no encounter open`,
+        );
+      }
+      // `reduce` is the fold for an arbitrary log, not only for the one
+      // `resolveEncounter` produces (`resolveEncounter` itself cannot name
+      // the wrong encounter — it takes `encounterId` from the open bracket,
+      // never from a caller — which is exactly why this check needs its own
+      // test at this level rather than one through that function). A
+      // `encounter_resolved` naming a different encounter than the one open
+      // is the same corrupt-log class as closing a bracket that was never
+      // open, one check further: it means some other producer, or a hand-
+      // edited log, is closing a fight the projection was not actually in.
+      if (encounterId !== state.encounter.encounterId) {
+        throw new Error(
+          `encounter_resolved at sequence ${String(event.sequence)} names encounter ` +
+            `${encounterId} but ${state.encounter.encounterId} is the one open`,
         );
       }
       return { ...state, encounter: null };

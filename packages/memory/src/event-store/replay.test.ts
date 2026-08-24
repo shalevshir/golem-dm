@@ -46,9 +46,15 @@ describe.skipIf(url === undefined || url === "")("replay round-trip over Postgre
       // `reduce` treats campaign_started as a no-op — the world it declares
       // is rebuilt from its payload before the fold begins rather than folded
       // out of it — which is exactly what makes "fold from snapshot plus
-      // events equals fold from zero" hold. `genesisState` above is that
-      // rebuilt starting state, standing in for the one
-      // `apps/server`'s `loadCampaign` builds from this event's `rootSeed`.
+      // events equals fold from zero" hold. That no-op is also why this
+      // payload can be `{}` rather than a real `CampaignStartedPayload`
+      // (`{ rootSeed }`): `reduce` never parses `campaign_started`, so an
+      // empty payload here is fine and deliberately exercises exactly that
+      // property, not a shortcut this test happens to get away with.
+      // `genesisState` above stands in for the rebuilt starting state
+      // `apps/server`'s `loadCampaign` would separately reconstruct from a
+      // real `rootSeed` — this fixture does not need one, since what is
+      // being proved here is the fold identity, not a real load.
       type: "campaign_started",
       payload: {},
     };

@@ -241,6 +241,33 @@ describe("reduce", () => {
     reduce(withActors, event(12, "scene_changed", { kind: "turn_advanced" }));
     expect(withActors).toEqual(before);
   });
+
+  // Fix 3's two new refusals, plus the parse each bracket case now runs.
+  // Deliberately narrow — the broader bracket-invariant coverage (combat
+  // outside a bracket, a second encounter_started, resolve clearing the
+  // bracket) is plan Task 6, not this fix.
+  it("throws when encounter_resolved names a different encounter than the one open", () => {
+    // `base`'s open encounter is "e1"; this event closes "e2" instead — the
+    // same corrupt-log class `resolveEncounter` itself cannot produce (it
+    // takes `encounterId` from the open bracket, never from a caller), which
+    // is why this needs its own coverage at the `reduce` level.
+    const mismatched = event(13, "encounter_resolved", {
+      encounterId: "e2",
+      outcome: "victory",
+      survivorIds: [],
+    });
+    expect(() => reduce(base, mismatched)).toThrow(/e2.*e1 is the one open/);
+  });
+
+  it("throws on an encounter_started payload that fails to parse", () => {
+    const missingEncounterId = event(14, "encounter_started", {});
+    expect(() => reduce(base, missingEncounterId)).toThrow();
+  });
+
+  it("throws on an encounter_resolved payload that fails to parse", () => {
+    const missingFields = event(15, "encounter_resolved", { encounterId: "e1" });
+    expect(() => reduce(base, missingFields)).toThrow();
+  });
 });
 
 describe("fold", () => {

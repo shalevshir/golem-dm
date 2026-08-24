@@ -247,8 +247,9 @@ describe("replay properties", () => {
     // My first replacement for it was ALSO non-discriminating, for a
     // different reason (review caught it): it compared the full event
     // arrays from `readSince`, which include sequence 0 — whose payload is
-    // `{ encounterId, rootSeed }` (`campaign.ts`). With rootSeed 42 vs. 99,
-    // that one event already differs before a single turn plays, so
+    // `{ rootSeed }` (`CampaignStartedPayload`, `@ai-dm/schemas`). With
+    // rootSeed 42 vs. 99, that one event already differs before a single
+    // turn plays, so
     // `.not.toEqual` on the whole array passes even if `rootSeed` never
     // reaches `seedFor` at all (e.g. a regression hardcoding
     // `ports.seedFor(42, sequence)` in the pipeline) — exactly the bug this
@@ -318,9 +319,11 @@ describe("snapshots", () => {
     // C-22 / C-35: get the fold's starting state from the campaign API, not
     // from a cast on the genesis event's payload — sequence 0 no longer
     // carries a `state` field (Task 8 removed it to kill the aliasing
-    // hazard; see `campaign.ts`'s `GenesisPayload`). Reintroducing that field
-    // to make a cast like `(genesis.payload as { state: unknown }).state`
-    // work would undo that fix, so this drops the cast entirely.
+    // hazard; see `@ai-dm/schemas`' `CampaignStartedPayload`, which replaced
+    // the old `GenesisPayload` this comment used to name). Reintroducing a
+    // `state` field to make a cast like
+    // `(genesis.payload as { state: unknown }).state` work would undo that
+    // fix, so this drops the cast entirely.
     const initial = await genesisStateFor();
     const upToSnapshot = events.filter(
       (each) => each.sequence > initial.sequence && each.sequence <= snapshot.sequence,

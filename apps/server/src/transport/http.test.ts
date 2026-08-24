@@ -46,6 +46,27 @@ describe("POST /campaigns", () => {
     expect(response.statusCode).toBe(404);
   });
 
+  it("appends nothing to the store for an unknown encounterId", async () => {
+    // Fix 2 regression guard: before the fix, `createCampaign` appended
+    // `campaign_started` before `buildEncounterById` ever ran inside
+    // `startEncounter`, so an unknown id still wrote a durable orphan
+    // `game_events` row for a campaign id nobody was ever given. The 404
+    // assertion above does not discriminate that bug on its own — the
+    // endpoint already returned 404 before this fix too — so this asserts
+    // the append-nothing half directly against the store.
+    const { app, store } = appWith();
+    const appendSpy = vi.spyOn(store, "append");
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/campaigns",
+      payload: { encounterId: "nope" },
+    });
+
+    expect(response.statusCode).toBe(404);
+    expect(appendSpy).not.toHaveBeenCalled();
+  });
+
   it("rejects a body with no encounterId with 400", async () => {
     const { app } = appWith();
     const response = await app.inject({ method: "POST", url: "/campaigns", payload: {} });

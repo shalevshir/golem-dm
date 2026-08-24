@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { createInMemoryEventStore } from "@ai-dm/memory";
+import { createInMemoryEventStore, EventStoreUnavailableError } from "@ai-dm/memory";
+import type { EventStore } from "@ai-dm/memory";
 import { fold, reduce } from "@ai-dm/schemas";
 import type { GameEvent } from "@ai-dm/schemas";
 import {
@@ -83,7 +84,13 @@ describe("createCampaign", () => {
     expect(events[0]?.payload).toEqual({ rootSeed: 42 });
   });
 
-  it("refuses the board through encounterOf, worldFor and builtOf", async () => {
+  // `worldFor` and `builtOf` both call `encounterOf` first and propagate
+  // whatever it throws, so all three assertions below pin the same single
+  // throw rather than three independent behaviours — `builtOf`'s own
+  // disagreement guard (the case where `encounterOf` succeeds but `built`
+  // disagrees with it) gets its own coverage in the `builtOf` describe block
+  // below instead.
+  it("refuses the board through encounterOf; worldFor/builtOf propagate its throw", async () => {
     const campaign = await createCampaign(baseInput());
     expect(() => encounterOf(campaign)).toThrow(/no encounter open/);
     expect(() => worldFor(campaign)).toThrow(/no encounter open/);
@@ -173,6 +180,37 @@ describe("startEncounter", () => {
     ).rejects.toThrow(UnknownEncounterError);
     expect(await input.store.readSince("s1", -1)).toHaveLength(1);
   });
+
+  // Mirrors `pipeline.test.ts`'s pair of `internal_error` tests for `emit`:
+  // a store rejection AFTER the guard has already passed (a known encounter
+  // id, no bracket open) must leave every field this function would
+  // otherwise write untouched, the same way a failed append never bumps
+  // `emit`'s `nextSequence`.
+  it("leaves state, built and nextSequence untouched when append rejects post-guard", async () => {
+    const input = baseInput();
+    const campaign = await createCampaign(input);
+    const stateBefore = campaign.state;
+    const builtBefore = campaign.built;
+    const nextSequenceBefore = campaign.nextSequence;
+    const failingStore: EventStore = {
+      ...input.store,
+      append: () => Promise.reject(new EventStoreUnavailableError("append", new Error("boom"))),
+    };
+
+    await expect(
+      startEncounter({
+        campaign,
+        encounterId: ENCOUNTER_ID,
+        store: failingStore,
+        clock: input.clock,
+        uuid: input.uuid,
+      }),
+    ).rejects.toThrow(EventStoreUnavailableError);
+
+    expect(campaign.state).toBe(stateBefore);
+    expect(campaign.built).toBe(builtBefore);
+    expect(campaign.nextSequence).toBe(nextSequenceBefore);
+  });
 });
 
 describe("resolveEncounter", () => {
@@ -204,7 +242,12 @@ describe("resolveEncounter", () => {
     expect(campaign.state.world.appliedClientMessageIds).toEqual(["c1"]);
   });
 
-  it("takes the encounter id from the open encounter, not from the caller", async () => {
+  // `ResolveEncounterInput` has no `encounterId` field at all, so there is no
+  // caller-supplied alternative for this to be pinning against — what this
+  // actually proves is the exact shape and contents of the appended
+  // `encounter_resolved` payload: `encounterId` from the open encounter,
+  // `outcome` and `survivorIds` from the input, nothing else.
+  it("writes encounter_resolved naming the open encounter, outcome and survivors", async () => {
     const input = baseInput();
     const campaign = await startedCampaign(input);
     await resolveEncounter({
@@ -238,6 +281,37 @@ describe("resolveEncounter", () => {
       }),
     ).rejects.toThrow(/no encounter open/);
     expect(await input.store.readSince("s1", -1)).toHaveLength(1);
+  });
+
+  // The `resolveEncounter` sibling of `startEncounter`'s equivalent test
+  // above: the guard here is `encounterOf(campaign)`, and a store rejection
+  // after it has already passed must leave `state`, `built` and
+  // `nextSequence` exactly as they were, not half-closed.
+  it("leaves state, built and nextSequence untouched when append rejects post-guard", async () => {
+    const input = baseInput();
+    const campaign = await startedCampaign(input);
+    const stateBefore = campaign.state;
+    const builtBefore = campaign.built;
+    const nextSequenceBefore = campaign.nextSequence;
+    const failingStore: EventStore = {
+      ...input.store,
+      append: () => Promise.reject(new EventStoreUnavailableError("append", new Error("boom"))),
+    };
+
+    await expect(
+      resolveEncounter({
+        campaign,
+        outcome: "victory",
+        survivorIds: ["hero"],
+        store: failingStore,
+        clock: input.clock,
+        uuid: input.uuid,
+      }),
+    ).rejects.toThrow(EventStoreUnavailableError);
+
+    expect(campaign.state).toBe(stateBefore);
+    expect(campaign.built).toBe(builtBefore);
+    expect(campaign.nextSequence).toBe(nextSequenceBefore);
   });
 });
 
@@ -444,5 +518,37 @@ describe("worldFor", () => {
     expect(world.combatants).toEqual(encounterOf(campaign).combatants);
     expect(world.grid).toEqual(encounterOf(campaign).grid);
     expect(world.actionRangesFeet).toBeDefined();
+  });
+});
+
+describe("builtOf", () => {
+  // `builtOf`'s own disagreement guard (`built === null` or `built.encounterId
+  // !== encounter.encounterId`) is dead in every other test in this suite:
+  // `encounterOf` throws first whenever the bracket is closed, and every test
+  // that gets past it holds `built` in lockstep with `state.encounter`
+  // because it only ever went through `createCampaign`/`startEncounter`/
+  // `resolveEncounter`. These two tests construct the disagreement directly
+  // — the guard's only justification (per the doc comment on `Campaign.built`
+  // and the deletion of the old `sceneEnglish` field) needs a test that can
+  // actually fail.
+  it("throws when built is null while the projection has an encounter open", async () => {
+    const campaign = await startedCampaign(baseInput());
+    campaign.built = null;
+    // Distinguishable from `encounterOf`'s "no encounter open" message:
+    // `encounterOf` does not throw here at all (the projection has a board),
+    // so this is `builtOf`'s own guard firing, not a propagated throw.
+    expect(() => builtOf(campaign)).toThrow(/built encounter none/);
+    expect(() => builtOf(campaign)).not.toThrow(/no encounter open/);
+  });
+
+  it("throws when built names a different encounter than the one open", async () => {
+    const campaign = await startedCampaign(baseInput());
+    const real = campaign.built;
+    if (real === null) throw new Error("expected startedCampaign to have set built");
+    // Fabricated by spreading the real `BuiltEncounter` with a different id,
+    // rather than looking up a second encounter — the catalogue holds only
+    // goblin-ambush.
+    campaign.built = { ...real, encounterId: "some-other-encounter" };
+    expect(() => builtOf(campaign)).toThrow(/built encounter some-other-encounter/);
   });
 });
