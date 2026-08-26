@@ -276,6 +276,84 @@ describe("reduce", () => {
     const missingFields = event(15, "encounter_resolved", { encounterId: "e1" });
     expect(() => reduce(base, missingFields)).toThrow();
   });
+
+  // The broader bracket-invariant coverage promised above: a combat event
+  // with no bracket open, a second bracket opened over one already open,
+  // and a resolve that closes the bracket without disturbing the world.
+
+  it("throws when state_delta_applied is folded with no encounter open", () => {
+    // Same corrupt-log reasoning as every bracket guard: a combat event
+    // with nothing open would otherwise project a plausible-looking board
+    // out of an impossible history, so this throws instead of returning
+    // `state` unchanged.
+    const noBracketOpen: CampaignState = { ...base, encounter: null };
+    const delta = event(16, "state_delta_applied", { combatants: rawCombatants });
+    expect(() => reduce(noBracketOpen, delta)).toThrow(
+      /state_delta_applied at sequence 16 with no encounter open/,
+    );
+  });
+
+  it("throws when a turn-advancing scene_changed is folded with no encounter open", () => {
+    // `turn_advanced` is the one `scene_changed` kind that is actually a
+    // combat signal, so it is held to the same no-bracket-no-fold rule as
+    // `state_delta_applied` above.
+    const noBracketOpen: CampaignState = { ...base, encounter: null };
+    const turnAdvanced = event(17, "scene_changed", { kind: "turn_advanced" });
+    expect(() => reduce(noBracketOpen, turnAdvanced)).toThrow(
+      /scene_changed at sequence 17 with no encounter open/,
+    );
+  });
+
+  it("ignores a non-turn-advancing scene_changed even with no encounter open", () => {
+    // The counterpart the plan's own wording omits: the `kind` gate runs
+    // BEFORE the bracket guard, on purpose, so a non-combat scene change —
+    // the kind §4.7's step 4 will emit for exploration and social scenes —
+    // can arrive with no fight open at all. Guarding the whole event type
+    // instead would make that future, legitimate event throw.
+    const noBracketOpen: CampaignState = { ...base, encounter: null };
+    const narrationCue = event(20, "scene_changed", { kind: "narration_cue" });
+    const next = reduce(noBracketOpen, narrationCue);
+    expect(next).toEqual(noBracketOpen);
+  });
+
+  it("throws when a second encounter_started arrives while one is already open", () => {
+    // Non-overlap is what makes `encounter: EncounterState | null` correct
+    // rather than a map keyed by encounter id: at most one bracket runs at
+    // a time, so a second `encounter_started` while one is open is a
+    // corrupt log, not a second fight starting. The payload is valid —
+    // unlike Run 1's malformed-payload test — so the already-open guard is
+    // the only thing that can throw here.
+    const secondStart = event(18, "encounter_started", { encounterId: "e2" });
+    expect(() => reduce(base, secondStart)).toThrow(
+      /names encounter e2, but encounter e1 is already open/,
+    );
+  });
+
+  it("clears the bracket on encounter_resolved while leaving world untouched", () => {
+    // Built explicitly rather than from `base`: `base`'s
+    // `appliedClientMessageIds` is `[]`, and a branch that accidentally
+    // reset the field to `[]` instead of preserving it would still look
+    // right against an already-empty array. A non-empty one actually
+    // discriminates.
+    const midEncounter: CampaignState = {
+      world: { campaignId: "s1", rootSeed: 7, appliedClientMessageIds: ["c1", "c2"] },
+      encounter: { ...baseEncounter, round: 3, currentActorIndex: 1 },
+    };
+    const before = structuredClone(midEncounter);
+    const resolved = event(19, "encounter_resolved", {
+      encounterId: "e1",
+      outcome: "victory",
+      survivorIds: [],
+    });
+
+    const next = reduce(midEncounter, resolved);
+    expect(next.encounter).toBeNull();
+    expect(next.world).toEqual(midEncounter.world);
+    expect(next.world.appliedClientMessageIds).toEqual(["c1", "c2"]);
+    // Matches the purity tests already in the file: `reduce` must not
+    // mutate what it's given even on the branch that clears a field.
+    expect(midEncounter).toEqual(before);
+  });
 });
 
 describe("fold", () => {
