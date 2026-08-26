@@ -654,17 +654,17 @@ Notes for whoever takes Task 8:
 
 **Files:** `apps/web/src/state/persistence.ts` + test; `PROJECT_PLAN.md`, `packages/memory/CLAUDE.md`, `apps/server/CLAUDE.md`.
 
-- [ ] **Step 1: Assert the cross-encounter guard**
+- [x] **Step 1: Assert the cross-encounter guard**
 
 `persistence.ts` stores display state keyed by campaign id and compares on the way back in (`0b8e10f`). Keyed by campaign rather than session, that check now spans encounters, so a restored roll log could describe a fight the campaign has already left. `applyFrame`'s sequence equality should already reject it — the stored sequence cannot match a post-`encounter_resolved` projection. **Assert it explicitly rather than inferring it**, with a test that stores a log mid-encounter, resolves, and expects the restored log to be dropped.
 
-- [ ] **Step 2: Sweep by shape, not wording**
+- [x] **Step 2: Sweep by shape, not wording**
 
 `packages/memory/CLAUDE.md:5` and `:12` name `session_snapshots` and the PK `(session_id, sequence)`; `:12` also still says "no campaign concept exists yet", which this plan makes false. `apps/server/CLAUDE.md` describes a session-scoped log.
 
 A comment describing a session-scoped projection is stale whether or not it uses the word "session" — match the claim, not the string.
 
-- [ ] **Step 3: Final verification**
+- [x] **Step 3: Final verification**
 
 ```bash
 corepack enable
@@ -675,3 +675,64 @@ DATABASE_URL=postgres://aidm:aidm@localhost:5432/aidm pnpm test
 ```
 
 The Postgres run must show `packages/memory` executing its suite rather than skipping. CI triggers only on `push:main` and `pull_request`, so open the PR to get a real run — the step-10 branch shipped reviewed-but-unexecuted for exactly this reason.
+
+
+**Done 2026-08-26 as Task 8.** One `docs:` commit plus one fix commit, 7 files,
+comments and prose only. Final verification, run by both the implementer and
+the controller independently:
+
+| Gate | Result |
+|---|---|
+| `pnpm test` (no `DATABASE_URL`) | 1274 passed, 30 skipped, 90 files |
+| `pnpm test` (Postgres) | 1304 passed, 0 skipped, 90 files |
+| `packages/memory` under Postgres | 62/62 executing, not skipping |
+| `apps/server`'s gated bracket test | executing (141/141) |
+| `pnpm typecheck` | exit 0 |
+| `npx eslint packages apps tools` | exit 0 |
+
+Test output is pristine apart from the `apps/web` jsdom canvas warnings Task
+1's baseline already records as permanent. The `aidm` database was confirmed
+untouched — it still carries the pre-rename schema, which is a decision for
+whoever owns that data, not this plan.
+
+**Step 1 did not need a test.** The guard it asks to assert is already pinned
+twice: `apps/web/src/App.test.tsx:478` covers the sequence half (a log stored
+at one sequence, a `campaign_state` frame at a higher one, the log dropped)
+and `persistence.test.ts:67` covers the campaign-id half. A cross-encounter
+version would drive the identical branch — `store.ts:194`'s
+`frame.sequence === state.sequence` — with a different backstory. There is no
+encounter-aware code anywhere in that path, and `encounter_resolved` always
+advances the sequence, so no reachable failure was missing. What was missing
+was the *reason*: that test's comment explained the guard purely as a
+mid-fight reconnect, which was the whole story only while a campaign *was* a
+fight. The comment now names the cross-encounter case, and says plainly that
+its own fixture does not cross a bracket.
+
+**Two §4.7 mentions were deliberately left.** `PROJECT_PLAN.md:783` and `:822`
+still say `SessionState`, and must. §4.7's preamble frames the section as the
+architecture *proposed*, and `:822` is that proposal's central prescription —
+there is no accurate modernization available, because `CampaignState` is the
+*result* of the split, not its input. "CampaignState splits into WorldState
+and EncounterState" would be a brand-new false claim. `:838` was different: an
+analogy anchored on a table the reader is told to look up today, whose anchor
+had been renamed, so the identifier was swapped and nothing else.
+
+**Known, deliberately unfixed:** `campaign.test.ts:593-594` still concludes
+that the mutation events make the rebuilt board's shape "load-bearing
+mid-fold". They do not. On the load path everything written into the first
+bracket is discarded before any assertion — `encounter_resolved` nulls the
+encounter and the second `encounter_started` substitutes a fresh board — so
+only the board's *existence* is load-bearing mid-fold, via the null guards.
+What the mutations genuinely buy is that a stale board would be *detectable*
+at all, which the block's own opening comment at `:564-567` already says
+correctly. The clause traces to this plan's own dispatch wording, not to the
+implementer.
+
+**Not fixed here, and not this branch's to fix:** shipped code carries roughly
+fifty citations of SDD process artifacts — `C-NN` correction ids, `CRITICAL-N`
+finding ids, "the brief's ...", and `task-corrections.md` by name — across
+`packages/rules-engine`, `packages/agents`, `packages/schemas`, `apps/web`,
+`apps/server` and `tools/sim`. `task-corrections.md` is not tracked in git, so
+those references already dangle. The pattern predates this branch and most of
+it sits in packages this plan is forbidden to touch. This branch removed two
+instances and added none. The cleanup needs its own change and its own review.
