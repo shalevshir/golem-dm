@@ -527,9 +527,53 @@ repo** so `.prettierrc`'s 100 cols applies.
 
 **Files:** `packages/schemas/src/reduce.test.ts`.
 
-- [ ] **Step 1: Combat outside a bracket throws** — `state_delta_applied` and `scene_changed` folded onto `encounter: null`.
-- [ ] **Step 2: A second `encounter_started` inside an open bracket throws.** Non-overlap is what makes `EncounterState | null` correct rather than a map.
-- [ ] **Step 3: `encounter_resolved` clears the bracket and leaves `world` intact**, including `appliedClientMessageIds`.
+- [x] **Step 1: Combat outside a bracket throws** — `state_delta_applied` and `scene_changed` folded onto `encounter: null`.
+- [x] **Step 2: A second `encounter_started` inside an open bracket throws.** Non-overlap is what makes `EncounterState | null` correct rather than a map.
+- [x] **Step 3: `encounter_resolved` clears the bracket and leaves `world` intact**, including `appliedClientMessageIds`.
+
+**Done 2026-08-26 as Task 6.** Tests only, one file: `reduce.test.ts` goes
+from 18 to 23 cases. `pnpm test` gives **1271 passed, 29 skipped over 90 test
+files** — Task 1's baseline of 1266 plus these 5, no package down a test.
+Typecheck and eslint exit 0. No Postgres run: nothing here touches the event
+store or a schema shape.
+
+The guards themselves already existed — Tasks 4 and 5 wrote them. This task
+only proves they cannot be deleted silently, so `reduce.ts` is deliberately
+absent from the diff.
+
+**Step 1 is three tests, not two.** Task 4's note above already warned that
+Step 1 must fold a `turn_advanced`, because the bracket guard sits *after*
+`scene_changed`'s `kind` gate. This task takes that one step further and also
+pins the other side of the gate: a non-combat kind (`narration_cue`) folded
+onto `encounter: null` must **not** throw. Only the throwing half was
+specified, and pinning it alone leaves the ordering in `reduce.ts:95-106`
+unprotected — a reorder that broke §4.7 step 4's out-of-combat scene changes
+would have passed the suite. The two tests together are what make the
+ordering a fact rather than an intention.
+
+**Step 3 could not have discriminated on the `base` fixture.** `base.world`
+carries `appliedClientMessageIds: []`, so "the world survives the bracket
+close" asserted against it would stay green even if the branch dropped the
+field. The test builds its own state with `["c1", "c2"]` and compares against
+that literal, not against a live reference.
+
+Notes for whoever takes Task 7:
+
+- **The two bracket cases have opposite guard polarity**, and it is the
+  single most error-prone thing in this file. `encounter_started` refuses
+  when a bracket is OPEN; `encounter_resolved` refuses when it is CLOSED. A
+  fixture that isolates one guard therefore masks the other — which is
+  exactly how Task 5's review round shipped a test that could not fail.
+  Assert on the message, not with a bare `.toThrow()`, wherever two throws
+  are reachable on the same path.
+- **Deleting a guard does not always produce a throw.** Removing
+  `state_delta_applied`'s bracket guard yields no error at all — `{...null}`
+  is legal JS, so the fold silently projects a board out of an impossible
+  history. Removing `scene_changed`'s yields a `TypeError` from the property
+  read one line down. A bare `.toThrow()` distinguishes neither from the
+  intended refusal.
+- **Sequences 0-20 are used** in `reduce.test.ts`; the `fold` describe reuses
+  0-2 deliberately. Uniqueness is not a convention of this file.
 
 ---
 
