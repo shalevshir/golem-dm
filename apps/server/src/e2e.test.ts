@@ -55,7 +55,7 @@ import { ServerFrame, fold } from "@ai-dm/schemas";
 import type { GameEvent, CampaignState } from "@ai-dm/schemas";
 import { buildApp } from "./app.js";
 import type { TurnPorts } from "./core/pipeline.js";
-import { encounterOf, loadCampaign } from "./core/campaign.js";
+import { createCampaign, encounterOf, loadCampaign } from "./core/campaign.js";
 import type { Campaign } from "./core/campaign.js";
 import { createCampaignRegistry } from "./transport/http.js";
 
@@ -625,5 +625,49 @@ describe("end to end", () => {
     expect(reconstructed).toEqual(serverProjection.state);
 
     secondSocket.close();
+  });
+
+  // Task 7, step 4 (§4.7): a campaign that exists but has never entered a
+  // fight. `POST /campaigns` always calls `createCampaign` then
+  // `startEncounter` back to back (`transport/http.ts`), so no HTTP route
+  // can produce this campaign — it is built directly against the harness's
+  // own store instead. `campaign.test.ts:325` already pins the projection
+  // itself (`encounter: null` survives a reload); what is new here is the
+  // wire frame: that `join` on such a campaign still answers with a valid
+  // `campaign_state`, not a schema violation or a silent placeholder.
+  it("joins an encounter-less campaign to a valid campaign_state frame with a null encounter", async () => {
+    const { url, store } = await startServer();
+
+    let n = 0;
+    const campaign = await createCampaign({
+      campaignId: "no-encounter-yet",
+      rootSeed: 7,
+      store,
+      clock: () => "2026-08-19T10:00:00.000Z",
+      uuid: () => {
+        n += 1;
+        return `00000000-0000-4000-8000-${String(n).padStart(12, "0")}`;
+      },
+    });
+
+    const socket = await connect(url);
+    const log = new FrameLog(socket);
+    // Never registered in-process (only the store was written to directly),
+    // so this exercises `registry.get`'s fall-through to `loadCampaign` on a
+    // miss (`transport/http.ts`), not the in-memory cache.
+    const ack = await joinAndAck(socket, log, campaign.state.world.campaignId);
+
+    // Explicit, not merely relying on `FrameLog`'s own internal parse: the
+    // protocol.ts frame schema is
+    // `{ type: "campaign_state", sequence, snapshot: CampaignState }` and
+    // `CampaignState.encounter` is nullable, so a frame with no board must be
+    // *valid* against that schema, not merely tolerated by a cast.
+    const parsed = ServerFrame.parse(ack);
+    if (parsed.type !== "campaign_state") {
+      throw new Error(`Expected campaign_state, got ${parsed.type}`);
+    }
+    expect(parsed.snapshot.encounter).toBeNull();
+
+    socket.close();
   });
 });

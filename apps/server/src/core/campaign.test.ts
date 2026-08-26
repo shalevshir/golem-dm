@@ -13,7 +13,7 @@ import {
   worldFor,
 } from "./campaign.js";
 import type { Campaign, CreateCampaignInput } from "./campaign.js";
-import { UnknownEncounterError } from "../encounters/index.js";
+import { buildEncounterById, UnknownEncounterError } from "../encounters/index.js";
 
 const clock = (): string => "2026-08-19T10:00:00.000Z";
 
@@ -550,5 +550,113 @@ describe("builtOf", () => {
     // goblin-ambush.
     campaign.built = { ...real, encounterId: "some-other-encounter" };
     expect(() => builtOf(campaign)).toThrow(/built encounter some-other-encounter/);
+  });
+});
+
+// Task 7 (§4.7 step 1's coverage): everything above proves a bracket opens
+// and closes correctly in isolation. Nothing yet proves a campaign survives
+// crossing one — this describe block is the first test that could not have
+// been written before the campaign/encounter split landed.
+describe("a campaign that fights the same encounter twice", () => {
+  // The catalogue holds exactly one encounter (`encounters/index.ts`), so
+  // "start again" necessarily reuses `goblin-ambush` — the stronger test: the
+  // same id must yield a pristine board after the first one was mutated,
+  // rather than merely a fresh id nobody has fought before. Damaging a
+  // combatant and moving the turn on before resolving is what makes a stale
+  // board detectable at all — an untouched board would look identical
+  // whether the second `startEncounter` truly rebuilt it or accidentally
+  // reused the first one.
+  //
+  // Proven on both the live path (`startEncounter` itself) and the load path
+  // (`loadCampaign`, folding the whole two-bracket log from scratch):
+  // `loadCampaign`'s per-encounter rebuild loop is the thing this plan
+  // actually introduced, and nothing before this test exercises it across a
+  // boundary.
+  it("resolving and restarting the same encounter gives a pristine board while the world carries over, live and on reload", async () => {
+    const input = baseInput();
+    const campaign = await startedCampaign(input);
+
+    // The world half of the boundary: appliedClientMessageIds must survive
+    // both resolveEncounter and a second startEncounter. Neither call ever
+    // appends a player_input — only the pipeline's `structured_action` case
+    // does — so one is appended directly here, for real, through the store,
+    // so the load-path assertion below sees it too and not merely a fold
+    // this one in-memory `Campaign` happens to carry.
+    const playerInput: GameEvent = {
+      eventId: input.uuid(),
+      campaignId: "s1",
+      sequence: campaign.nextSequence,
+      timestamp: clock(),
+      type: "player_input",
+      payload: { clientMessageId: "c1" },
+    };
+    await input.store.append("s1", [playerInput]);
+    campaign.state = reduce(campaign.state, playerInput);
+    campaign.nextSequence += 1;
+
+    // Mutate the open board so a stale one would be detectable: damage a
+    // combatant and advance the turn, the same two event types a real turn
+    // would append (mirrors `resolveEncounter`'s "closes the bracket and
+    // keeps the world" test, one describe block up).
+    const damaged = encounterOf(campaign).combatants.map((each) =>
+      each.combatantId === "goblin-a" ? { ...each, currentHp: 1 } : each,
+    );
+    campaign.state = reduce(campaign.state, {
+      eventId: input.uuid(),
+      campaignId: "s1",
+      sequence: campaign.nextSequence++,
+      timestamp: clock(),
+      type: "state_delta_applied",
+      payload: { combatants: damaged },
+    });
+    campaign.state = reduce(campaign.state, {
+      eventId: input.uuid(),
+      campaignId: "s1",
+      sequence: campaign.nextSequence++,
+      timestamp: clock(),
+      type: "scene_changed",
+      payload: { kind: "turn_advanced" },
+    });
+    expect(encounterOf(campaign).currentActorIndex).toBe(1);
+    expect(
+      encounterOf(campaign).combatants.find((each) => each.combatantId === "goblin-a")?.currentHp,
+    ).toBe(1);
+
+    await resolveEncounter({
+      campaign,
+      outcome: "victory",
+      survivorIds: ["hero"],
+      store: input.store,
+      clock: input.clock,
+      uuid: input.uuid,
+    });
+
+    const restarted = await startEncounter({
+      campaign,
+      encounterId: ENCOUNTER_ID,
+      store: input.store,
+      clock: input.clock,
+      uuid: input.uuid,
+    });
+
+    // 1. Live path: the second board is pristine, not the mutated first one.
+    const pristine = buildEncounterById(ENCOUNTER_ID).world.combatants;
+    expect(encounterOf(restarted).round).toBe(1);
+    expect(encounterOf(restarted).currentActorIndex).toBe(0);
+    expect(encounterOf(restarted).combatants).toEqual(pristine);
+    expect(restarted.built).not.toBeNull();
+
+    // 2. The world survived the boundary — idempotency is campaign-scoped,
+    // not fight-scoped, so a resend of "c1" must still be recognized as a
+    // duplicate after the encounter that first saw it has already ended.
+    expect(restarted.state.world.appliedClientMessageIds).toEqual(["c1"]);
+
+    // 3. Load path: folding the whole log from scratch exercises
+    // encounter_started -> substitute -> encounter_resolved -> clear, twice
+    // over in one log, and must land on exactly what the live campaign has.
+    const loaded = await loadCampaign({ campaignId: "s1", store: input.store });
+    expect(loaded?.state).toEqual(restarted.state);
+    expect(loaded?.built).toEqual(restarted.built);
+    expect(loaded?.nextSequence).toBe(restarted.nextSequence);
   });
 });

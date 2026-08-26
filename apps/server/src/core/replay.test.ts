@@ -2,11 +2,11 @@
 // fails, the projection has forked from the log and no amount of passing unit
 // tests makes the server correct. Per this task's brief: no production code
 // here — a failing property means a bug in Tasks 6-10, not a weaker assertion.
-import { describe, expect, it } from "vitest";
+import { afterAll, describe, expect, it } from "vitest";
 import { validateExecuteTurn } from "@ai-dm/rules-engine";
 import type { TacticalAgent } from "@ai-dm/agents";
 import { createDeterministicNarrative } from "@ai-dm/agents";
-import { createInMemoryEventStore } from "@ai-dm/memory";
+import { connectPostgresEventStore, createInMemoryEventStore } from "@ai-dm/memory";
 import type { EventStore } from "@ai-dm/memory";
 import { fold } from "@ai-dm/schemas";
 import type {
@@ -18,7 +18,7 @@ import type {
 } from "@ai-dm/schemas";
 import { SNAPSHOT_EVERY, handleCommand } from "./pipeline.js";
 import type { TurnPorts } from "./pipeline.js";
-import { createCampaign, loadCampaign, startEncounter } from "./campaign.js";
+import { createCampaign, loadCampaign, resolveEncounter, startEncounter } from "./campaign.js";
 import type { Campaign } from "./campaign.js";
 
 const CLOCK = (): string => "2026-08-19T10:00:00.000Z";
@@ -110,28 +110,48 @@ interface PlayOptions {
 }
 
 /**
- * Plays `rounds` full rounds: one player Dodge from "hero", followed by
- * whatever `handleCommand`'s enemy sweep does in response (both goblins
- * dodge too, via `defaultTactical`, so nobody ever takes damage and the
- * fight never concludes on its own — C-38: nothing enforces a round cap, so
- * the bound here is this loop's own `rounds` argument, not the pipeline's).
- * Only the hero's turn is driven from the outside; the hostile turns are the
- * pipeline's own doing, exactly as they would be for a real client.
+ * Plays `rounds` full rounds against an EXISTING campaign: one player Dodge
+ * from "hero", followed by whatever `handleCommand`'s enemy sweep does in
+ * response (both goblins dodge too, via `defaultTactical`, so nobody ever
+ * takes damage and the fight never concludes on its own — C-38: nothing
+ * enforces a round cap, so the bound here is this loop's own `rounds`
+ * argument, not the pipeline's). Only the hero's turn is driven from the
+ * outside; the hostile turns are the pipeline's own doing, exactly as they
+ * would be for a real client.
+ *
+ * Factored out of `playRounds` below (Task 7): seed-determinism-across-a-
+ * boundary needs to keep playing on the SAME campaign after a
+ * resolveEncounter/startEncounter pair reopens it on a second encounter,
+ * not spin up a fresh one each time. `startAt` is what lets two calls on one
+ * campaign use disjoint `clientMessageId`s — reusing "c0", "c1", ... across a
+ * resolve/restart boundary would silently dedupe the second encounter's own
+ * first move against the idempotency set carried over from the first
+ * (world-scoped, campaign.test.ts's own boundary test).
  */
+async function playRoundsOn(
+  campaign: Campaign,
+  store: EventStore,
+  rounds: number,
+  startAt = 0,
+): Promise<Campaign> {
+  const ports = portsWith(store);
+  for (let round = 0; round < rounds; round += 1) {
+    await drain(
+      handleCommand(campaign, dodgeCommand("hero", `c${String(startAt + round)}`), ports),
+    );
+  }
+  return campaign;
+}
+
+/** `playRoundsOn`, against a freshly started campaign — what every property
+ * below that only cares about one encounter wants. */
 async function playRounds(
   store: EventStore,
   rounds: number,
   options: PlayOptions = {},
 ): Promise<Campaign> {
-  const campaignId = options.campaignId ?? "s1";
-  const rootSeed = options.rootSeed ?? 42;
-  const campaign = await startedCampaign(store, { campaignId, rootSeed });
-  const ports = portsWith(store);
-
-  for (let round = 0; round < rounds; round += 1) {
-    await drain(handleCommand(campaign, dodgeCommand("hero", `c${String(round)}`), ports));
-  }
-  return campaign;
+  const campaign = await startedCampaign(store, options);
+  return playRoundsOn(campaign, store, rounds);
 }
 
 /**
@@ -336,3 +356,141 @@ describe("snapshots", () => {
     expect(fold(initial.state, upToSnapshot)).toEqual(snapshot.state);
   });
 });
+
+// Task 7, step 3 (§4.7): seed determinism must hold ACROSS a bracket, not
+// merely within one. The "replay properties" tests above already own "same
+// commands, same seed" and "different rootSeed, different seeds" for a
+// single encounter; this is the property those cannot express, because
+// `campaign.nextSequence` — what `seedFor` is keyed on — is campaign-scoped
+// and keeps climbing across a resolveEncounter/startEncounter boundary
+// rather than resetting.
+describe("seed determinism across a bracket", () => {
+  /** Every `dice_rolled` seed recorded with `sequence` in `[from, to)`, in log
+   * order — the same shape the "a different rootSeed..." test's `seedsOf`
+   * uses above, restricted to one encounter's own span so encounter A's and
+   * encounter B's rolls can be compared separately, without a
+   * `campaign_started` payload (which carries `rootSeed` and would make a
+   * whole-array comparison differ for free — see that test's own comment)
+   * anywhere near either side. */
+  function seedsIn(events: readonly GameEvent[], from: number, to: number): unknown[] {
+    return events
+      .filter((each) => each.sequence >= from && each.sequence < to && each.type === "dice_rolled")
+      .map((each) => each.payload["seed"]);
+  }
+
+  /** Plays a two-encounter campaign — rounds in A, resolve, start B (the only
+   * encounter the catalogue has, so B is A's own id reused), rounds in B —
+   * and returns its full log plus the sequence B's span starts at. */
+  async function playAcrossABoundary(
+    store: EventStore,
+  ): Promise<{ events: GameEvent[]; boundary: number }> {
+    const campaign = await startedCampaign(store, { rootSeed: 42 });
+    await playRoundsOn(campaign, store, 2);
+
+    await resolveEncounter({
+      campaign,
+      outcome: "victory",
+      survivorIds: ["hero"],
+      store,
+      clock: CLOCK,
+      uuid: uuids(),
+    });
+    await startEncounter({
+      campaign,
+      encounterId: ENCOUNTER_ID,
+      store,
+      clock: CLOCK,
+      uuid: uuids(),
+    });
+    const boundary = campaign.nextSequence;
+
+    await playRoundsOn(campaign, store, 2, 2);
+
+    return { events: await store.readSince("s1", -1), boundary };
+  }
+
+  it("reproduces encounter B's dice_rolled seeds across independent stores, distinct from encounter A's own", async () => {
+    const a = await playAcrossABoundary(createInMemoryEventStore());
+    const b = await playAcrossABoundary(createInMemoryEventStore());
+    const lastSequence = (events: readonly GameEvent[]): number =>
+      (events.at(-1)?.sequence ?? -1) + 1;
+
+    const bSpanA = seedsIn(a.events, a.boundary, lastSequence(a.events));
+    const bSpanB = seedsIn(b.events, b.boundary, lastSequence(b.events));
+
+    // 1. Determinism: two independent stores, the same rootSeed, and the
+    // same command sequence spanning the boundary produce identical
+    // dice_rolled seeds in encounter B's own span. Both spans are non-empty
+    // (playRoundsOn(..., 2, ...) rolls dice every round) — the emptiness
+    // guard on `lastSequence` is only for an events array that could
+    // otherwise be, never exercised here.
+    expect(bSpanA.length).toBeGreaterThan(0);
+    expect(bSpanA).toEqual(bSpanB);
+
+    // 2. Continuity — the assertion that makes the first one mean something
+    // (per this task's brief): encounter B's seeds must NOT equal encounter
+    // A's own. Seeds derive from `campaign.nextSequence`, campaign-scoped and
+    // still climbing after the boundary, never reset per encounter. Without
+    // this second check, a regression that reset the sequence counter (or
+    // `seedFor`'s own notion of "sequence") back to the same range for every
+    // encounter — exactly what §4.7 forbids with "an encounter's `rootSeed`
+    // derives from the campaign seed and sequence, never fresh randomness" —
+    // would reproduce identically across the two independent stores
+    // (satisfying assertion 1) while silently replaying encounter A's own
+    // seeds for encounter B, and every existing test would still pass.
+    // Verified by injecting exactly that regression — see this task's report.
+    const aSpanA = seedsIn(a.events, 0, a.boundary);
+    expect(bSpanA).not.toEqual(aSpanA);
+  });
+});
+
+// Task 7, step 2 (projection half): the charter's append -> replay ->
+// identical-projection round-trip, over a campaign spanning two encounters —
+// a log a single `fold` provably cannot handle (`encounter_started` is a
+// guard-only no-op without the catalogue substitution `loadCampaign`
+// performs; see this task's report for the verified throw). Lives here,
+// not in `packages/memory`, because building a real second board needs
+// `startEncounter`/`buildEncounterById`, which live in `apps/server` and
+// which `@ai-dm/memory` may never import (dependency direction).
+const DATABASE_URL = process.env.DATABASE_URL;
+
+// A blank `DATABASE_URL=` must skip exactly like an absent one — matching
+// `packages/memory/src/event-store/replay.test.ts`'s identical guard:
+// `postgres("")` does not reject, it silently falls back to localhost.
+describe.skipIf(DATABASE_URL === undefined || DATABASE_URL === "")(
+  "replay across a bracket, over Postgres",
+  () => {
+    const handle = connectPostgresEventStore(DATABASE_URL ?? "");
+
+    afterAll(async () => {
+      await handle.close();
+    });
+
+    it("folds an identical projection across two encounters via loadCampaign", async () => {
+      // Unique per run: the scratch database retains rows from earlier
+      // verification passes, so a fixed id could collide with them.
+      const campaignId = `bracket-${String(Date.now())}`;
+      const store = handle.store;
+      const ports = { store, clock: CLOCK, uuid: uuids() };
+
+      const created = await createCampaign({ campaignId, rootSeed: 42, ...ports });
+      const campaign = await startEncounter({
+        campaign: created,
+        encounterId: ENCOUNTER_ID,
+        ...ports,
+      });
+      await playRoundsOn(campaign, store, 2);
+
+      await resolveEncounter({ campaign, outcome: "victory", survivorIds: ["hero"], ...ports });
+      await startEncounter({ campaign, encounterId: ENCOUNTER_ID, ...ports });
+      await playRoundsOn(campaign, store, 2, 2);
+
+      const loaded = await loadCampaign({ campaignId, store });
+      // `built` and `nextSequence` too, not just `state`: a load that
+      // silently dropped either would still pass a `state`-only comparison.
+      expect(loaded?.state).toEqual(campaign.state);
+      expect(loaded?.built).toEqual(campaign.built);
+      expect(loaded?.nextSequence).toBe(campaign.nextSequence);
+    });
+  },
+);

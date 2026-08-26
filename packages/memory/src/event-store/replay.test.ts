@@ -28,7 +28,14 @@ describe.skipIf(url === undefined || url === "")("replay round-trip over Postgre
       world: { campaignId, rootSeed: 7, appliedClientMessageIds: [] },
       encounter: {
         encounterId: "e1",
-        grid: { width: 2, height: 2, tiles: [["normal", "normal"], ["normal", "normal"]] },
+        grid: {
+          width: 2,
+          height: 2,
+          tiles: [
+            ["normal", "normal"],
+            ["normal", "normal"],
+          ],
+        },
         combatants: [],
         turnOrder: [],
         currentActorIndex: 0,
@@ -37,7 +44,17 @@ describe.skipIf(url === undefined || url === "")("replay round-trip over Postgre
     };
   }
 
-  function stream(campaignId: string): GameEvent[] {
+  /**
+   * `includeBracket` defaults to false so the fold-identity test below
+   * ("folds to the same state from zero and from a snapshot", unchanged)
+   * keeps folding exactly the stream it always has. `genesisState` there is
+   * a state with an encounter already OPEN, and an `encounter_started`
+   * arriving on top of it would throw "already open" — these two new event
+   * types are gated to the round-trip test only, which compares raw events
+   * rather than folding them (do not "fix" this by changing `genesisState`,
+   * which is correct as it stands).
+   */
+  function stream(campaignId: string, includeBracket = false): GameEvent[] {
     const genesis: GameEvent = {
       eventId: "00000000-0000-4000-8000-000000000000",
       campaignId,
@@ -85,7 +102,32 @@ describe.skipIf(url === undefined || url === "")("replay round-trip over Postgre
         ],
       },
     }));
-    return [genesis, ...deltas];
+
+    if (!includeBracket) return [genesis, ...deltas];
+
+    // Task 7, step 2 (round-trip half): proves these two new event types'
+    // jsonb payloads survive Postgres unchanged, the one property this file
+    // can prove about them — the projection half (loadCampaign across two
+    // real encounters) lives in apps/server/src/core/replay.test.ts instead,
+    // since folding a bracket needs the encounter catalogue, which
+    // @ai-dm/memory may never import (dependency direction).
+    const started: GameEvent = {
+      eventId: "00000000-0000-4000-8000-000000000061",
+      campaignId,
+      sequence: 61,
+      timestamp: "2026-08-22T10:00:00.000Z",
+      type: "encounter_started",
+      payload: { encounterId: "e1" },
+    };
+    const resolved: GameEvent = {
+      eventId: "00000000-0000-4000-8000-000000000062",
+      campaignId,
+      sequence: 62,
+      timestamp: "2026-08-22T10:00:00.000Z",
+      type: "encounter_resolved",
+      payload: { encounterId: "e1", outcome: "victory", survivorIds: ["c1"] },
+    };
+    return [genesis, ...deltas, started, resolved];
   }
 
   it("folds to the same state from zero and from a snapshot", async () => {
@@ -107,7 +149,12 @@ describe.skipIf(url === undefined || url === "")("replay round-trip over Postgre
 
   it("survives a full round trip through the database unchanged", async () => {
     const campaignId = `roundtrip-${String(Date.now())}`;
-    const events = stream(campaignId);
+    // Task 7: with the bracket events included, this also proves
+    // encounter_started's and encounter_resolved's jsonb payloads —
+    // `{ encounterId }` and `{ encounterId, outcome, survivorIds }` — round
+    // trip through Postgres unchanged, the same as every other event type
+    // already covered here.
+    const events = stream(campaignId, true);
     await store.append(campaignId, events);
     // Not just the projection — the events themselves. A jsonb payload or a
     // truncated timestamp that changed in transit would show here first.
