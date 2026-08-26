@@ -481,6 +481,16 @@ describe("App", () => {
     // describes a board it does not. Reaching this needs events the client
     // never saw — the server appending a turn after the socket died, which a
     // kill mid-turn does.
+    //
+    // That was the whole story back when a campaign was one fight, so a
+    // restored log could only ever describe the fight it came from. A
+    // campaign now spans encounters, and this same check is what stops the
+    // sharper case: a restored log describing a fight the campaign has
+    // already left, since an encounter_resolved always advances the
+    // sequence past whatever was stored. This fixture still drives the
+    // mid-fight case above, not a bracket crossing — the sequence jump here
+    // comes from a live reconnect — but `applyFrame` takes the identical
+    // branch either way.
     sessionStorage.setItem(CAMPAIGN_STORAGE_KEY, "s1");
     sessionStorage.setItem(
       LOG_STORAGE_KEY,

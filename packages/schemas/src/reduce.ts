@@ -47,14 +47,10 @@ import { EncounterStartedPayload, EncounterResolvedPayload } from "./events.js";
 import type { GameEvent } from "./events.js";
 import type { CampaignState } from "./protocol.js";
 
-// The task brief's "Interfaces" preview names this pair `SessionStartedPayload`
-// and `TurnAdvancedPayload`, but `GameEvent.type` has no `session_started` or
-// `turn_advanced` member — turn advancement is one `kind` of `scene_changed`,
-// and nothing in this file (or the rest of the event enum) needs a
-// session-started payload at all. That preview list predates the brief's own
-// worked implementation below and was not kept in sync with it; the worked
-// implementation is what was built and tested here. This schema parses the
-// whole `scene_changed` payload — `kind` is what `reduce` switches on below.
+// `GameEvent.type` has no `session_started` or `turn_advanced` member: turn
+// advancement is one `kind` of `scene_changed`, not an event type of its own.
+// This schema parses the whole `scene_changed` payload — `kind` is what
+// `reduce` switches on below.
 export const PlayerInputPayload = z.object({ clientMessageId: z.string() });
 export const StateDeltaAppliedPayload = z.object({ combatants: z.array(Combatant) });
 export const SceneChangedPayload = z.object({ kind: z.string() });

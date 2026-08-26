@@ -906,11 +906,12 @@ built and tested, so out-of-combat skill checks come nearly free.
    [`docs/decisions/0004-campaign-vs-session-identity.md`](docs/decisions/0004-campaign-vs-session-identity.md),
    ACCEPTED. Load-bearing; everything below depends on it.
 1. **Schemas and the `WorldState`/`EncounterState` split**, new event types,
-   `reduce` refactor — while the log is small and no users exist.
+   `reduce` refactor — while the log is small and no users exist. **Landed**
+   on branch `step-11-campaign-state-split` (all 8 tasks; not yet merged to
+   `main`).
    [`docs/superpowers/specs/2026-08-23-campaign-state-split-design.md`](docs/superpowers/specs/2026-08-23-campaign-state-split-design.md),
    plan at
-   [`docs/superpowers/plans/2026-08-23-campaign-state-split.md`](docs/superpowers/plans/2026-08-23-campaign-state-split.md)
-   (8 tasks).
+   [`docs/superpowers/plans/2026-08-23-campaign-state-split.md`](docs/superpowers/plans/2026-08-23-campaign-state-split.md).
 2. **Static content loaders and a deliberately tiny authored world:** one
    town, two factions, three NPCs, a five-node arc. Enough to prove the
    pipeline, not to be good.

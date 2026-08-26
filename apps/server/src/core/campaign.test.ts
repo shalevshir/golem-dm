@@ -577,12 +577,19 @@ describe("a campaign that fights the same encounter twice", () => {
     const campaign = await startedCampaign(input);
 
     // Every mutation below is appended for real, not merely folded into
-    // `campaign.state` in memory: the load-path assertion (part 3) folds
-    // `input.store`'s own log from scratch, and that log must actually
-    // contain the dirtying events or a `loadCampaign` that carried a stale
-    // board across the second `encounter_started` would be indistinguishable
-    // from one that rebuilt correctly — there would be nothing dirty in the
-    // log for either to disagree about.
+    // `campaign.state` in memory, for two reasons:
+    //
+    // - Skipping the append would leave the store's log with a hole at the
+    //   sequences these events consume. Appending succeeds at all only
+    //   because `findAppendConflict` rejects duplicate sequences and
+    //   campaign mismatches, not gaps — no production path ever produces a
+    //   log with one.
+    // - Without them, the log the load-path assertion (part 3) re-folds
+    //   from scratch would carry no combat events at all, so nothing
+    //   between the brackets would exercise the substituted board's
+    //   contents, only its existence. The `state_delta_applied` and the
+    //   three `turn_advanced`s below actually walk `turnOrder`, making the
+    //   rebuilt board's shape load-bearing mid-fold, not only at the end.
     async function appendAndFold(event: GameEvent): Promise<void> {
       await input.store.append("s1", [event]);
       campaign.state = reduce(campaign.state, event);

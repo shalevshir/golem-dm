@@ -631,10 +631,12 @@ describe("end to end", () => {
   // fight. `POST /campaigns` always calls `createCampaign` then
   // `startEncounter` back to back (`transport/http.ts`), so no HTTP route
   // can produce this campaign — it is built directly against the harness's
-  // own store instead. `campaign.test.ts:325` already pins the projection
-  // itself (`encounter: null` survives a reload); what is new here is the
-  // wire frame: that `join` on such a campaign still answers with a valid
-  // `campaign_state`, not a schema violation or a silent placeholder.
+  // own store instead. `campaign.test.ts`'s "rebuilds an identical
+  // projection from a log of exactly one event" already pins the
+  // projection itself (`encounter: null` survives a reload); what is new
+  // here is the wire frame: that `join` on such a campaign still answers
+  // with a valid `campaign_state`, not a schema violation or a silent
+  // placeholder.
   it("joins an encounter-less campaign to a valid campaign_state frame with a null encounter", async () => {
     const { url, store } = await startServer();
 
