@@ -835,7 +835,7 @@ Mutable world state is a projection of the log, in
 `packages/memory/src/world-state.ts` — which is what invariant 3 forces and
 what `packages/memory/CLAUDE.md:7` already commits to. The Postgres tables
 are a materialized cache of that fold, the same relationship
-`session_snapshots` has to `game_events`; `SNAPSHOT_EVERY = 50` generalizes
+`campaign_snapshots` has to `game_events`; `SNAPSHOT_EVERY = 50` generalizes
 to keep a long campaign's fold affordable.
 
 - **Calendar/time** advances only through explicit events — travel, rest,

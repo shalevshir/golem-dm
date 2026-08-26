@@ -76,12 +76,10 @@ describe.skipIf(url === undefined || url === "")("replay round-trip over Postgre
       payload: {},
     };
     // `state_delta_applied`'s payload is `StateDeltaAppliedPayload` in
-    // `@ai-dm/schemas`' `reduce.ts` — `{ combatants: Combatant[] }`, not the
-    // `{ round }` shape the brief's preview used. That preview predates the
-    // implemented `reduce()` (see the note atop `reduce.ts` about the same
-    // drift for `CampaignStartedPayload`/`TurnAdvancedPayload`); a minimal
-    // valid `Combatant` is substituted here so `fold` can parse it, with a
-    // per-index `currentHp` so each delta actually changes projected state.
+    // `@ai-dm/schemas`' `reduce.ts` — `{ combatants: Combatant[] }`. A
+    // minimal valid `Combatant` is substituted here so `fold` can parse it,
+    // with a per-index `currentHp` so each delta actually changes projected
+    // state.
     const deltas = Array.from({ length: 60 }, (_, index): GameEvent => ({
       eventId: `00000000-0000-4000-8000-${String(index + 1).padStart(12, "0")}`,
       campaignId,
