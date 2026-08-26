@@ -77,9 +77,11 @@ describe.skipIf(url === undefined || url === "")("replay round-trip over Postgre
     };
     // `state_delta_applied`'s payload is `StateDeltaAppliedPayload` in
     // `@ai-dm/schemas`' `reduce.ts` — `{ combatants: Combatant[] }`. A
-    // minimal valid `Combatant` is substituted here so `fold` can parse it,
-    // with a per-index `currentHp` so each delta actually changes projected
-    // state.
+    // minimal valid `Combatant` is substituted here so `fold` can parse it.
+    // `position: [index % 2, index % 2]` is what actually guarantees every
+    // delta changes projected state, alternating on every index; `currentHp`
+    // varies too but `Math.max(1, 10 - index)` saturates at 1 from index 9
+    // on, repeating for 50 of the 60 deltas, so it cannot carry this alone.
     const deltas = Array.from({ length: 60 }, (_, index): GameEvent => ({
       eventId: `00000000-0000-4000-8000-${String(index + 1).padStart(12, "0")}`,
       campaignId,

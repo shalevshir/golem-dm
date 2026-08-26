@@ -590,8 +590,11 @@ describe("a campaign that fights the same encounter twice", () => {
     //   between the brackets would exercise the substituted board's
     //   contents, only its existence. The `state_delta_applied` below writes
     //   real combatants, and the three `turn_advanced`s that follow actually
-    //   walk `turnOrder` — together making the rebuilt board's shape
-    //   load-bearing mid-fold rather than only at the end.
+    //   walk `turnOrder` — not because the fold's correctness depends on
+    //   their shape mid-bracket (`encounter_resolved` discards this board
+    //   outright, and the second `encounter_started` substitutes a fresh
+    //   one), but because, exactly as the opening comment above already
+    //   says, they are what makes a stale board detectable at all.
     async function appendAndFold(event: GameEvent): Promise<void> {
       await input.store.append("s1", [event]);
       campaign.state = reduce(campaign.state, event);

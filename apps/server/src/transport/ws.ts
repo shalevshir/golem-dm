@@ -88,7 +88,7 @@ export function registerWebSocketRoute(app: FastifyInstance, input: WebSocketRou
         //    turn is still resolving. Claimed ONLY for mutating commands
         //    (`structured_action`/`free_text`) — see the `join` exclusion
         //    just below for why. `campaignId` below reads `campaign?.state.
-        //    campaignId`, which is `undefined` whenever this socket has not
+        //    world.campaignId`, which is `undefined` whenever this socket has not
         //    yet bound a campaign — including a stray non-join sent before
         //    any `join` at all, a case guard 1 does NOT rule out (it only
         //    serializes messages on this socket; it does not require the

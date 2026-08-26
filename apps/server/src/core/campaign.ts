@@ -337,8 +337,9 @@ export async function loadCampaign(input: {
   //   final `built` survives past this loop. That is NOT N-1 wasted builds,
   //   though: each intermediate one is still needed while it runs, because
   //   its `initialEncounterState` is what seeds the fold for that
-  //   encounter's own events (the combatants `state_delta_applied` mutates,
-  //   the turn order `scene_changed` walks) before the next
+  //   encounter's own events — only the turn order `scene_changed` walks;
+  //   `state_delta_applied` replaces `combatants` wholesale from its own
+  //   payload, so the seed's combatants are never read — before the next
   //   `encounter_resolved` discards it. Memoizing the catalogue lookup would
   //   still be a legitimate follow-up; it is out of scope for this commit.
   // - Load success is coupled to the catalogue's entire history, not just
