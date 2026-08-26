@@ -745,3 +745,18 @@ or a finding: `Fix 2` (`apps/server/src/transport/http.ts:177`,
 `packages/schemas/src/reduce.test.ts`) are artifacts of the process, not of
 the code, and point at nothing once this plan is merged and gone. The cleanup
 needs its own change and its own review.
+
+**Treat every count above as a lower bound.** They come from a grep, and a
+grep is a finding aid rather than the defect boundary. A separate sweep of
+this same branch working by *shape* rather than by pattern found roughly 158
+citation lines where the pattern matched 59 — it misses bare ids
+(`C-13 is closed`), suffixed ones (`C-36a`, where a `\b` fails before the
+letter), lowercase prose (`finding 4`), and spelled-out references
+(`Review round 1, item 5`, `Important 3`). Two independent measurements of
+the same branch also disagreed on the absolute totals (147→156 and 151→160)
+while agreeing exactly on the delta and on every itemised instance, which is
+what a pattern-dependent count looks like. The direction and the roughly +10
+are solid; the absolutes are not, and no future sweep should declare itself
+done against a grep total. This is the project's own "sweep by shape, not
+wording" rule, rediscovered the hard way inside the very note that records
+the defect.
