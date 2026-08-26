@@ -581,10 +581,72 @@ Notes for whoever takes Task 7:
 
 **Files:** `apps/server/src/core/campaign.test.ts`, `packages/memory/src/event-store/replay.test.ts`, `apps/server/src/e2e.test.ts`.
 
-- [ ] **Step 1: One campaign, two encounters** — start, resolve, start again. The second board is fresh; the world's idempotency set survives the boundary. This is the whole point of the task and the first test that could not have been written before it.
-- [ ] **Step 2: Replay across a bracket** — the charter's append→replay→identical-projection round-trip, over a campaign spanning two encounters. Postgres-only, `skipIf` without `DATABASE_URL`, as the existing one is.
-- [ ] **Step 3: Seed determinism across a boundary** — the same campaign seed and log produce the same rolls in the second encounter on a re-run.
-- [ ] **Step 4: A campaign with no encounter yet** projects `encounter: null` and serves a `campaign_state` frame without one.
+- [x] **Step 1: One campaign, two encounters** — start, resolve, start again. The second board is fresh; the world's idempotency set survives the boundary. This is the whole point of the task and the first test that could not have been written before it.
+- [x] **Step 2: Replay across a bracket** — the charter's append→replay→identical-projection round-trip, over a campaign spanning two encounters. Postgres-only, `skipIf` without `DATABASE_URL`, as the existing one is.
+- [x] **Step 3: Seed determinism across a boundary** — the same campaign seed and log produce the same rolls in the second encounter on a re-run.
+- [x] **Step 4: A campaign with no encounter yet** projects `encounter: null` and serves a `campaign_state` frame without one.
+
+**Done 2026-08-26 as Task 7.** Four new tests, all in `apps/server`; one of
+them Postgres-gated. `pnpm test` gives **1274 passed, 30 skipped over 90 test
+files** without a database and **1304 passed, 0 skipped** with one. Typecheck
+and eslint exit 0. Output is pristine apart from the pre-existing `apps/web`
+jsdom canvas warnings Task 1's baseline already records.
+
+**The file list above was wrong for half this task, and the corrections are
+the interesting part.**
+
+**Step 2 could not be written where it was assigned.** `fold` alone cannot
+round-trip a bracket: `encounter_started` is a guard-only no-op that leaves
+`encounter: null`, so the matching `encounter_resolved` hits the
+no-bracket-open guard and throws. Verified rather than reasoned — folding
+`[encounter_started e1, encounter_resolved e1]` from `encounter: null` raises
+`encounter_resolved at sequence 2 with no encounter open`. `@ai-dm/memory`
+depends only on `@ai-dm/schemas`, so it cannot reach `loadCampaign`, the only
+function that folds a bracket. The projection half therefore lives in
+`apps/server/src/core/replay.test.ts` as a Postgres-gated block; the half that
+IS provable in `packages/memory` — that both new event types' jsonb payloads
+survive a round trip — extends the existing round-trip test's stream instead.
+
+**Step 3 had no home in the list either.** The rolls come from `pipeline.ts`'s
+`seedFor(rootSeed, campaign.nextSequence)`, and `campaign.test.ts` never
+imports the pipeline. It joins the two determinism tests already in
+`apps/server/src/core/replay.test.ts`.
+
+**Step 3 got a second assertion the plan did not ask for:** encounter B's
+seeds must *differ* from encounter A's. Seeds derive from the campaign-scoped
+`nextSequence`, so a regression resetting that counter per encounter — exactly
+what §4.7 forbids with "an encounter's `rootSeed` derives from the campaign
+seed and sequence, never fresh randomness" — would pass the determinism check
+and every pre-existing test.
+
+**Step 4's projection half already existed** at `campaign.test.ts:325`. Only
+the frame half was new, and it needed a campaign built directly against the
+store: `POST /campaigns` calls `createCampaign` then `startEncounter`, so no
+HTTP route yields an encounter-less campaign.
+
+Notes for whoever takes Task 8:
+
+- **A reviewer finding can rest on a false premise, and did here.** Review
+  round 1 asked for the load path's mutation events to be appended to the
+  store, on the grounds that the fold could otherwise not tell a stale board
+  from a rebuilt one. The implementer applied the fix and said the rationale
+  was wrong; re-review agreed and proved it. `reduce`'s `encounter_resolved`
+  nulls `encounter` unconditionally, and the substitution computes
+  `initialEncounterState(buildEncounterById(id))` — a pure function of the
+  catalogue with no access to the prior board. No variable in that scope holds
+  encounter A's mutated board, so "carried a stale board across" is
+  unconstructible. The *other* half of the finding was real: without the
+  appends the log had a hole at the sequences those events consumed, and no
+  production path produces such a log.
+- **A one-entry catalogue hides a real gap.** A `loadCampaign` that failed to
+  reset `built` on `encounter_resolved` is undetectable by any test today,
+  because the stale `built` names the same encounter id as the fresh one.
+  Nothing to fix here; it becomes testable the moment a second encounter
+  exists.
+- **`npx vitest run <path>` from the repo root walks `.claude/worktrees/*`**
+  on this machine and produces spurious failures — the same hazard already
+  known for root `pnpm lint`. Use `pnpm --filter <pkg> test -- <path>`. Root
+  `pnpm test` is unaffected.
 
 ---
 
