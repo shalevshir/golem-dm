@@ -420,10 +420,11 @@ describe("seed determinism across a bracket", () => {
 
     // 1. Determinism: two independent stores, the same rootSeed, and the
     // same command sequence spanning the boundary produce identical
-    // dice_rolled seeds in encounter B's own span. Both spans are non-empty
-    // (playRoundsOn(..., 2, ...) rolls dice every round) — the emptiness
-    // guard on `lastSequence` is only for an events array that could
-    // otherwise be, never exercised here.
+    // dice_rolled seeds in encounter B's own span. Guarded non-empty first:
+    // `playRoundsOn(..., 2, ...)` rolls dice every round, so `bSpanA` is
+    // never actually empty here, but without this line a regression that
+    // silently stopped `dice_rolled` from firing at all would make the
+    // `toEqual` below pass vacuously on two empty arrays instead of failing.
     expect(bSpanA.length).toBeGreaterThan(0);
     expect(bSpanA).toEqual(bSpanB);
 
@@ -439,7 +440,15 @@ describe("seed determinism across a bracket", () => {
     // (satisfying assertion 1) while silently replaying encounter A's own
     // seeds for encounter B, and every existing test would still pass.
     // Verified by injecting exactly that regression — see this task's report.
+    //
+    // `aSpanA` is guarded non-empty too, the same way and for the same
+    // reason as `bSpanA` above: without it, a regression that emptied
+    // encounter A's OWN span (rather than reusing it for B) would satisfy
+    // `not.toEqual` against an empty array for free, while assertion 1 still
+    // held — indistinguishable, from this test's point of view, from the
+    // real property holding.
     const aSpanA = seedsIn(a.events, 0, a.boundary);
+    expect(aSpanA).toHaveLength(bSpanA.length);
     expect(bSpanA).not.toEqual(aSpanA);
   });
 });

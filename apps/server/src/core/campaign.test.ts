@@ -576,48 +576,64 @@ describe("a campaign that fights the same encounter twice", () => {
     const input = baseInput();
     const campaign = await startedCampaign(input);
 
+    // Every mutation below is appended for real, not merely folded into
+    // `campaign.state` in memory: the load-path assertion (part 3) folds
+    // `input.store`'s own log from scratch, and that log must actually
+    // contain the dirtying events or a `loadCampaign` that carried a stale
+    // board across the second `encounter_started` would be indistinguishable
+    // from one that rebuilt correctly — there would be nothing dirty in the
+    // log for either to disagree about.
+    async function appendAndFold(event: GameEvent): Promise<void> {
+      await input.store.append("s1", [event]);
+      campaign.state = reduce(campaign.state, event);
+      campaign.nextSequence += 1;
+    }
+
     // The world half of the boundary: appliedClientMessageIds must survive
     // both resolveEncounter and a second startEncounter. Neither call ever
     // appends a player_input — only the pipeline's `structured_action` case
-    // does — so one is appended directly here, for real, through the store,
-    // so the load-path assertion below sees it too and not merely a fold
-    // this one in-memory `Campaign` happens to carry.
-    const playerInput: GameEvent = {
+    // does — so one is appended directly here.
+    await appendAndFold({
       eventId: input.uuid(),
       campaignId: "s1",
       sequence: campaign.nextSequence,
       timestamp: clock(),
       type: "player_input",
       payload: { clientMessageId: "c1" },
-    };
-    await input.store.append("s1", [playerInput]);
-    campaign.state = reduce(campaign.state, playerInput);
-    campaign.nextSequence += 1;
+    });
 
     // Mutate the open board so a stale one would be detectable: damage a
-    // combatant and advance the turn, the same two event types a real turn
-    // would append (mirrors `resolveEncounter`'s "closes the bracket and
-    // keeps the world" test, one describe block up).
+    // combatant, then play a full round forward — turnOrder has 3 members,
+    // so three turn_advanced events wrap back around to "hero" and roll
+    // `round` to 2, not just move `currentActorIndex` off 0. A single
+    // turn_advanced would leave `round` at 1 on the dirty board too,
+    // indistinguishable from pristine on that field alone — the fixture
+    // needs every field the assertions below check to actually differ.
+    // Mirrors `resolveEncounter`'s "closes the bracket and keeps the world"
+    // test, one describe block up, for the event shapes.
     const damaged = encounterOf(campaign).combatants.map((each) =>
       each.combatantId === "goblin-a" ? { ...each, currentHp: 1 } : each,
     );
-    campaign.state = reduce(campaign.state, {
+    await appendAndFold({
       eventId: input.uuid(),
       campaignId: "s1",
-      sequence: campaign.nextSequence++,
+      sequence: campaign.nextSequence,
       timestamp: clock(),
       type: "state_delta_applied",
       payload: { combatants: damaged },
     });
-    campaign.state = reduce(campaign.state, {
-      eventId: input.uuid(),
-      campaignId: "s1",
-      sequence: campaign.nextSequence++,
-      timestamp: clock(),
-      type: "scene_changed",
-      payload: { kind: "turn_advanced" },
-    });
-    expect(encounterOf(campaign).currentActorIndex).toBe(1);
+    for (let turn = 0; turn < 3; turn += 1) {
+      await appendAndFold({
+        eventId: input.uuid(),
+        campaignId: "s1",
+        sequence: campaign.nextSequence,
+        timestamp: clock(),
+        type: "scene_changed",
+        payload: { kind: "turn_advanced" },
+      });
+    }
+    expect(encounterOf(campaign).round).toBe(2);
+    expect(encounterOf(campaign).currentActorIndex).toBe(0);
     expect(
       encounterOf(campaign).combatants.find((each) => each.combatantId === "goblin-a")?.currentHp,
     ).toBe(1);
@@ -640,6 +656,9 @@ describe("a campaign that fights the same encounter twice", () => {
     });
 
     // 1. Live path: the second board is pristine, not the mutated first one.
+    // `round` and `combatants` are the fields the dirty board actually
+    // disagrees with pristine on now (`currentActorIndex` wrapped back to 0
+    // on both — still asserted, just no longer the discriminating field).
     const pristine = buildEncounterById(ENCOUNTER_ID).world.combatants;
     expect(encounterOf(restarted).round).toBe(1);
     expect(encounterOf(restarted).currentActorIndex).toBe(0);
@@ -653,7 +672,10 @@ describe("a campaign that fights the same encounter twice", () => {
 
     // 3. Load path: folding the whole log from scratch exercises
     // encounter_started -> substitute -> encounter_resolved -> clear, twice
-    // over in one log, and must land on exactly what the live campaign has.
+    // over in one log — now a genuinely contiguous log with the dirtying
+    // events for real (part 1's `appendAndFold` calls above), not a log with
+    // a hole where they would have been — and must land on exactly what the
+    // live campaign has.
     const loaded = await loadCampaign({ campaignId: "s1", store: input.store });
     expect(loaded?.state).toEqual(restarted.state);
     expect(loaded?.built).toEqual(restarted.built);

@@ -657,16 +657,17 @@ describe("end to end", () => {
     // miss (`transport/http.ts`), not the in-memory cache.
     const ack = await joinAndAck(socket, log, campaign.state.world.campaignId);
 
-    // Explicit, not merely relying on `FrameLog`'s own internal parse: the
-    // protocol.ts frame schema is
-    // `{ type: "campaign_state", sequence, snapshot: CampaignState }` and
-    // `CampaignState.encounter` is nullable, so a frame with no board must be
-    // *valid* against that schema, not merely tolerated by a cast.
-    const parsed = ServerFrame.parse(ack);
-    if (parsed.type !== "campaign_state") {
-      throw new Error(`Expected campaign_state, got ${parsed.type}`);
+    // No separate parse here: `FrameLog`'s own message handler already runs
+    // `ServerFrame.parse` on every inbound frame (see that class above), so
+    // `ack` arriving at all — the protocol.ts frame schema is
+    // `{ type: "campaign_state", sequence, snapshot: CampaignState }`, and
+    // `CampaignState.encounter` is nullable — is already the proof this
+    // frame, snapshot.encounter included, is schema-*valid*, not merely
+    // tolerated by a cast.
+    if (ack.type !== "campaign_state") {
+      throw new Error(`Expected campaign_state, got ${ack.type}`);
     }
-    expect(parsed.snapshot.encounter).toBeNull();
+    expect(ack.snapshot.encounter).toBeNull();
 
     socket.close();
   });
