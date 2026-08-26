@@ -337,9 +337,14 @@ export async function loadCampaign(input: {
   //   final `built` survives past this loop. That is NOT N-1 wasted builds,
   //   though: each intermediate one is still needed while it runs, because
   //   its `initialEncounterState` is what seeds the fold for that
-  //   encounter's own events — only the turn order `scene_changed` walks;
-  //   `state_delta_applied` replaces `combatants` wholesale from its own
-  //   payload, so the seed's combatants are never read — before the next
+  //   encounter's own events: `scene_changed` reads `turnOrder`,
+  //   `currentActorIndex` and `round` straight off the seed on the first
+  //   `turn_advanced` of a bracket, and maps over `combatants` to reset the
+  //   up-next actor's economy. `state_delta_applied` replaces `combatants`
+  //   wholesale from its own payload, so once one has been folded the seed's
+  //   combatants no longer matter — but the pipeline can emit a bare
+  //   `turn_advanced` with no delta before it, and this fold is for an
+  //   arbitrary log, so do not read that as "never" — before the next
   //   `encounter_resolved` discards it. Memoizing the catalogue lookup would
   //   still be a legitimate follow-up; it is out of scope for this commit.
   // - Load success is coupled to the catalogue's entire history, not just

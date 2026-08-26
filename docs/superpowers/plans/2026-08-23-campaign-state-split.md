@@ -717,16 +717,18 @@ and EncounterState" would be a brand-new false claim. `:838` was different: an
 analogy anchored on a table the reader is told to look up today, whose anchor
 had been renamed, so the identifier was swapped and nothing else.
 
-**Known, deliberately unfixed:** `campaign.test.ts:593-594` still concludes
-that the mutation events make the rebuilt board's shape "load-bearing
-mid-fold". They do not. On the load path everything written into the first
-bracket is discarded before any assertion — `encounter_resolved` nulls the
-encounter and the second `encounter_started` substitutes a fresh board — so
-only the board's *existence* is load-bearing mid-fold, via the null guards.
-What the mutations genuinely buy is that a stale board would be *detectable*
-at all, which the block's own opening comment at `:564-567` already says
-correctly. The clause traces to this plan's own dispatch wording, not to the
-implementer.
+**Fixed after the whole-branch review, having been recorded here as
+deliberately unfixed:** `campaign.test.ts` concluded that the mutation events
+make the rebuilt board's shape "load-bearing mid-fold". They do not. On the
+load path everything written into the first bracket is discarded before any
+assertion — `encounter_resolved` nulls the encounter and the second
+`encounter_started` substitutes a fresh board — so only the board's
+*existence* is load-bearing there. What the mutations genuinely buy is that a
+stale board is *detectable* at all. The clause traced to this plan's own
+dispatch wording, not to the implementer, and the review's fix wave corrected
+it; the comment now says what the block's own opening already said. Recorded
+rather than deleted because it was the fourth pass over one sentence, each
+correcting the last and three of them leaving something untrue.
 
 **Not fixed here, and not this branch's to fix:** shipped code carries roughly
 fifty citations of SDD process artifacts — `C-NN` correction ids, `CRITICAL-N`
@@ -746,17 +748,18 @@ or a finding: `Fix 2` (`apps/server/src/transport/http.ts:177`,
 the code, and point at nothing once this plan is merged and gone. The cleanup
 needs its own change and its own review.
 
-**Treat every count above as a lower bound.** They come from a grep, and a
-grep is a finding aid rather than the defect boundary. A separate sweep of
-this same branch working by *shape* rather than by pattern found roughly 158
-citation lines where the pattern matched 59 — it misses bare ids
-(`C-13 is closed`), suffixed ones (`C-36a`, where a `\b` fails before the
-letter), lowercase prose (`finding 4`), and spelled-out references
-(`Review round 1, item 5`, `Important 3`). Two independent measurements of
-the same branch also disagreed on the absolute totals (147→156 and 151→160)
-while agreeing exactly on the delta and on every itemised instance, which is
-what a pattern-dependent count looks like. The direction and the roughly +10
-are solid; the absolutes are not, and no future sweep should declare itself
-done against a grep total. This is the project's own "sweep by shape, not
+**The count is pattern-dependent, so treat it as approximate.** Two
+independent measurements of this branch produced different absolute totals
+(147→156 and 151→160) while agreeing exactly on the delta, **+9**, and on
+every itemised instance. That gap was never explained, which is what a
+pattern-dependent count looks like: the delta is solid, the absolute is not.
+
+A pattern also is not the defect boundary. This one catches suffixed ids
+(`C-36a`) and bare ones (`C-13 is closed`) fine, but it misses citations
+written as prose — `finding 4` (`tools/sim/src/index.test.ts`),
+`Review round 1, item 5` (`apps/server/src/core/pipeline.ts`), `Important 3`
+(`apps/server/src/e2e.test.ts`). So a sweep should match by shape and use the
+grep only to find candidates; it should not declare itself done against a
+grep total. This is the project's own "sweep by shape, not
 wording" rule, rediscovered the hard way inside the very note that records
 the defect.
