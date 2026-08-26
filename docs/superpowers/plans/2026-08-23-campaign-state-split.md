@@ -734,5 +734,14 @@ finding ids, "the brief's ...", and `task-corrections.md` by name — across
 `packages/rules-engine`, `packages/agents`, `packages/schemas`, `apps/web`,
 `apps/server` and `tools/sim`. `task-corrections.md` is not tracked in git, so
 those references already dangle. The pattern predates this branch and most of
-it sits in packages this plan is forbidden to touch. This branch removed two
-instances and added none. The cleanup needs its own change and its own review.
+it sits in packages this plan is forbidden to touch. This branch made the
+pattern worse, not better: measured base-to-HEAD across `packages apps tools`,
+citations went from 147 to 156. Two `the brief` mentions were removed, but
+eleven were added — `C-26` (×1), `C-37` (×2), `CRITICAL-1` (×2), and `task's
+report` (×2) are more of the same habit already named above. Three more are a
+new and worse kind, naming review rounds of *this plan* rather than a defect
+or a finding: `Fix 2` (`apps/server/src/transport/http.ts:177`,
+`http.test.ts:50`), `Fix 3`, and `Run 1` (both
+`packages/schemas/src/reduce.test.ts`) are artifacts of the process, not of
+the code, and point at nothing once this plan is merged and gone. The cleanup
+needs its own change and its own review.

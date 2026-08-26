@@ -29,3 +29,5 @@ Vitest against a throwaway Postgres (docker compose in `apps/server/`). Two dist
 docker compose -f ../../apps/server/docker-compose.yml up -d
 pnpm --filter @ai-dm/memory db:generate | db:migrate | test | typecheck
 ```
+
+The `0000` baseline was regenerated, not altered, for the campaign rename (ADR-0004) — drizzle's migrator picks the next migration by `created_at`, not by content hash, so a database that already ran the pre-rename baseline treats the regenerated one as unapplied and reruns it: `CREATE TABLE "campaign_snapshots"` succeeds, then `CREATE TABLE "game_events"` fails, `42P07 relation "game_events" already exists`. That failure is inside one transaction, so the rollback is complete — no half-applied schema, no stray `__drizzle_migrations` row, existing data intact. Drop `game_events` and `session_snapshots` (or the docker volume) and rerun `db:migrate`. CI never hits this — each run gets a fresh container.
