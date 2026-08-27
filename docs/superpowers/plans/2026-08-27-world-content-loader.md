@@ -1724,6 +1724,71 @@ Then record each task's actual outcome inline in this plan, in the style of `202
 
 ---
 
+---
+
+## Outcomes
+
+Recorded as each task closed, in the style of step 1's plan. The commits named
+here exist in git whether or not this file is read again.
+
+| Task | Commits | Result |
+|---|---|---|
+| 1 Baseline | — | 90 files, 1274 passed, 30 skipped; typecheck and eslint 0. Measured twice, before and after `main` moved to `69f0bef`, identical both times. |
+| 2 Content schemas | `4698e76` | Review clean first pass. Both files byte-identical to the brief; the `world.ts` deletion surgically isolated. 91 files, 1297 passed. |
+| 3 Authored world | `fdbede9`, `9f737ca`, `c02488d`, `d39c056` | Two fix rounds. 92 files, 1303 passed. |
+| 4 Loader, happy path | `7bfacb5` | Review clean first pass. 93 files, 1309 passed. |
+| 5 Refusal: ids | `4cb2cce`, `65956f7`, `5da9c1e` | One fix round, on the plan's most valuable finding. 93 files, 1322 passed. |
+| 6 Refusal: faction pairs | `828acb1` | Review clean first pass. 93 files, 1328 passed. |
+| 7 Docs sweep | `c36378a`, `a55e8de` | Postgres run: 1358 passed, **0 skipped**, `packages/memory` 62/62. |
+
+### The three findings worth carrying forward
+
+**Task 5's review found two reference checks that could not fail.**
+`QuestNode.locationId` and the `faction_band_at_least` branch of
+`predicateRefs` each had a call site no test exercised: the fixture's node
+pointed at a location that existed, and the fixture had no predicate of that
+kind. Deleting either check outright would have failed nothing, and a bug
+returning only `factionA` from that branch would have passed the whole suite
+— with only compile-time exhaustiveness behind it, which checks shape and not
+logic. Closing it took two fixture edits and grew the exhaustive assertion
+from twelve problems to fourteen. **Both the implementer and the re-reviewer
+independently sabotaged each check and confirmed exactly one assertion failed
+each time.** That break-it-and-watch-it-fail step is what separates a check
+from a decoration, and it belongs in step 3's plan too.
+
+**A count was wrong in four documents at once.** `loadWorld` opens five JSON
+files; the spec, the plan (twice) and the shipped `data/world/README.md` all
+said six, because the count included `README.md`, which nothing loads. The
+first sweep fixed the instances matching the phrase "six named" and missed
+one worded differently; sweeping by *shape* then found four more, including a
+claim that the loader hands back four `Map`s when it returns five. The
+project's own rule — sweep by shape, not by wording — was rediscovered the
+hard way, again.
+
+**The exhaustiveness guarantee rests on `strictNullChecks`, not
+`noImplicitReturns`.** `tsconfig.base.json` does not set the latter. A
+scratch compile confirmed the mechanism: a switch that returns from every
+branch with no `default` fails with TS2366 the moment a union member is added,
+because the function's declared return type does not include `undefined`.
+That is the same mechanism `packages/schemas/src/reduce.ts` relies on, and it
+is what makes `predicateRefs`/`effectRefs` fail to compile rather than
+silently skip a new predicate or effect kind's cross-reference. Step 3 adds
+kinds to both unions and will meet this.
+
+### Deferred, and deliberately not fixed here
+
+- `packages/memory/CLAUDE.md`'s Stack bullet says the world content and scene
+  engine "are still ahead". Half false now — the content exists, the engine
+  does not — and it should be narrowed to step 3 alone. **Not touched**,
+  because that file carries an uncommitted edit belonging to someone else and
+  staging it would sweep their prose into this PR. Flagged in PR #3 instead.
+- `LocationDefinition`, `FactionDefinition` and `QuestEdge` have no direct
+  unit test in `content.test.ts`. They are parsed against the real authored
+  world by `world-content.test.ts`, which is stronger than a fixture.
+- The `alpha/no-such-faction` relation entry is written into the relations map
+  under a key nothing can query. Harmless dead data in a fixture.
+
+
 ## Self-review
 
 Run against the spec after writing, before executing.
