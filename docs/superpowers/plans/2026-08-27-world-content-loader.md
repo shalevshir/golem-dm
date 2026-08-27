@@ -12,7 +12,7 @@
 
 ### The one thing this plan gets right or gets wrong
 
-Step 1 was wide and shallow — 36 files, one rename. This one is the opposite: narrow, and every interesting decision is in what the loader **refuses**. A loader that parses six files and hands back four `Map`s is twenty lines and proves nothing. What earns this step its place is that a dangling `factionId` in a hand-edited JSON file is caught at load with the file, the field and the id named — because §4.7's whole premise is that events point at lore by id, and an id that resolves to nothing is the one way that premise fails silently.
+Step 1 was wide and shallow — 36 files, one rename. This one is the opposite: narrow, and every interesting decision is in what the loader **refuses**. A loader that parses five files and hands back five `Map`s is twenty lines and proves nothing. What earns this step its place is that a dangling `factionId` in a hand-edited JSON file is caught at load with the file, the field and the id named — because §4.7's whole premise is that events point at lore by id, and an id that resolves to nothing is the one way that premise fails silently.
 
 So the plan front-loads the content and the happy path (Tasks 2–4), then spends two full tasks on refusal (Tasks 5–6), each with its own fixture defects and its own assertions. If a task ever tempts you to "add validation later", that is the deliverable being deferred.
 
@@ -38,7 +38,7 @@ So the plan front-loads the content and the happy path (Tasks 2–4), then spend
 
 **`@ai-dm/schemas`** — `src/content.ts` (new: every authored shape), `src/content.test.ts` (new), `src/world.ts` (delete the dead `FactionRelation`), `src/index.ts` (one export line), `src/world-content.test.ts` (new: proves every shipped `data/world/` file parses, mirroring `src/srd.test.ts`).
 
-**`data/world/`** — `README.md`, `world.json`, `factions.json`, `locations.json`, `npcs.json`, `arc.json`, and `fixtures/broken-references/` holding the same six filenames with deliberate defects.
+**`data/world/`** — `README.md`, `world.json`, `factions.json`, `locations.json`, `npcs.json`, `arc.json`, and `fixtures/broken-references/` holding the same five JSON filenames with deliberate defects.
 
 **`@ai-dm/server`** — `src/world/index.ts` (new: `loadWorld`, `AuthoredWorld`, `WorldContentError`), `src/world/index.test.ts` (new), `src/encounters/srd.ts` (one comment-accuracy line on `dataDir`).
 
@@ -541,7 +541,7 @@ Open the PR now, not at the end: CI triggers only on `push:main` and `pull_reque
 
 **Interfaces:**
 - Consumes: every schema Task 2 produced.
-- Produces: the six files `loadWorld` reads in Task 4, and the ids Tasks 4-6 assert on — location `emberfall`; factions `ashen-guild`, `river-wardens`; NPCs `maren-vess`, `old-tobin`, `sela-the-innkeeper`; nodes `arrival`, `guild-offer`, `warden-warning`, `the-weir`, `reckoning`.
+- Produces: the five JSON files `loadWorld` reads in Task 4, and the ids Tasks 4-6 assert on — location `emberfall`; factions `ashen-guild`, `river-wardens`; NPCs `maren-vess`, `old-tobin`, `sela-the-innkeeper`; nodes `arrival`, `guild-offer`, `warden-warning`, `the-weir`, `reckoning`.
 
 **This content goes in `data/world/`, never `data/srd/`.** Invariant 6 restricts that directory to SRD 5.2.1 CC-BY material. Everything below is original. Do not touch `NOTICE.md`.
 
@@ -628,7 +628,7 @@ corepack enable && pnpm --filter @ai-dm/schemas test world-content
 
 Expected: FAIL with `ENOENT` — `data/world/` does not exist yet.
 
-- [ ] **Step 3: Write the six content files**
+- [ ] **Step 3: Write the five content files**
 
 `data/world/world.json`:
 
@@ -868,7 +868,7 @@ growing the world is a deliberate edit rather than a side effect."
 - Modify: `apps/server/src/encounters/srd.ts:14-17` (one comment line)
 
 **Interfaces:**
-- Consumes: every schema from Task 2; the six files from Task 3; `dataDir(relativePath: string): string` from `../encounters/srd.js`.
+- Consumes: every schema from Task 2; the five JSON files from Task 3; `dataDir(relativePath: string): string` from `../encounters/srd.js`.
 - Produces: `loadWorld(dir?: string): AuthoredWorld`, `pairKey(a: string, b: string): string`, and the `AuthoredWorld` interface. Task 5 adds `WorldContentError` to the same file.
 
 This task ships a loader that reads, parses and indexes. It does **not** cross-reference — that is Tasks 5 and 6, and a loader that only parses is honest about what it checks in the meantime.
