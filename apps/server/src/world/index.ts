@@ -22,9 +22,21 @@ import {
   WorldManifest,
 } from "@ai-dm/schemas";
 import type { FactionBand, WorldEffect, WorldPredicate } from "@ai-dm/schemas";
+import { pairKey } from "@ai-dm/rules-engine";
+import type { AuthoredWorld } from "@ai-dm/rules-engine";
 import { dataDir } from "../encounters/srd.js";
 
 const WORLD_DIR_RELATIVE = join("data", "world");
+
+/**
+ * Re-exported from `@ai-dm/rules-engine`, where both moved when §4.7's step 3
+ * scene engine — pure, and forbidden from importing an app — became their
+ * consumer. `loadWorld` is what produces an `AuthoredWorld`, so a caller
+ * holding the loader should not have to know which package the type was
+ * hoisted into. There is still exactly one declaration of each.
+ */
+export { pairKey };
+export type { AuthoredWorld };
 
 /**
  * Thrown by `loadWorld` when content parses but does not hang together — a
@@ -103,43 +115,8 @@ function effectRefs(effect: WorldEffect): readonly ContentRef[] {
   }
 }
 
-/**
- * The authored world, indexed. `Map`s rather than arrays for the reason
- * `loadGear` returns them: every consumer looks content up by id.
- *
- * Declared here rather than in `@ai-dm/schemas` because it is neither a wire
- * shape nor a zod schema — it holds `Map`s. `SrdGear` is the identical case
- * and lives in `@ai-dm/rules-engine`, next to its consumer rather than in the
- * schema package. §4.7's step 3 scene engine takes this injected and can
- * rehome the type then.
- */
-export interface AuthoredWorld {
-  readonly worldId: string;
-  readonly startingDay: number;
-  readonly startingNodeId: string;
-  readonly factions: ReadonlyMap<string, FactionDefinition>;
-  readonly locations: ReadonlyMap<string, LocationDefinition>;
-  readonly npcs: ReadonlyMap<string, NpcDefinition>;
-  readonly questNodes: ReadonlyMap<string, QuestNode>;
-  /** Keyed by `pairKey`, so a relation is an unordered pair. */
-  readonly relations: ReadonlyMap<string, FactionBand>;
-}
-
 function readJson(dir: string, file: string): unknown {
   return JSON.parse(readFileSync(join(dir, file), "utf8"));
-}
-
-/**
- * Canonical key for an unordered faction pair, so declaring `A,B` and `B,A`
- * names one relation rather than two. `|` is safe as a delimiter because
- * `ContentId` forbids it.
- *
- * Exported because a `Map` keyed by a private convention is unusable by a
- * consumer. Step 3 may well want a `relationBetween(world, a, b)` wrapper
- * over it; that is one line and belongs with the code that needs it.
- */
-export function pairKey(a: string, b: string): string {
-  return a < b ? `${a}|${b}` : `${b}|${a}`;
 }
 
 // Parsed once per directory. The files never change at runtime, and the
