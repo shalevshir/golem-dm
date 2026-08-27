@@ -2,7 +2,7 @@
 
 ## Purpose & boundary
 
-Single source of truth for every shared data shape: character sheets, tactical actions (`ExecuteTurn`), game events, world/grid types. Everything else derives from here — TS types via `z.infer`, runtime validation via `.parse()`, LLM tool definitions via `zod-to-json-schema`.
+Single source of truth for every shared data shape: character sheets, tactical actions (`ExecuteTurn`), game events, world/grid types, authored world content (`content.ts` — locations, factions, NPCs, the quest DAG). Everything else derives from here — TS types via `z.infer`, runtime validation via `.parse()`, LLM tool definitions via `zod-to-json-schema`.
 
 **Boundary:** zod is the only runtime dependency. No I/O, no game logic, no LLM code. If you're writing behavior, it belongs in `rules-engine` or `agents`.
 

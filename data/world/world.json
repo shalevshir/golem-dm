@@ -1,0 +1,8 @@
+{
+  "worldId": "emberfall",
+  "startingDay": 1,
+  "startingNodeId": "arrival",
+  "factionRelations": [
+    { "factionA": "ashen-guild", "factionB": "river-wardens", "band": "cold" }
+  ]
+}

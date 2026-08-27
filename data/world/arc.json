@@ -1,0 +1,69 @@
+[
+  {
+    "nodeId": "arrival",
+    "titleEnglish": "Arrival at Emberfall",
+    "sceneEnglish": "The road drops out of the pines and Emberfall is below you: a weir throwing white water on the left, a hillside of smoking kilns on the right, and a town wedged between them that has clearly not been sleeping well. Two people are waiting at the bridge, and they are not standing together.",
+    "locationId": "emberfall",
+    "edges": [
+      { "to": "guild-offer", "labelEnglish": "Hear out the guild factor" },
+      { "to": "warden-warning", "labelEnglish": "Hear out the river warden" }
+    ]
+  },
+  {
+    "nodeId": "guild-offer",
+    "titleEnglish": "The Guild's Offer",
+    "sceneEnglish": "Maren Vess buys you a meal you did not ask for and lays a ledger open beside it. The wardens, she says, have been opening the weir gates at night and drowning the lower kilns. She wants a witness who is not from here.",
+    "locationId": "emberfall",
+    "preconditions": [{ "kind": "node_completed", "nodeId": "arrival" }],
+    "effects": [
+      {
+        "kind": "shift_faction_relation",
+        "factionA": "ashen-guild",
+        "factionB": "river-wardens",
+        "delta": -1
+      }
+    ],
+    "edges": [{ "to": "the-weir", "labelEnglish": "Go and look at the weir yourself" }]
+  },
+  {
+    "nodeId": "warden-warning",
+    "titleEnglish": "The Warden's Warning",
+    "sceneEnglish": "Old Tobin buys you nothing. He walks you along the bank until the water goes grey and stays grey, and points at it without saying anything for a long moment. The kilns, he says, are washing their ash straight into the fish ladder.",
+    "locationId": "emberfall",
+    "preconditions": [{ "kind": "node_completed", "nodeId": "arrival" }],
+    "effects": [{ "kind": "advance_calendar", "days": 1 }],
+    "edges": [{ "to": "the-weir", "labelEnglish": "Go and look at the weir yourself" }]
+  },
+  {
+    "nodeId": "the-weir",
+    "titleEnglish": "The Weir at Low Water",
+    "sceneEnglish": "The weir up close is older than either quarrel. The gate mechanism has been forced, recently and badly, and the ash on the stonework is weeks deep. Both stories are true, which is the one answer nobody in town has offered you.",
+    "locationId": "emberfall",
+    "preconditions": [{ "kind": "node_completed", "nodeId": "arrival" }],
+    "edges": [{ "to": "reckoning", "labelEnglish": "Put both parties in one room" }]
+  },
+  {
+    "nodeId": "reckoning",
+    "titleEnglish": "Reckoning at the Inn",
+    "sceneEnglish": "Sela clears the long table without being asked and stands where she can see the door. Maren Vess arrives with her ledgers; Old Tobin arrives with a piece of the forced gate mechanism. Nobody has to shout, which surprises everyone present.",
+    "locationId": "emberfall",
+    "preconditions": [
+      { "kind": "node_completed", "nodeId": "the-weir" },
+      {
+        "kind": "faction_band_at_least",
+        "factionA": "ashen-guild",
+        "factionB": "river-wardens",
+        "band": "hostile"
+      }
+    ],
+    "effects": [
+      {
+        "kind": "shift_faction_relation",
+        "factionA": "ashen-guild",
+        "factionB": "river-wardens",
+        "delta": 2
+      },
+      { "kind": "advance_calendar", "days": 2 }
+    ]
+  }
+]

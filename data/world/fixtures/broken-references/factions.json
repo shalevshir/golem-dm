@@ -1,0 +1,5 @@
+[
+  { "factionId": "alpha", "nameEnglish": "Alpha", "nameHebrew": "אלפא", "descriptionEnglish": "A fixture faction." },
+  { "factionId": "beta", "nameEnglish": "Beta", "nameHebrew": "בטא", "descriptionEnglish": "A fixture faction." },
+  { "factionId": "gamma", "nameEnglish": "Gamma", "nameHebrew": "גמא", "descriptionEnglish": "A fixture faction." }
+]

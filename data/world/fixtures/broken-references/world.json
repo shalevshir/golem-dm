@@ -1,0 +1,12 @@
+{
+  "worldId": "broken-references",
+  "startingDay": 1,
+  "startingNodeId": "no-such-node",
+  "factionRelations": [
+    { "factionA": "alpha", "factionB": "beta", "band": "cold" },
+    { "factionA": "beta", "factionB": "alpha", "band": "war" },
+    { "factionA": "alpha", "factionB": "no-such-faction", "band": "neutral" },
+    { "factionA": "gamma", "factionB": "gamma", "band": "neutral" },
+    { "factionA": "no-such-faction", "factionB": "beta", "band": "cold" }
+  ]
+}

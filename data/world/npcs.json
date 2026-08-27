@@ -1,0 +1,28 @@
+[
+  {
+    "npcId": "maren-vess",
+    "nameEnglish": "Maren Vess",
+    "nameHebrew": "מארן וס",
+    "grammaticalGender": "feminine",
+    "locationId": "emberfall",
+    "factionId": "ashen-guild",
+    "descriptionEnglish": "Factor for the Ashen Guild. Keeps her ledgers in three colours of ink, and will tell you exactly what each colour means if you ask her."
+  },
+  {
+    "npcId": "old-tobin",
+    "nameEnglish": "Old Tobin",
+    "nameHebrew": "טובין הזקן",
+    "grammaticalGender": "masculine",
+    "locationId": "emberfall",
+    "factionId": "river-wardens",
+    "descriptionEnglish": "Warden of the lower weir for forty years. He has outlived three floods and fully expects to outlive the kilns."
+  },
+  {
+    "npcId": "sela-the-innkeeper",
+    "nameEnglish": "Sela the Innkeeper",
+    "nameHebrew": "סלה הפונדקאית",
+    "grammaticalGender": "feminine",
+    "locationId": "emberfall",
+    "descriptionEnglish": "Keeps the only inn in town with a roof that holds. Takes no side, serves both, and hears everything twice."
+  }
+]

@@ -12,9 +12,9 @@ import { MonsterStatBlock } from "@ai-dm/schemas";
 const MONSTER_DIR_RELATIVE = join("data", "srd", "monsters");
 
 /** Walk up until `relativePath` appears — a fixed relative path would be
- * wrong for `dist/` after `pnpm build`. Shared by every loader under
- * `apps/server/src/encounters/` (`gear.ts`, `characters.ts`) so the walk-up
- * itself is written once. */
+ * wrong for `dist/` after `pnpm build`. Shared by every loader in this app
+ * (`gear.ts`, `characters.ts`, `conditions.ts`, `../world/index.ts`) so the
+ * walk-up itself is written once. */
 export function dataDir(relativePath: string): string {
   let dir = dirname(fileURLToPath(import.meta.url));
   for (;;) {
