@@ -17,7 +17,12 @@ import {
   startScene,
   traverseEdge,
 } from "@ai-dm/rules-engine";
-import type { SceneState, SceneTransition } from "@ai-dm/rules-engine";
+import type {
+  EdgeOption,
+  SceneOptions,
+  SceneState,
+  SceneTransition,
+} from "@ai-dm/rules-engine";
 import { loadWorld } from "./index.js";
 
 function stateOf(transition: SceneTransition): SceneState {
@@ -27,6 +32,15 @@ function stateOf(transition: SceneTransition): SceneState {
     );
   }
   return transition.state;
+}
+
+function edgesOf(options: SceneOptions): readonly EdgeOption[] {
+  if (!options.valid) {
+    expect.unreachable(
+      `expected options, got: ${options.rejections.map((r) => r.message).join("; ")}`,
+    );
+  }
+  return options.edges;
 }
 
 describe("the Emberfall arc", () => {
@@ -40,7 +54,7 @@ describe("the Emberfall arc", () => {
 
   it("offers both branches from arrival, both open", () => {
     const world = loadWorld();
-    const options = availableEdges(world, stateOf(startScene(world)));
+    const options = edgesOf(availableEdges(world, stateOf(startScene(world))));
     expect(options.map((each) => each.edge.to).sort()).toEqual([
       "guild-offer",
       "warden-warning",
@@ -63,7 +77,7 @@ describe("the Emberfall arc", () => {
     // reckoning: +2 bands from hostile, +2 days from 1.
     expect(relationBetween(state, "ashen-guild", "river-wardens")).toBe("neutral");
     expect(state.day).toBe(3);
-    expect(availableEdges(world, state)).toEqual([]);
+    expect(edgesOf(availableEdges(world, state))).toEqual([]);
   });
 
   // Warden branch: warden-warning advances a day and shifts nothing.
@@ -109,7 +123,7 @@ describe("the Emberfall arc", () => {
     for (const second of ["guild-offer", "warden-warning"]) {
       let state = stateOf(traverseEdge(world, stateOf(startScene(world)), second));
       state = stateOf(traverseEdge(world, state, "the-weir"));
-      const options = availableEdges(world, state);
+      const options = edgesOf(availableEdges(world, state));
       expect(options).toHaveLength(1);
       expect(options[0]?.open).toBe(true);
     }

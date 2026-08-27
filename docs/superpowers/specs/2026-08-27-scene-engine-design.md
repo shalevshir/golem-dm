@@ -190,7 +190,7 @@ export function relationBetween(
 ): FactionBand | undefined;
 export function evaluatePredicate(predicate: WorldPredicate, state: SceneState): boolean;
 export function startScene(world: AuthoredWorld): SceneTransition;
-export function availableEdges(world: AuthoredWorld, state: SceneState): readonly EdgeOption[];
+export function availableEdges(world: AuthoredWorld, state: SceneState): SceneOptions;
 export function traverseEdge(world: AuthoredWorld, state: SceneState, to: string): SceneTransition;
 export function completeCurrentNode(world: AuthoredWorld, state: SceneState): SceneTransition;
 ```
@@ -212,6 +212,10 @@ export type SceneTransition =
   | { valid: true; state: SceneState }
   | { valid: false; rejections: SceneRejection[] };
 
+export type SceneOptions =
+  | { valid: true; edges: readonly EdgeOption[] }
+  | { valid: false; rejections: readonly SceneRejection[] };
+
 export interface EdgeOption {
   edge: QuestEdge;
   /** True exactly when `traverseEdge` to this edge's target would succeed. */
@@ -227,6 +231,15 @@ explain is data, not an exception. A rejection carries every failed
 precondition, not the first — same argument as `WorldContentError` carrying
 every defect.
 
+`applyEffect` takes the world as well as the state, because the band a shift
+starts from is authored: a `SceneState` folded out of the event log may carry
+only the pairs that have actually changed, and reading the state alone would
+make a shift over an unchanged pair silently do nothing. The authored relation
+is the baseline; the state is the overlay. `completeCurrentNode` likewise
+re-checks its node's own preconditions before applying its effects — entry is
+gated by `startScene` and `traverseEdge`, but those stop being the only
+producers of a `SceneState` the moment step 4 folds one out of the log.
+
 `applyEffect` is deliberately **not** exported. It is reachable only through a
 node completing, which is what keeps invariant 1 intact one level above
 combat: a caller cannot shift a faction band except by completing a node that
@@ -234,8 +247,13 @@ declares the shift. An unexported applier is also fully tested — through
 `traverseEdge` and `completeCurrentNode`, which is a stronger test than
 calling it directly.
 
-`availableEdges` returns every edge with its status rather than only the open
-ones, because both callers this step can name need the closed ones: the router
+`availableEdges` answers with a union rather than a bare array so that "this
+node has no way out" and "this node does not exist" stay distinguishable: all
+three entry points refuse an unresolvable `currentNodeId` with the same
+`no_such_node` rejection, because a router reading a bare `[]` cannot tell a
+terminal node from content that has since been renamed, and would narrate an
+ending for a campaign that is actually broken. Within a valid answer it
+returns every edge with its status rather than only the open ones, because both callers this step can name need the closed ones: the router
 must be able to say why a choice is unavailable, and the golden tests assert
 that a blocked edge is blocked for the stated reason. It shares one internal
 `entryRejections(world, state, nodeId)` helper with `traverseEdge`, so

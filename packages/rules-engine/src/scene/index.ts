@@ -128,6 +128,34 @@ export interface EdgeOption {
   rejections: readonly SceneRejection[];
 }
 
+/**
+ * What asking for the current node's choices resolves to.
+ *
+ * A union rather than a bare array so that "this node has no way out" and
+ * "this node does not exist" are distinguishable. A terminal node answers
+ * `{ valid: true, edges: [] }`; a state pointing at content that has since
+ * been renamed answers `{ valid: false }` with the same `no_such_node`
+ * rejection `traverseEdge` and `completeCurrentNode` give — otherwise a
+ * router reading `[]` narrates an ending for a campaign that is actually
+ * broken.
+ */
+export type SceneOptions =
+  | { valid: true; edges: readonly EdgeOption[] }
+  | { valid: false; rejections: readonly SceneRejection[] };
+
+/**
+ * The refusal every entry point gives for a `currentNodeId` that resolves to
+ * no node. Written once so `availableEdges`, `traverseEdge` and
+ * `completeCurrentNode` cannot answer the same corrupt state differently.
+ */
+function missingCurrentNode(state: SceneState): SceneRejection {
+  return {
+    reason: "no_such_node",
+    message: `no quest node "${state.currentNodeId}"`,
+    subjectId: state.currentNodeId,
+  };
+}
+
 /** Why entering `nodeId` from `state` would be refused. Empty means it would not. */
 function entryRejections(
   world: AuthoredWorld,
@@ -168,16 +196,27 @@ function describePredicate(predicate: WorldPredicate): string {
  * nothing can shift a faction band by asking. It is fully exercised through
  * `traverseEdge` and `completeCurrentNode`, which is a stronger test than
  * calling it directly would be.
+ *
+ * It takes `world` for the band a shift starts from: a `SceneState` folded
+ * out of the event log may carry only the pairs that have actually changed,
+ * since the rest are already in `world.json`. Reading the state alone would
+ * make a shift over an unchanged pair silently do nothing, so the authored
+ * relation is the baseline and the state is the overlay.
  */
-function applyEffect(effect: WorldEffect, state: SceneState): SceneState {
+function applyEffect(
+  world: AuthoredWorld,
+  effect: WorldEffect,
+  state: SceneState,
+): SceneState {
   switch (effect.kind) {
     case "shift_faction_relation": {
       const key = pairKey(effect.factionA, effect.factionB);
-      const current = state.relations.get(key);
-      // A shift over a pair the state does not hold is a no-op rather than an
-      // invention: `loadWorld` refuses an effect naming an unknown faction, so
-      // reaching this means a hand-built state, and inventing `neutral` here
-      // would put a relation in the map that no author declared.
+      const current = state.relations.get(key) ?? world.relations.get(key);
+      // Still a no-op when neither the state nor the authored world declares
+      // the pair, rather than an invention: `loadWorld` refuses an effect
+      // naming an unknown faction, so reaching this means a hand-built world,
+      // and inventing `neutral` here would put a relation in the map that no
+      // author declared.
       if (current === undefined) return state;
       const relations = new Map(state.relations);
       relations.set(key, shiftBand(current, effect.delta));
@@ -193,12 +232,12 @@ function applyEffect(effect: WorldEffect, state: SceneState): SceneState {
  * applied — but only the first time, so a cycle cannot pump a faction shift
  * twice.
  */
-function completed(node: QuestNode, state: SceneState): SceneState {
+function completed(world: AuthoredWorld, node: QuestNode, state: SceneState): SceneState {
   if (state.completedNodeIds.has(node.nodeId)) return state;
   const completedNodeIds = new Set(state.completedNodeIds);
   completedNodeIds.add(node.nodeId);
   return node.effects.reduce<SceneState>(
-    (each, effect) => applyEffect(effect, each),
+    (each, effect) => applyEffect(world, effect, each),
     { ...state, completedNodeIds },
   );
 }
@@ -230,22 +269,23 @@ export function startScene(world: AuthoredWorld): SceneTransition {
  * one line. It shares `entryRejections` with `traverseEdge`, so what this
  * calls open and what that accepts cannot drift apart.
  *
- * An unknown `currentNodeId` reads as "no options" (`[]`) rather than a
- * `no_such_node` rejection like its siblings `traverseEdge` and
- * `completeCurrentNode` — deliberately quieter, because a caller that has
- * lost its node will discover it on the traversal it attempts next.
+ * An unknown `currentNodeId` is refused with the same `no_such_node`
+ * rejection its siblings give, so a router cannot mistake missing content for
+ * a scene that has simply run out of choices.
  */
-export function availableEdges(
-  world: AuthoredWorld,
-  state: SceneState,
-): readonly EdgeOption[] {
+export function availableEdges(world: AuthoredWorld, state: SceneState): SceneOptions {
   const current = world.questNodes.get(state.currentNodeId);
-  if (current === undefined) return [];
-  const after = completed(current, state);
-  return current.edges.map((edge) => {
-    const rejections = entryRejections(world, after, edge.to);
-    return { edge, open: rejections.length === 0, rejections };
-  });
+  if (current === undefined) {
+    return { valid: false, rejections: [missingCurrentNode(state)] };
+  }
+  const after = completed(world, current, state);
+  return {
+    valid: true,
+    edges: current.edges.map((edge) => {
+      const rejections = entryRejections(world, after, edge.to);
+      return { edge, open: rejections.length === 0, rejections };
+    }),
+  };
 }
 
 /**
@@ -267,16 +307,7 @@ export function traverseEdge(
 ): SceneTransition {
   const current = world.questNodes.get(state.currentNodeId);
   if (current === undefined) {
-    return {
-      valid: false,
-      rejections: [
-        {
-          reason: "no_such_node",
-          message: `no quest node "${state.currentNodeId}"`,
-          subjectId: state.currentNodeId,
-        },
-      ],
-    };
+    return { valid: false, rejections: [missingCurrentNode(state)] };
   }
   if (!current.edges.some((edge) => edge.to === to)) {
     return {
@@ -290,7 +321,7 @@ export function traverseEdge(
       ],
     };
   }
-  const after = completed(current, state);
+  const after = completed(world, current, state);
   const rejections = entryRejections(world, after, to);
   if (rejections.length > 0) return { valid: false, rejections };
   return { valid: true, state: { ...after, currentNodeId: to } };
@@ -301,6 +332,12 @@ export function traverseEdge(
  * effects — the shipped arc's `reckoning` has effects and no edges, so without
  * this they are declared by an author and applied by nothing.
  *
+ * The node's own preconditions are re-checked first. Entry is already gated by
+ * `startScene` and `traverseEdge`, but they are not the only producers of a
+ * `SceneState` once step 4 folds one out of the event log — and completing a
+ * node applies its declared effects, so it may not be the one door into them
+ * that skips the gate.
+ *
  * Idempotent, through the same first-completion guard as traversal.
  */
 export function completeCurrentNode(
@@ -309,16 +346,9 @@ export function completeCurrentNode(
 ): SceneTransition {
   const current = world.questNodes.get(state.currentNodeId);
   if (current === undefined) {
-    return {
-      valid: false,
-      rejections: [
-        {
-          reason: "no_such_node",
-          message: `no quest node "${state.currentNodeId}"`,
-          subjectId: state.currentNodeId,
-        },
-      ],
-    };
+    return { valid: false, rejections: [missingCurrentNode(state)] };
   }
-  return { valid: true, state: completed(current, state) };
+  const rejections = entryRejections(world, state, state.currentNodeId);
+  if (rejections.length > 0) return { valid: false, rejections };
+  return { valid: true, state: completed(world, current, state) };
 }

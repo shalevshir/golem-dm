@@ -9,7 +9,14 @@ import {
   startScene,
   traverseEdge,
 } from "./index.js";
-import type { AuthoredWorld, SceneRejection, SceneState, SceneTransition } from "./index.js";
+import type {
+  AuthoredWorld,
+  EdgeOption,
+  SceneOptions,
+  SceneRejection,
+  SceneState,
+  SceneTransition,
+} from "./index.js";
 import { blockedWorld, linearWorld } from "./test-fixtures.js";
 import type { FactionBand } from "@ai-dm/schemas";
 
@@ -215,12 +222,84 @@ describe("completeCurrentNode", () => {
     expect(after.relations).toEqual(before.relations);
     expect(relationBetween(after, "gamma", "delta")).toBeUndefined();
   });
+
+  // A `SceneState` folded out of the event log may carry only the pairs that
+  // have actually changed — the rest are already in `world.json`. Reading the
+  // state alone made a shift over an unchanged pair silently do nothing, so
+  // the authored relation is the baseline the shift starts from.
+  it("shifts from the authored band when the state omits the pair", () => {
+    const world: AuthoredWorld = {
+      ...linearWorld(),
+      startingNodeId: "solo",
+      questNodes: new Map([
+        [
+          "solo",
+          {
+            nodeId: "solo",
+            titleEnglish: "Solo",
+            sceneEnglish: "A node that shifts a pair the state has not recorded.",
+            locationId: "here",
+            preconditions: [],
+            effects: [
+              { kind: "shift_faction_relation", factionA: "alpha", factionB: "beta", delta: -1 },
+            ],
+            edges: [],
+          },
+        ],
+      ]),
+    };
+    // linearWorld() declares alpha/beta at `neutral`; this projection has
+    // recorded no change to it yet, so the pair is absent from the state.
+    const partial: SceneState = {
+      currentNodeId: "solo",
+      completedNodeIds: new Set<string>(),
+      relations: new Map(),
+      day: 1,
+    };
+    expect(relationBetween(partial, "alpha", "beta")).toBeUndefined();
+    const after = stateOf(completeCurrentNode(world, partial));
+    expect(relationBetween(after, "alpha", "beta")).toBe("cold");
+  });
+
+  // Entry is gated by `startScene` and `traverseEdge`, but they stop being the
+  // only producers of a `SceneState` once step 4 folds one out of the log —
+  // and completing a node is what applies its effects.
+  it("refuses to complete a node whose own preconditions are unmet", () => {
+    const world = linearWorld();
+    const stranded: SceneState = {
+      currentNodeId: "middle",
+      completedNodeIds: new Set<string>(),
+      relations: world.relations,
+      day: 1,
+    };
+    const transition = completeCurrentNode(world, stranded);
+    expect(transition.valid).toBe(false);
+    if (transition.valid) return;
+    expect(transition.rejections).toHaveLength(1);
+    expect(transition.rejections[0]?.reason).toBe("precondition_unmet");
+    // middle carries a -1 shift and a +2 day advance; neither may have run.
+    expect(relationBetween(stranded, "alpha", "beta")).toBe("neutral");
+    expect(stranded.day).toBe(1);
+  });
 });
+
+/**
+ * The edges from a `SceneOptions`, or a loud failure naming the rejections —
+ * the `stateOf` of the third entry point.
+ */
+function edgesOf(options: SceneOptions): readonly EdgeOption[] {
+  if (!options.valid) {
+    expect.unreachable(
+      `expected options, got: ${options.rejections.map((r) => r.reason).join(", ")}`,
+    );
+  }
+  return options.edges;
+}
 
 describe("availableEdges", () => {
   it("reports an open edge as open with no rejections", () => {
     const world = linearWorld();
-    const options = availableEdges(world, stateOf(startScene(world)));
+    const options = edgesOf(availableEdges(world, stateOf(startScene(world))));
     expect(options).toHaveLength(1);
     expect(options[0]?.edge.to).toBe("middle");
     expect(options[0]?.open).toBe(true);
@@ -229,7 +308,7 @@ describe("availableEdges", () => {
 
   it("reports every edge, not only the open ones", () => {
     const world = blockedWorld();
-    const options = availableEdges(world, stateOf(startScene(world)));
+    const options = edgesOf(availableEdges(world, stateOf(startScene(world))));
     expect(options.map((each) => each.edge.to)).toEqual(["open", "shut"]);
   });
 
@@ -237,7 +316,7 @@ describe("availableEdges", () => {
     const world = linearWorld();
     let state = stateOf(traverseEdge(world, stateOf(startScene(world)), "middle"));
     state = stateOf(traverseEdge(world, state, "end"));
-    expect(availableEdges(world, state)).toEqual([]);
+    expect(edgesOf(availableEdges(world, state))).toEqual([]);
   });
 });
 
@@ -398,7 +477,7 @@ describe("refusing a traversal", () => {
 describe("availableEdges under a closed gate", () => {
   it("marks the closed edge closed and the open one open", () => {
     const world = blockedWorld();
-    const options = availableEdges(world, stateOf(startScene(world)));
+    const options = edgesOf(availableEdges(world, stateOf(startScene(world))));
     const byTarget = new Map(options.map((each) => [each.edge.to, each]));
     expect(byTarget.get("open")?.open).toBe(true);
     expect(byTarget.get("shut")?.open).toBe(false);
@@ -411,7 +490,7 @@ describe("availableEdges under a closed gate", () => {
   it("agrees with traverseEdge on every edge", () => {
     const world = blockedWorld();
     const state = stateOf(startScene(world));
-    for (const option of availableEdges(world, state)) {
+    for (const option of edgesOf(availableEdges(world, state))) {
       expect(traverseEdge(world, state, option.edge.to).valid).toBe(option.open);
     }
   });
@@ -485,11 +564,24 @@ describe("acting from a state whose current node does not exist", () => {
     expect(rejections[0]?.subjectId).toBe("ghost");
   });
 
-  // The third sibling answers differently on purpose: "no options" rather than
-  // a loud `no_such_node`, per its own doc comment. Pinned here so the branch
-  // is reached — without this case it was covered by line but not by branch,
-  // which is exactly what let it silently disagree with its two siblings.
-  it("returns no options from availableEdges, quietly rather than as a rejection", () => {
-    expect(availableEdges(linearWorld(), ghostState())).toEqual([]);
+  // All three siblings answer alike. `availableEdges` used to return `[]`
+  // here, which a router cannot tell apart from a terminal node that has
+  // simply run out of edges — so a campaign pointing at renamed content read
+  // as one that had ended.
+  it("refuses availableEdges", () => {
+    const options = availableEdges(linearWorld(), ghostState());
+    expect(options.valid).toBe(false);
+    if (options.valid) return;
+    expect(options.rejections).toHaveLength(1);
+    expect(options.rejections[0]?.reason).toBe("no_such_node");
+    expect(options.rejections[0]?.subjectId).toBe("ghost");
+  });
+
+  // A terminal node is the case that must NOT look like the one above.
+  it("distinguishes a terminal node from a missing one", () => {
+    const world = linearWorld();
+    let state = stateOf(traverseEdge(world, stateOf(startScene(world)), "middle"));
+    state = stateOf(traverseEdge(world, state, "end"));
+    expect(edgesOf(availableEdges(world, state))).toEqual([]);
   });
 });
