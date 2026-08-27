@@ -973,8 +973,8 @@ combat with a UI that can still send them.
    [`docs/superpowers/plans/2026-08-23-campaign-state-split.md`](docs/superpowers/plans/2026-08-23-campaign-state-split.md).
 2. **Static content loaders and a deliberately tiny authored world:** one
    town, two factions, three NPCs, a five-node arc. Enough to prove the
-   pipeline, not to be good. **Merged to `main`** <date> as `<sha>`,
-   CI green with Postgres at <passed> passed / 0 skipped / 93 files.
+   pipeline, not to be good. **Merged to `main`** 2026-08-27 as `b66de41`,
+   CI green with Postgres at 1365 passed / 0 skipped / 93 files.
    [`docs/superpowers/specs/2026-08-27-world-content-loader-design.md`](docs/superpowers/specs/2026-08-27-world-content-loader-design.md),
    plan at
    [`docs/superpowers/plans/2026-08-27-world-content-loader.md`](docs/superpowers/plans/2026-08-27-world-content-loader.md).
