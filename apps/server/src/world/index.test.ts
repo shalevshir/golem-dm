@@ -203,8 +203,9 @@ describe("loadWorld's start-node check", () => {
   it("refuses a world whose starting node can never be entered", () => {
     const problems = problemsFrom(UNENTERABLE);
     expect(problems).toHaveLength(1);
-    expect(problems[0]).toContain("startingNodeId");
-    expect(problems[0]).toContain("start");
+    expect(problems[0]).toBe(
+      'world.json startingNodeId is unenterable: entering "start" requires "start" to be completed',
+    );
   });
 
   // "leaves the broken-references fixture's problem count untouched" is not
