@@ -14,11 +14,6 @@ export const GridMap = z.object({
   tiles: z.array(z.array(TerrainType)),
 });
 
-export const FactionRelation = z.object({
-  factionId: z.string(),
-  score: z.number().int().min(-100).max(100),
-});
-
 export const Faction = z.enum(["party", "hostile", "neutral"]);
 
 /**
@@ -75,7 +70,6 @@ export const Combatant = z.object({
 export type GridMap = z.infer<typeof GridMap>;
 export type EntityStatus = z.infer<typeof EntityStatus>;
 export type TerrainType = z.infer<typeof TerrainType>;
-export type FactionRelation = z.infer<typeof FactionRelation>;
 export type Faction = z.infer<typeof Faction>;
 export type ActionEconomy = z.infer<typeof ActionEconomy>;
 export type Combatant = z.infer<typeof Combatant>;

@@ -3,6 +3,7 @@ export * from "./character.js";
 export * from "./actions.js";
 export * from "./events.js";
 export * from "./world.js";
+export * from "./content.js";
 export * from "./srd.js";
 export * from "./derived.js";
 export * from "./gear.js";
