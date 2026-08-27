@@ -1,0 +1,20 @@
+[
+  {
+    "npcId": "twin",
+    "nameEnglish": "Twin the First",
+    "nameHebrew": "התאום הראשון",
+    "grammaticalGender": "masculine",
+    "locationId": "no-such-place",
+    "factionId": "no-such-faction",
+    "descriptionEnglish": "Carries both dangling references. Indexed, so both are checked."
+  },
+  {
+    "npcId": "twin",
+    "nameEnglish": "Twin the Second",
+    "nameHebrew": "התאום השני",
+    "grammaticalGender": "feminine",
+    "locationId": "also-no-such-place",
+    "factionId": "alpha",
+    "descriptionEnglish": "A duplicate id. Its locationId is ALSO dangling, and must never be reported — a dropped entry is not cross-referenced, and that absence is what proves first-wins."
+  }
+]

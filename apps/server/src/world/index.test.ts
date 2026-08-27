@@ -1,7 +1,7 @@
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { dataDir } from "../encounters/srd.js";
-import { loadWorld, pairKey } from "./index.js";
+import { loadWorld, pairKey, WorldContentError } from "./index.js";
 
 describe("loadWorld", () => {
   // This is the only test that exercises the walk-up for `data/world`: if
@@ -52,5 +52,83 @@ describe("loadWorld", () => {
 
   it("throws ENOENT for a directory with no world in it", () => {
     expect(() => loadWorld(join(dataDir(join("data", "world")), "nope"))).toThrow(/ENOENT/);
+  });
+});
+
+const BROKEN = join(dataDir(join("data", "world")), "fixtures", "broken-references");
+
+/**
+ * The problems `loadWorld` threw for `dir`, or a loud failure if it did not
+ * throw at all.
+ *
+ * `expect.unreachable` runs OUTSIDE the try/catch on purpose. Called inside
+ * it, its own AssertionError lands in the very same `catch` as the real
+ * assertions and gets asserted against instead — the must-fix minor already
+ * recorded at `apps/server/src/config.test.ts:36`. The `caught` flag is that
+ * file's fix, stated once here so the twelve assertions below are one line
+ * each.
+ */
+function problemsFrom(dir: string): readonly string[] {
+  let caught: unknown;
+  let threw = false;
+  try {
+    loadWorld(dir);
+  } catch (error) {
+    threw = true;
+    caught = error;
+  }
+  if (!threw) expect.unreachable(`loadWorld(${dir}) should have thrown`);
+  expect(caught).toBeInstanceOf(WorldContentError);
+  return (caught as WorldContentError).problems;
+}
+
+describe("loadWorld refusing broken content", () => {
+  // The strongest single statement that the checks below do not false-positive.
+  it("accepts the real authored world", () => {
+    expect(() => loadWorld()).not.toThrow();
+  });
+
+  it("throws a named, instanceof-able error", () => {
+    expect(() => loadWorld(BROKEN)).toThrow(WorldContentError);
+    expect(() => loadWorld(BROKEN)).toThrow(/Invalid world content/);
+  });
+
+  // One throw carrying every defect, not the first. Throwing at the first
+  // dangling id would make an author fix these one reload at a time.
+  it.each([
+    'duplicate npc id "twin"',
+    'world.json startingNodeId references unknown quest node "no-such-node"',
+    'npc twin references unknown location "no-such-place"',
+    'npc twin references unknown faction "no-such-faction"',
+    'quest node start edge references unknown quest node "no-such-node"',
+    'quest node start precondition references unknown quest node "no-such-node"',
+    'quest node start effect references unknown faction "no-such-faction"',
+  ])("names: %s", (problem) => {
+    expect(problemsFrom(BROKEN)).toContain(problem);
+  });
+
+  // A duplicate is dropped during indexing, so the surviving entry is the
+  // FIRST one. Both twins carry a dangling locationId, and only the first
+  // one's is reported — asserting the absence of the second's is what makes
+  // this test fail if indexing ever started cross-referencing dropped
+  // entries, or started keeping the last entry instead of the first.
+  it("keeps the first of two entries sharing an id", () => {
+    const problems = problemsFrom(BROKEN);
+    expect(problems).toContain('npc twin references unknown location "no-such-place"');
+    expect(problems).not.toContain(
+      'npc twin references unknown location "also-no-such-place"',
+    );
+  });
+
+  // Every file in the fixture parses cleanly — these are defects zod cannot
+  // see, which is the whole reason the loader has to look. If this ever
+  // throws a ZodError instead, the fixture has drifted into being malformed
+  // and has stopped testing cross-referencing at all.
+  it("throws for defects zod cannot see, not for a malformed file", () => {
+    // `problemsFrom` asserts the error is a WorldContentError and not a
+    // ZodError, which is the real claim: every file in the fixture parses
+    // cleanly, so if this ever came back a ZodError the fixture would have
+    // drifted into being malformed and stopped testing cross-referencing.
+    expect(problemsFrom(BROKEN).length).toBeGreaterThan(0);
   });
 });

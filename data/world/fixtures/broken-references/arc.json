@@ -1,0 +1,18 @@
+[
+  {
+    "nodeId": "start",
+    "titleEnglish": "Start",
+    "sceneEnglish": "A fixture node whose every outbound reference is wrong.",
+    "locationId": "somewhere",
+    "preconditions": [{ "kind": "node_completed", "nodeId": "no-such-node" }],
+    "effects": [
+      {
+        "kind": "shift_faction_relation",
+        "factionA": "alpha",
+        "factionB": "no-such-faction",
+        "delta": 1
+      }
+    ],
+    "edges": [{ "to": "no-such-node", "labelEnglish": "Nowhere" }]
+  }
+]

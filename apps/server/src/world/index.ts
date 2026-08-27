@@ -21,10 +21,87 @@ import {
   QuestNode,
   WorldManifest,
 } from "@ai-dm/schemas";
-import type { FactionBand } from "@ai-dm/schemas";
+import type { FactionBand, WorldEffect, WorldPredicate } from "@ai-dm/schemas";
 import { dataDir } from "../encounters/srd.js";
 
 const WORLD_DIR_RELATIVE = join("data", "world");
+
+/**
+ * Thrown by `loadWorld` when content parses but does not hang together — a
+ * duplicate id, an id that resolves to nothing, a faction pair left
+ * undeclared. Named and `instanceof`-able for the reason
+ * `UnknownEncounterError` is: a caller distinguishing this from a `ZodError`
+ * should not have to match on message text.
+ *
+ * It carries EVERY problem found rather than the first. An author fixing five
+ * dangling ids should need one reload, not five.
+ */
+export class WorldContentError extends Error {
+  readonly problems: readonly string[];
+
+  constructor(dir: string, problems: readonly string[]) {
+    super(`Invalid world content in ${dir}:\n  - ${problems.join("\n  - ")}`);
+    this.name = "WorldContentError";
+    this.problems = problems;
+  }
+}
+
+/** Which collection an id has to resolve in. */
+type ContentKind = "faction" | "location" | "quest node";
+
+interface ContentRef {
+  readonly kind: ContentKind;
+  readonly id: string;
+}
+
+function indexBy<T>(
+  items: readonly T[],
+  idOf: (item: T) => string,
+  what: string,
+  problems: string[],
+): Map<string, T> {
+  const map = new Map<string, T>();
+  for (const item of items) {
+    const id = idOf(item);
+    if (map.has(id)) {
+      problems.push(`duplicate ${what} id "${id}"`);
+      continue;
+    }
+    map.set(id, item);
+  }
+  return map;
+}
+
+/**
+ * Every content id a predicate names. Written as a `return` from each branch
+ * with no `default`, so adding a `WorldPredicate` kind fails to compile here
+ * rather than silently skipping its cross-reference — the same exhaustiveness
+ * discipline `packages/schemas/src/reduce.ts` relies on.
+ */
+function predicateRefs(predicate: WorldPredicate): readonly ContentRef[] {
+  switch (predicate.kind) {
+    case "node_completed":
+      return [{ kind: "quest node", id: predicate.nodeId }];
+    case "faction_band_at_least":
+      return [
+        { kind: "faction", id: predicate.factionA },
+        { kind: "faction", id: predicate.factionB },
+      ];
+  }
+}
+
+/** Same exhaustiveness contract as `predicateRefs`. */
+function effectRefs(effect: WorldEffect): readonly ContentRef[] {
+  switch (effect.kind) {
+    case "shift_faction_relation":
+      return [
+        { kind: "faction", id: effect.factionA },
+        { kind: "faction", id: effect.factionB },
+      ];
+    case "advance_calendar":
+      return [];
+  }
+}
 
 /**
  * The authored world, indexed. `Map`s rather than arrays for the reason
@@ -82,20 +159,66 @@ export function loadWorld(dir: string = dataDir(WORLD_DIR_RELATIVE)): AuthoredWo
   const npcList = NpcDefinition.array().parse(readJson(dir, "npcs.json"));
   const nodeList = QuestNode.array().parse(readJson(dir, "arc.json"));
 
+  const problems: string[] = [];
+
+  const factions = indexBy(factionList, (each) => each.factionId, "faction", problems);
+  const locations = indexBy(locationList, (each) => each.locationId, "location", problems);
+  const npcs = indexBy(npcList, (each) => each.npcId, "npc", problems);
+  const questNodes = indexBy(nodeList, (each) => each.nodeId, "quest node", problems);
+
+  const collections: Record<ContentKind, ReadonlyMap<string, unknown>> = {
+    faction: factions,
+    location: locations,
+    "quest node": questNodes,
+  };
+
+  const checkRef = (ref: ContentRef, where: string): void => {
+    if (!collections[ref.kind].has(ref.id)) {
+      problems.push(`${where} references unknown ${ref.kind} "${ref.id}"`);
+    }
+  };
+
+  const relations = new Map<string, FactionBand>();
+  for (const entry of manifest.factionRelations) {
+    relations.set(pairKey(entry.factionA, entry.factionB), entry.band);
+  }
+
+  checkRef({ kind: "quest node", id: manifest.startingNodeId }, "world.json startingNodeId");
+
+  // Iterating the indexed maps rather than the parsed lists: an entry dropped
+  // as a duplicate is already reported, and cross-referencing it too would
+  // report the same defect twice under one id.
+  for (const npc of npcs.values()) {
+    const where = `npc ${npc.npcId}`;
+    checkRef({ kind: "location", id: npc.locationId }, where);
+    if (npc.factionId !== undefined) checkRef({ kind: "faction", id: npc.factionId }, where);
+  }
+
+  for (const node of questNodes.values()) {
+    const where = `quest node ${node.nodeId}`;
+    checkRef({ kind: "location", id: node.locationId }, where);
+    for (const edge of node.edges) {
+      checkRef({ kind: "quest node", id: edge.to }, `${where} edge`);
+    }
+    for (const predicate of node.preconditions) {
+      for (const ref of predicateRefs(predicate)) checkRef(ref, `${where} precondition`);
+    }
+    for (const effect of node.effects) {
+      for (const ref of effectRefs(effect)) checkRef(ref, `${where} effect`);
+    }
+  }
+
+  if (problems.length > 0) throw new WorldContentError(dir, problems);
+
   const world: AuthoredWorld = {
     worldId: manifest.worldId,
     startingDay: manifest.startingDay,
     startingNodeId: manifest.startingNodeId,
-    factions: new Map(factionList.map((each) => [each.factionId, each])),
-    locations: new Map(locationList.map((each) => [each.locationId, each])),
-    npcs: new Map(npcList.map((each) => [each.npcId, each])),
-    questNodes: new Map(nodeList.map((each) => [each.nodeId, each])),
-    relations: new Map(
-      manifest.factionRelations.map((each) => [
-        pairKey(each.factionA, each.factionB),
-        each.band,
-      ]),
-    ),
+    factions,
+    locations,
+    npcs,
+    questNodes,
+    relations,
   };
 
   cache.set(dir, world);
