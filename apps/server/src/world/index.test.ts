@@ -1,4 +1,4 @@
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { dataDir } from "../encounters/srd.js";
 import { loadWorld, pairKey, WorldContentError } from "./index.js";
@@ -49,6 +49,17 @@ describe("loadWorld", () => {
   // rather than being served this cached world.
   it("caches per directory, so an explicit path hits the same entry", () => {
     expect(loadWorld(dataDir(join("data", "world")))).toBe(loadWorld());
+  });
+
+  // The cache key is the RESOLVED directory, not the raw argument string —
+  // otherwise a trailing slash or an embedded "." segment is a full reread
+  // and re-parse for what is, on disk, the exact same directory.
+  it("caches on the resolved directory, so different spellings of one path share an entry", () => {
+    const dir = dataDir(join("data", "world"));
+    const trailingSlash = `${dir}/`;
+    const dotSegment = `${dirname(dir)}/./world`;
+    expect(loadWorld(trailingSlash)).toBe(loadWorld(dir));
+    expect(loadWorld(dotSegment)).toBe(loadWorld(dir));
   });
 
   it("throws ENOENT for a directory with no world in it", () => {
@@ -106,6 +117,8 @@ describe("loadWorld refusing broken content", () => {
     'quest node start precondition references unknown quest node "no-such-node"',
     'quest node start precondition references unknown faction "no-such-faction"',
     'quest node start effect references unknown faction "no-such-faction"',
+    "quest node start precondition alpha/alpha relates a faction to itself",
+    "quest node start effect alpha/alpha relates a faction to itself",
   ])("names: %s", (problem) => {
     expect(problemsFrom(BROKEN)).toContain(problem);
   });
@@ -143,13 +156,14 @@ describe("loadWorld refusing faction relations", () => {
     "faction relation gamma/gamma relates a faction to itself",
     'no faction relation declared for "alpha" and "gamma"',
     'no faction relation declared for "beta" and "gamma"',
+    'faction relation no-such-faction/beta references unknown faction "no-such-faction"',
   ])("names: %s", (problem) => {
     expect(problemsFrom(BROKEN)).toContain(problem);
   });
 
   // The complete set, so a check that starts reporting something extra —
   // or stops reporting something — fails here rather than passing quietly.
-  it("reports exactly these fourteen problems and no others", () => {
+  it("reports exactly these seventeen problems and no others", () => {
     expect(new Set(problemsFrom(BROKEN))).toEqual(
       new Set([
         'duplicate npc id "twin"',
@@ -161,11 +175,14 @@ describe("loadWorld refusing faction relations", () => {
         'quest node start precondition references unknown quest node "no-such-node"',
         'quest node start precondition references unknown faction "no-such-faction"',
         'quest node start effect references unknown faction "no-such-faction"',
+        "quest node start precondition alpha/alpha relates a faction to itself",
+        "quest node start effect alpha/alpha relates a faction to itself",
         'duplicate faction relation for "beta" and "alpha"',
         'faction relation alpha/no-such-faction references unknown faction "no-such-faction"',
         "faction relation gamma/gamma relates a faction to itself",
         'no faction relation declared for "alpha" and "gamma"',
         'no faction relation declared for "beta" and "gamma"',
+        'faction relation no-such-faction/beta references unknown faction "no-such-faction"',
       ]),
     );
   });

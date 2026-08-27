@@ -13,7 +13,7 @@
 // `buildEncounter` takes `statBlocks` and `characters` — rather than reaching
 // for the filesystem itself.
 import { readFileSync } from "node:fs";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import {
   FactionDefinition,
   LocationDefinition,
@@ -150,7 +150,8 @@ export function pairKey(a: string, b: string): string {
 const cache = new Map<string, AuthoredWorld>();
 
 export function loadWorld(dir: string = dataDir(WORLD_DIR_RELATIVE)): AuthoredWorld {
-  const hit = cache.get(dir);
+  const cacheKey = resolve(dir);
+  const hit = cache.get(cacheKey);
   if (hit !== undefined) return hit;
 
   const manifest = WorldManifest.parse(readJson(dir, "world.json"));
@@ -231,9 +232,19 @@ export function loadWorld(dir: string = dataDir(WORLD_DIR_RELATIVE)): AuthoredWo
     }
     for (const predicate of node.preconditions) {
       for (const ref of predicateRefs(predicate)) checkRef(ref, `${where} precondition`);
+      if (predicate.kind === "faction_band_at_least" && predicate.factionA === predicate.factionB) {
+        problems.push(
+          `${where} precondition ${predicate.factionA}/${predicate.factionB} relates a faction to itself`,
+        );
+      }
     }
     for (const effect of node.effects) {
       for (const ref of effectRefs(effect)) checkRef(ref, `${where} effect`);
+      if (effect.kind === "shift_faction_relation" && effect.factionA === effect.factionB) {
+        problems.push(
+          `${where} effect ${effect.factionA}/${effect.factionB} relates a faction to itself`,
+        );
+      }
     }
   }
 
@@ -250,6 +261,6 @@ export function loadWorld(dir: string = dataDir(WORLD_DIR_RELATIVE)): AuthoredWo
     relations,
   };
 
-  cache.set(dir, world);
+  cache.set(cacheKey, world);
   return world;
 }

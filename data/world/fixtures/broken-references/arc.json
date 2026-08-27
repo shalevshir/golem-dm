@@ -11,6 +11,12 @@
         "factionA": "alpha",
         "factionB": "no-such-faction",
         "band": "cold"
+      },
+      {
+        "kind": "faction_band_at_least",
+        "factionA": "alpha",
+        "factionB": "alpha",
+        "band": "allied"
       }
     ],
     "effects": [
@@ -18,6 +24,12 @@
         "kind": "shift_faction_relation",
         "factionA": "alpha",
         "factionB": "no-such-faction",
+        "delta": 1
+      },
+      {
+        "kind": "shift_faction_relation",
+        "factionA": "alpha",
+        "factionB": "alpha",
         "delta": 1
       }
     ],

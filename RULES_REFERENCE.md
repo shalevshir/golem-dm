@@ -273,7 +273,7 @@ Not yet implemented, roughly in dependency order:
   Cover regardless of its size, and an object gives whatever its terrain type
   says. RAW asks how much of the target is actually covered.
 - **"Ally" is faction equality.** `passabilityThrough` treats same-faction as
-  allied. A `FactionRelation` score exists in `schemas` but is not consulted.
+  allied.
 - **Standing up from Prone.** `ExecuteTurn` cannot express it, so a prone actor
   is always costed as crawling (§6).
 - **Narrow openings.** RAW treats "a narrow opening sized for a creature one

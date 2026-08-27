@@ -117,6 +117,27 @@ describe("WorldPredicate and WorldEffect", () => {
     expect(WorldEffect.safeParse({ kind: "advance_calendar", days: 1 }).success).toBe(true);
   });
 
+  // The one field that could run the calendar BACKWARDS — the replay
+  // determinism property §4.7's event-driven time decision protects.
+  // `WorldManifest.startingDay` has a "refuses day zero" test just below;
+  // this is its structural twin.
+  it.each([0, -1])("refuses an advance_calendar of %d days", (days) => {
+    expect(WorldEffect.safeParse({ kind: "advance_calendar", days }).success).toBe(false);
+  });
+
+  // A fractional delta yields a non-integer band index — FACTION_BANDS[3.5]
+  // is undefined — so step 3's lookup would find no band at all.
+  it("refuses a fractional shift_faction_relation delta", () => {
+    expect(
+      WorldEffect.safeParse({
+        kind: "shift_faction_relation",
+        factionA: "ashen-guild",
+        factionB: "river-wardens",
+        delta: 0.5,
+      }).success,
+    ).toBe(false);
+  });
+
   // §4.7: regional danger is DERIVED from faction relations and quest
   // progress, never stored, because derived state cannot drift. There is no
   // effect that writes it and there must not be one.
