@@ -62,6 +62,15 @@ describe("shiftBand", () => {
     expect(shiftBand("war", 6)).toBe("allied");
     expect(shiftBand("allied", -6)).toBe("war");
   });
+
+  // Unreachable through authored content — `WorldEffect.delta` is
+  // `z.number().int()` — but the export is typed `delta: number`, and
+  // `FACTION_BANDS[3.5]` is `undefined`. Truncating toward zero before
+  // indexing is what keeps that a rounded shift rather than a silent no-op.
+  it("truncates a fractional delta toward zero rather than silently no-opping", () => {
+    expect(shiftBand("cold", 1.9)).toBe("neutral");
+    expect(shiftBand("cold", -1.9)).toBe("hostile");
+  });
 });
 
 describe("relationBetween", () => {
@@ -474,5 +483,13 @@ describe("acting from a state whose current node does not exist", () => {
     expect(rejections).toHaveLength(1);
     expect(rejections[0]?.reason).toBe("no_such_node");
     expect(rejections[0]?.subjectId).toBe("ghost");
+  });
+
+  // The third sibling answers differently on purpose: "no options" rather than
+  // a loud `no_such_node`, per its own doc comment. Pinned here so the branch
+  // is reached — without this case it was covered by line but not by branch,
+  // which is exactly what let it silently disagree with its two siblings.
+  it("returns no options from availableEdges, quietly rather than as a rejection", () => {
+    expect(availableEdges(linearWorld(), ghostState())).toEqual([]);
   });
 });

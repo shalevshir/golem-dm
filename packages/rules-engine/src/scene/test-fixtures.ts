@@ -48,8 +48,6 @@ function node(nodeId: string, rest: Partial<QuestNode> = {}): QuestNode {
 function world(
   nodes: readonly QuestNode[],
   options: {
-    startingNodeId?: string;
-    startingDay?: number;
     relations?: readonly (readonly [string, string, FactionBand])[];
   } = {},
 ): AuthoredWorld {
@@ -58,8 +56,8 @@ function world(
   );
   return {
     worldId: "fixture",
-    startingDay: options.startingDay ?? 1,
-    startingNodeId: options.startingNodeId ?? nodes[0]?.nodeId ?? "start",
+    startingDay: 1,
+    startingNodeId: nodes[0]?.nodeId ?? "start",
     factions: new Map(Array.from(factionIds, (id) => [id, faction(id)])),
     locations: new Map([["here", HERE]]),
     npcs: new Map(),

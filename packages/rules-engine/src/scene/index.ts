@@ -44,9 +44,15 @@ export interface SceneState {
  * Clamping rather than wrapping or throwing: `delta` is schema-bounded to
  * -6..+6, which is wider than the seven-band scale on purpose, so an author
  * can declare "as hostile as this gets" without knowing the starting band.
+ *
+ * `delta` is typed `number`, not the schema's integer, so a fractional value
+ * is truncated toward zero before indexing. Authored content cannot produce
+ * one — `WorldEffect.delta` is `z.number().int()` — but a hand-built caller
+ * could, and `FACTION_BANDS[3.5]` is `undefined`, which would otherwise fall
+ * through `?? band` as a silent no-op rather than a shift.
  */
 export function shiftBand(band: FactionBand, delta: number): FactionBand {
-  const shifted = FACTION_BANDS.indexOf(band) + delta;
+  const shifted = FACTION_BANDS.indexOf(band) + Math.trunc(delta);
   const clamped = Math.min(Math.max(shifted, 0), FACTION_BANDS.length - 1);
   // `noUncheckedIndexedAccess` types this as possibly undefined; the clamp
   // above is what makes it not, and `?? band` is the honest way to say so
@@ -112,7 +118,7 @@ export interface SceneRejection {
  */
 export type SceneTransition =
   | { valid: true; state: SceneState }
-  | { valid: false; rejections: SceneRejection[] };
+  | { valid: false; rejections: readonly SceneRejection[] };
 
 export interface EdgeOption {
   edge: QuestEdge;
@@ -223,6 +229,11 @@ export function startScene(world: AuthoredWorld): SceneTransition {
  * choice is unavailable, and a caller wanting only the open ones filters in
  * one line. It shares `entryRejections` with `traverseEdge`, so what this
  * calls open and what that accepts cannot drift apart.
+ *
+ * An unknown `currentNodeId` reads as "no options" (`[]`) rather than a
+ * `no_such_node` rejection like its siblings `traverseEdge` and
+ * `completeCurrentNode` — deliberately quieter, because a caller that has
+ * lost its node will discover it on the traversal it attempts next.
  */
 export function availableEdges(
   world: AuthoredWorld,
