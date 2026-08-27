@@ -338,7 +338,7 @@ function abortingTactical(): TacticalAgent {
  * Resolves with a legal dodge after `delayMs` — never aborted, just slow.
  * Used to prove `enemyTurn` shares ONE deadline between the tactical call
  * and the narration that follows it, rather than giving each its own fresh
- * `turnTimeoutMs` (the review's IMPORTANT finding): a tactical call that
+ * `turnTimeoutMs`: a tactical call that
  * eats most of the budget should leave the following narration almost none
  * of it, not a brand new window.
  */
@@ -1426,7 +1426,7 @@ describe("handleCommand — turn timeout", () => {
     expect(encounterOf(campaign).round).toBe(2);
   }, 10_000);
 
-  // The review's IMPORTANT finding: the tactical call and the narration
+  // The tactical call and the narration
   // that follows it must share ONE 10s budget, not each get their own —
   // apps/server/CLAUDE.md's "hard turn timeout 10s" and the spec's "A 10s
   // hard cap wraps the narrative stream and the tactical call" both read as
@@ -1437,8 +1437,8 @@ describe("handleCommand — turn timeout", () => {
   // budget's worth of wall-clock time, not the ~1.5-2x a pair of
   // independent budgets per enemy turn would take.
   //
-  // Review round 3: `turnTimeoutMs` and `slowTactical`'s delay were scaled
-  // up 2.5x from the original 80ms/60ms (to 200ms/150ms), and the
+  // `turnTimeoutMs` and `slowTactical`'s delay are scaled up 2.5x from an
+  // initial 80ms/60ms (to 200ms/150ms), and the
   // threshold with them — not because the pipeline needs a bigger budget,
   // but because this is a wall-clock assertion and its discrimination is a
   // RATIO (shared band vs. doubled band), not an absolute gap. At 80ms the
@@ -1465,12 +1465,12 @@ describe("handleCommand — turn timeout", () => {
       turnTimeoutMs: 200,
     };
 
-    // Review round 2: this used to time the whole `drain(...)`, but since
-    // Task 4 that drain ends with a `turn_affordances` frame — pure
-    // computation (`affordancesFor` probing ~143 candidate tiles through
-    // `validateExecuteTurn`) that no deadline governs. Folding that fixed
-    // ~100ms of real work into the budget-sharing assertion erased the
-    // margin the comment above describes. Consuming the generator by hand
+    // Timing the whole `drain(...)` would be wrong: that drain ends with a
+    // `turn_affordances` frame — pure computation (`affordancesFor` probing
+    // ~143 candidate tiles through `validateExecuteTurn`) that no deadline
+    // governs. Folding that fixed ~100ms of real work into the budget-sharing
+    // assertion erases the margin the comment above describes. Consuming the
+    // generator by hand
     // and stamping a timestamp only on frames the turn timeout actually
     // governs — i.e. everything except `turn_affordances` — excludes that
     // trailing computation by construction, so this keeps measuring the
@@ -1499,7 +1499,7 @@ describe("handleCommand — turn timeout", () => {
     // goblin-b (~200ms) is roughly 600ms. Two independent budgets per enemy
     // turn would instead be hero (~200ms) + goblin-a (150 + 200 = 350ms) +
     // goblin-b (350ms), or roughly 900ms. Measured wall-clock reality runs
-    // higher than either estimate (see the "Review round 3" comment above
+    // higher than either estimate (see the budget-scaling comment above
     // for the actual figures and the real headroom the 750ms threshold
     // gives against each scenario).
     expect(elapsed).toBeLessThan(750);
@@ -1522,7 +1522,7 @@ describe("handleCommand — narration degradation ladder", () => {
     expect(emitted.source).toBe("model");
     expect(emitted.text).toBe(tokens.join(""));
     expect(emitted.text).toBe("אלדד פוגע בגובלין לוחם.");
-    // Fix round 1, Finding 2: this is the `model` rung's own promptVersion
+    // The `model` rung's own promptVersion
     // check — see the "stamps the prompt version" test's comment below for
     // why it isn't checked only there.
     expect(emitted.promptVersion).toBe(NARRATIVE_PROMPT_VERSION);
@@ -1537,7 +1537,7 @@ describe("handleCommand — narration degradation ladder", () => {
     expect(emitted.text).not.toMatch(/[a-zA-Z]/);
   });
 
-  // Fix round 1, Finding 3: whitespace is not the same as nothing —
+  // Whitespace is not the same as nothing —
   // `narrate` (pipeline.ts) checks `text.trim() === ""`, not `text === ""`,
   // specifically so a provider that emits only `" "`/`"\n"` still falls back
   // rather than being treated as a (nonsensical) complete narration.
@@ -1559,12 +1559,12 @@ describe("handleCommand — narration degradation ladder", () => {
     expect(emitted.text).toBe(tokens.join(""));
     expect(emitted.text).toContain("… ");
     expect(emitted.text.trimEnd().endsWith(".")).toBe(true);
-    // Fix round 1, Finding 2: the `completed` rung's own promptVersion check.
+    // The `completed` rung's own promptVersion check.
     expect(emitted.promptVersion).toBe(NARRATIVE_PROMPT_VERSION);
   });
 
-  // Fix round 1, Finding 1: `NARRATION_TERMINATORS` (pipeline.ts) is
-  // `[".", "!", "?", "…"]`, and only "." had a test. A later "simplify" to
+  // `NARRATION_TERMINATORS` (pipeline.ts) is
+  // `[".", "!", "?", "…"]`, and covering only "." is not enough. A later "simplify" to
   // e.g. `/[.!?]$/` would silently drop "…" and nothing here would notice —
   // a model narration that legitimately trails off ("אלדד מהסס…") would then
   // be misclassified `completed`, get a doubled ellipsis appended, and be
@@ -1579,8 +1579,8 @@ describe("handleCommand — narration degradation ladder", () => {
   });
 
   // This covers the `deterministic` rung; the `model` and `completed` rungs
-  // are covered by their own promptVersion assertions above (Fix round 1,
-  // Finding 2) rather than re-running a turn here — every payload every
+  // are covered by their own promptVersion assertions above rather than
+  // re-running a turn here — every payload every
   // rung can produce is checked, split across the tests that already build
   // each one, instead of duplicating three `runOneTurn` calls in one test.
   it("stamps the prompt version on every narration whatever produced it", async () => {
@@ -1713,13 +1713,13 @@ describe("handleCommand — turn_affordances", () => {
       handleCommand(campaign, { type: "join", campaignId: "s1" }, portsWith(store)),
     );
     expect(frames.some((each) => each.type === "turn_affordances")).toBe(false);
-    // Review round 1, item 4: pin that the join still produced its normal
+    // Pin that the join still produced its normal
     // response — absence-only would also pass a join that yields nothing.
     expect(frames.at(-1)?.type).toBe("campaign_state");
   });
 
-  // Review round 1, item 1: the original `if (index !== -1)` guard let this
-  // test pass vacuously — deleting `yield* playerAffordances();` from the
+  // An `if (index !== -1)` guard here would let this test pass vacuously —
+  // deleting `yield* playerAffordances();` from the
   // `structured_action` case left the whole suite green, because nothing
   // else in this file drives a `structured_action` far enough to observe
   // the second yield point (the e2e reconnect test only covers `join`).

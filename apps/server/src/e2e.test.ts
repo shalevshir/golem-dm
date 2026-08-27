@@ -199,8 +199,8 @@ class FrameLog {
 
   constructor(socket: WebSocket) {
     socket.on("message", (data: Buffer | string) => {
-      // Important 3: parsed against the real schema, not cast — see
-      // `ws.test.ts`'s identical fix for the full rationale.
+      // Parsed against the real schema, not cast — see `ws.test.ts`'s
+      // identical parse for the full rationale.
       const frame = ServerFrame.parse(JSON.parse(String(data)));
       this.frames.push(frame);
       for (const waiter of [...this.waiters]) {
@@ -502,10 +502,10 @@ describe("end to end", () => {
     send(firstSocket, heroDodge("t1"));
 
     // Close the instant the hero's OWN turn_advance arrives — strictly
-    // before the enemy sweep starts (same technique as ws.test.ts's C-36a
-    // test). That leaves a genuine gap: `handleCommand` drains to
-    // completion regardless of the socket (C-36a, proven there — this file
-    // relies on it rather than re-proving it), so both goblins' turns keep
+    // before the enemy sweep starts (same technique as ws.test.ts's
+    // drain-after-close test). That leaves a genuine gap: `handleCommand`
+    // drains to completion regardless of the socket (proven there — this
+    // file relies on it rather than re-proving it), so both goblins' turns keep
     // appending to the store while this client is gone. Cutting off only
     // after the whole round had already finished — this file's first draft
     // did exactly that, using the round's own end as `cut` — leaves the
@@ -551,7 +551,7 @@ describe("end to end", () => {
     );
     const roundEndSequence = afterRound.nextSequence - 1;
 
-    // Review round 1, item 3: whether the reconnecting join also gets a
+    // Whether the reconnecting join also gets a
     // trailing `turn_affordances` frame is keyed on the exact same
     // condition `waitForProjection`'s predicate above just used to decide
     // the round was over — not re-derived, and not assumed. If the hero
@@ -575,7 +575,7 @@ describe("end to end", () => {
     // round actually ended at, which is strictly past `cut` by construction
     // (the enemy sweep alone is several events).
     //
-    // Review round 1, item 2: when a trailing `turn_affordances` frame is
+    // When a trailing `turn_affordances` frame is
     // expected, the wait does not settle on the last `event` frame alone —
     // it also waits for that trailing frame to actually arrive. Settling
     // early relied on the trailing frame reaching this socket in the same

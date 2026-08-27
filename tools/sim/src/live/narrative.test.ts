@@ -216,7 +216,7 @@ describe("runNarrativeBenchmark", () => {
     });
     expect(report.samples).toHaveLength(SCRIPTED_BRIEFS.length);
     report.samples.forEach((sample, index) => {
-      // The sample carries the brief's own identity, not just an index into
+      // Each sample carries its source brief itself, not just an index into
       // a corpus a consumer would otherwise have to re-import in lockstep.
       expect(sample.source).toBe(SCRIPTED_BRIEFS[index]);
       expect(sample.beatsEnglish.length).toBeGreaterThan(0);
@@ -247,7 +247,7 @@ describe("runNarrativeBenchmark", () => {
   });
 
   it("divides cost by the narrations that actually happened, not by the full errored+clean sample count", async () => {
-    // Regression check for the review's finding: dividing by samples.length
+    // Regression check: dividing by samples.length
     // (which includes the errored sample) would understate the cost of a
     // narration that actually happened. One errored sample among otherwise-
     // clean ones is the realistic shape — a single rate limit, not every
@@ -308,7 +308,7 @@ describe("runNarrativeBenchmark", () => {
         return () => (t += 100);
       })(),
     });
-    // Fix round 1, finding 4: an errored attempt reporting no usage is the
+    // An errored attempt reporting no usage is the
     // expected shape of a failure, not a shortfall the reader needs a
     // separate "cost is under-reported" warning for — narrative-report.ts
     // already states the erroredSamples count on its own, right above the
@@ -335,7 +335,7 @@ describe("runNarrativeBenchmark", () => {
   });
 
   it("excludes usage from a finish that carries both error and usage together, not just from an errored finish with no usage at all", async () => {
-    // Fix round 1, finding 2: `NarrativeFinish` declares `usage` and `error`
+    // `NarrativeFinish` declares `usage` and `error`
     // as independent optional fields (hebrew.ts) — nothing in the type
     // forbids a provider from reporting both on the same finish. This case
     // cannot be constructed through the fake port used everywhere else in

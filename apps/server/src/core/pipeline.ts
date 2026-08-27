@@ -241,7 +241,7 @@ async function* untilDeadline(
     });
   };
 
-  // C-36b: this loop has no bound of its own on how long it can be
+  // This loop has no bound of its own on how long it can be
   // suspended at `yield next.value` below, and abandoning early (a consumer
   // that `break`s out of its `for await`, which propagates `.return()` in
   // here) must still release `iterator` — the `for (;;)` body's own two
@@ -649,7 +649,7 @@ export async function* handleCommand(
     const statBlock = builtOf(campaign).statBlocks.get(actorId);
     if (statBlock === undefined) return;
 
-    // Review round 1, item 5: the spread comes first and the explicit
+    // The spread comes first and the explicit
     // fields after, so the pipeline's own `type`/`forSequence` stay
     // authoritative even if `TurnAffordances` ever grows a field with
     // either name — previously the spread came last and would have

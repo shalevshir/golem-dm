@@ -609,7 +609,7 @@ describe("App", () => {
   });
 
   it("drops a tile selected on a previous turn instead of sending it as this turn's destination", async () => {
-    // Finding 2: `selectedTile` used to be cleared only inside `commit`, so a
+    // `selectedTile` used to be cleared only inside `commit`, so a
     // tile clicked (but never committed) on one turn's affordances survived
     // into the next turn's and could be sent as a destination the server
     // never sanctioned for the new board. The fix re-derives the effective

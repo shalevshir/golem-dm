@@ -103,8 +103,8 @@ export function registerWebSocketRoute(app: FastifyInstance, input: WebSocketRou
         // `latestSnapshot`/`readSince` and yields `campaign_state`/`event`
         // frames, never `emit`, so it cannot itself duplicate a turn, which
         // is the only hazard this lock exists to prevent. Claiming it for
-        // `join` was a regression: C-36a keeps a turn's `handleCommand`
-        // draining, lock held, for the WHOLE hero turn plus the entire enemy
+        // `join` was a regression: draining a turn's `handleCommand` to
+        // completion holds the lock for the WHOLE hero turn plus the entire enemy
         // sweep (each budgeted `turnTimeoutMs`) even after the originating
         // socket has disappeared — so a client that drops mid-turn and
         // reconnects could have its own `join` rejected with
@@ -151,7 +151,7 @@ export function registerWebSocketRoute(app: FastifyInstance, input: WebSocketRou
             return;
           }
 
-          // C-36a: drain to completion — never `break` out of this loop.
+          // Drain to completion — never `break` out of this loop.
           // `handleCommand`'s `emit` writes its periodic snapshot after its
           // `yield`, and the enemy-turn loop appends several events per
           // turn; abandoning the iterator mid-turn (which a `break` would

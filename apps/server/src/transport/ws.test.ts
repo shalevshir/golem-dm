@@ -115,7 +115,7 @@ function framesUntil(
       reject(new Error(`timed out after ${String(frames.length)} frames`));
     }, FRAME_TIMEOUT_MS);
     function onMessage(data: Buffer | string): void {
-      // Important 3: parsed against the real schema, not cast — the branch
+      // Parsed against the real schema, not cast — the branch
       // exists to freeze this wire contract, so a frame that violates
       // `ServerFrame` must fail the test, not silently satisfy `.type`
       // checks the way `JSON.parse(...) as ServerFrame` would let it.
@@ -142,7 +142,7 @@ function framesUntil(
 
 /**
  * Send `join` and resolve once the server acks with its first reply.
- * Bounded and diagnostic (Minor 7, task 14 round 2): the ad hoc
+ * Bounded and diagnostic: the ad hoc
  * `new Promise<void>((resolve) => socket.once("message", resolve))` this
  * replaces had no timeout and no reject path, so a regression here used to
  * surface as vitest's generic timeout instead of a message naming what
@@ -318,9 +318,9 @@ describe("websocket transport", () => {
     socket.close();
   });
 
-  // Important 1 (task 14 review round 2): C-36a requires the transport to
-  // DRAIN `handleCommand` to completion, never abandon it mid-turn. Every
-  // test above passes even under the exact violation C-36a forbids:
+  // The transport must DRAIN `handleCommand` to completion, never abandon it
+  // mid-turn. Every test above passes even under the exact violation that
+  // rule forbids:
   //
   //   for await (const frame of handleCommand(...)) {
   //     send(frame);
@@ -335,7 +335,7 @@ describe("websocket transport", () => {
   // not from the socket: once the client closes there is nothing left to
   // receive frames on, but a compliant handler keeps the generator running
   // and keeps appending regardless.
-  it("keeps appending the enemy sweep after the client closes mid-turn (C-36a)", async () => {
+  it("keeps appending the enemy sweep after the client closes mid-turn", async () => {
     const { app, url, store } = await startServer();
     const campaignId = await createCampaignOver(app);
     const socket = await connect(url);
@@ -382,7 +382,7 @@ describe("websocket transport", () => {
       if (Date.now() > deadline) {
         throw new Error(
           "goblin-a's action_validated was never appended after the socket closed " +
-            "— the handler abandoned handleCommand instead of draining it (C-36a)",
+            "— the handler abandoned handleCommand instead of draining it",
         );
       }
       await new Promise((resolve) => setTimeout(resolve, 10));
@@ -481,8 +481,9 @@ describe("websocket transport", () => {
     socketB.close();
   });
 
-  // General coverage for `turn_in_progress` (finding 8: it was the only
-  // `ServerErrorCode` with zero tests) on the simpler, same-socket path: a
+  // General coverage for `turn_in_progress` (otherwise the only
+  // `ServerErrorCode` with no test of its own) on the simpler, same-socket
+  // path: a
   // second message on the SAME connection while the first is still
   // resolving is also rejected, not queued (spec §Concurrency — a queued
   // stale click would land against a changed board).
