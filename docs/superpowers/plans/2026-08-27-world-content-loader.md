@@ -579,18 +579,12 @@ describe("the authored world", () => {
     expect(manifest.startingNodeId).toBe("arrival");
   });
 
-  it("parses every collection", () => {
-    expect(FactionDefinition.array().parse(readJson("factions.json"))).toHaveLength(2);
-    expect(LocationDefinition.array().parse(readJson("locations.json"))).toHaveLength(1);
-    expect(NpcDefinition.array().parse(readJson("npcs.json"))).toHaveLength(3);
-    expect(QuestNode.array().parse(readJson("arc.json"))).toHaveLength(5);
-  });
-
-  // A scope guard, not a claim about worlds in general. §4.7 sizes this world
-  // at one town, two factions, three NPCs and a five-node arc — "enough to
-  // prove the pipeline, not to be good". Growing it should be a deliberate
-  // act that edits this line, not something that happens while adding colour.
-  it("is still the deliberately tiny world §4.7 asked for", () => {
+  // Doubles as the scope guard, which is why it asserts exact counts rather
+  // than `toBeGreaterThan`. §4.7 sizes this world at one town, two factions,
+  // three NPCs and a five-node arc — "enough to prove the pipeline, not to be
+  // good". Growing it should be a deliberate act that edits these numbers,
+  // not something that happens while adding colour.
+  it("parses every collection, and is still deliberately tiny", () => {
     expect(LocationDefinition.array().parse(readJson("locations.json"))).toHaveLength(1);
     expect(FactionDefinition.array().parse(readJson("factions.json"))).toHaveLength(2);
     expect(NpcDefinition.array().parse(readJson("npcs.json"))).toHaveLength(3);
@@ -1166,9 +1160,9 @@ Create `data/world/fixtures/broken-references/world.json`:
     "nameEnglish": "Twin the Second",
     "nameHebrew": "התאום השני",
     "grammaticalGender": "feminine",
-    "locationId": "somewhere",
+    "locationId": "also-no-such-place",
     "factionId": "alpha",
-    "descriptionEnglish": "A duplicate id. Dropped during indexing, so its own fields are valid on purpose — a dropped entry is not cross-referenced."
+    "descriptionEnglish": "A duplicate id. Its locationId is ALSO dangling, and must never be reported — a dropped entry is not cross-referenced, and that absence is what proves first-wins."
   }
 ]
 ```
@@ -1209,6 +1203,31 @@ import { WorldContentError } from "./index.js"; // add to the existing import
 
 const BROKEN = join(dataDir(join("data", "world")), "fixtures", "broken-references");
 
+/**
+ * The problems `loadWorld` threw for `dir`, or a loud failure if it did not
+ * throw at all.
+ *
+ * `expect.unreachable` runs OUTSIDE the try/catch on purpose. Called inside
+ * it, its own AssertionError lands in the very same `catch` as the real
+ * assertions and gets asserted against instead — the must-fix minor already
+ * recorded at `apps/server/src/config.test.ts:36`. The `caught` flag is that
+ * file's fix, stated once here so the twelve assertions below are one line
+ * each.
+ */
+function problemsFrom(dir: string): readonly string[] {
+  let caught: unknown;
+  let threw = false;
+  try {
+    loadWorld(dir);
+  } catch (error) {
+    threw = true;
+    caught = error;
+  }
+  if (!threw) expect.unreachable(`loadWorld(${dir}) should have thrown`);
+  expect(caught).toBeInstanceOf(WorldContentError);
+  return (caught as WorldContentError).problems;
+}
+
 describe("loadWorld refusing broken content", () => {
   // The strongest single statement that the checks below do not false-positive.
   it("accepts the real authored world", () => {
@@ -1231,26 +1250,20 @@ describe("loadWorld refusing broken content", () => {
     'quest node start precondition references unknown quest node "no-such-node"',
     'quest node start effect references unknown faction "no-such-faction"',
   ])("names: %s", (problem) => {
-    try {
-      loadWorld(BROKEN);
-      expect.unreachable("loadWorld should have thrown");
-    } catch (error) {
-      expect(error).toBeInstanceOf(WorldContentError);
-      expect((error as WorldContentError).problems).toContain(problem);
-    }
+    expect(problemsFrom(BROKEN)).toContain(problem);
   });
 
-  // A duplicate is dropped during indexing, so the entry that survives is the
-  // first one — which is why the fixture puts both dangling ids on it.
+  // A duplicate is dropped during indexing, so the surviving entry is the
+  // FIRST one. Both twins carry a dangling locationId, and only the first
+  // one's is reported — asserting the absence of the second's is what makes
+  // this test fail if indexing ever started cross-referencing dropped
+  // entries, or started keeping the last entry instead of the first.
   it("keeps the first of two entries sharing an id", () => {
-    try {
-      loadWorld(BROKEN);
-      expect.unreachable("loadWorld should have thrown");
-    } catch (error) {
-      expect((error as WorldContentError).problems).not.toContain(
-        'npc twin references unknown faction "alpha"',
-      );
-    }
+    const problems = problemsFrom(BROKEN);
+    expect(problems).toContain('npc twin references unknown location "no-such-place"');
+    expect(problems).not.toContain(
+      'npc twin references unknown location "also-no-such-place"',
+    );
   });
 
   // Every file in the fixture parses cleanly — these are defects zod cannot
@@ -1258,12 +1271,11 @@ describe("loadWorld refusing broken content", () => {
   // throws a ZodError instead, the fixture has drifted into being malformed
   // and has stopped testing cross-referencing at all.
   it("throws for defects zod cannot see, not for a malformed file", () => {
-    try {
-      loadWorld(BROKEN);
-      expect.unreachable("loadWorld should have thrown");
-    } catch (error) {
-      expect((error as Error).name).toBe("WorldContentError");
-    }
+    // `problemsFrom` asserts the error is a WorldContentError and not a
+    // ZodError, which is the real claim: every file in the fixture parses
+    // cleanly, so if this ever came back a ZodError the fixture would have
+    // drifted into being malformed and stopped testing cross-referencing.
+    expect(problemsFrom(BROKEN).length).toBeGreaterThan(0);
   });
 });
 ```
@@ -1420,7 +1432,25 @@ Then replace the body of `loadWorld` between the five `.parse` calls and the `co
   if (problems.length > 0) throw new WorldContentError(dir, problems);
 ```
 
-The `const world` literal then uses the local `factions` / `locations` / `npcs` / `questNodes` / `relations` bindings instead of building the `Map`s inline, and `cache.set` stays where it is — the cache is only written on a clean load, so a broken directory throws on every call rather than only the first.
+Then replace the `const world` literal so it uses the local bindings instead of building the `Map`s inline:
+
+```ts
+  const world: AuthoredWorld = {
+    worldId: manifest.worldId,
+    startingDay: manifest.startingDay,
+    startingNodeId: manifest.startingNodeId,
+    factions,
+    locations,
+    npcs,
+    questNodes,
+    relations,
+  };
+
+  cache.set(dir, world);
+  return world;
+```
+
+`cache.set` stays below the throw, which is what makes a broken directory throw on every call rather than only the first.
 
 - [ ] **Step 5: Run the tests to verify they pass**
 
@@ -1498,45 +1528,28 @@ describe("loadWorld refusing faction relations", () => {
     'no faction relation declared for "alpha" and "gamma"',
     'no faction relation declared for "beta" and "gamma"',
   ])("names: %s", (problem) => {
-    try {
-      loadWorld(BROKEN);
-      expect.unreachable("loadWorld should have thrown");
-    } catch (error) {
-      expect((error as WorldContentError).problems).toContain(problem);
-    }
+    expect(problemsFrom(BROKEN)).toContain(problem);
   });
 
   // The complete set, so a check that starts reporting something extra —
   // or stops reporting something — fails here rather than passing quietly.
   it("reports exactly these twelve problems and no others", () => {
-    try {
-      loadWorld(BROKEN);
-      expect.unreachable("loadWorld should have thrown");
-    } catch (error) {
-      expect(new Set((error as WorldContentError).problems)).toEqual(
-        new Set([
-          'duplicate npc id "twin"',
-          'world.json startingNodeId references unknown quest node "no-such-node"',
-          'npc twin references unknown location "no-such-place"',
-          'npc twin references unknown faction "no-such-faction"',
-          'quest node start edge references unknown quest node "no-such-node"',
-          'quest node start precondition references unknown quest node "no-such-node"',
-          'quest node start effect references unknown faction "no-such-faction"',
-          'duplicate faction relation for "beta" and "alpha"',
-          'faction relation alpha/no-such-faction references unknown faction "no-such-faction"',
-          "faction relation gamma/gamma relates a faction to itself",
-          'no faction relation declared for "alpha" and "gamma"',
-          'no faction relation declared for "beta" and "gamma"',
-        ]),
-      );
-    }
-  });
-
-  // With two factions the real world declares one pair, which is the whole
-  // exhaustive requirement. If this ever fails, the completeness rule has
-  // started firing on valid content.
-  it("accepts the real world's single declared pair", () => {
-    expect(loadWorld().relations.size).toBe(1);
+    expect(new Set(problemsFrom(BROKEN))).toEqual(
+      new Set([
+        'duplicate npc id "twin"',
+        'world.json startingNodeId references unknown quest node "no-such-node"',
+        'npc twin references unknown location "no-such-place"',
+        'npc twin references unknown faction "no-such-faction"',
+        'quest node start edge references unknown quest node "no-such-node"',
+        'quest node start precondition references unknown quest node "no-such-node"',
+        'quest node start effect references unknown faction "no-such-faction"',
+        'duplicate faction relation for "beta" and "alpha"',
+        'faction relation alpha/no-such-faction references unknown faction "no-such-faction"',
+        "faction relation gamma/gamma relates a faction to itself",
+        'no faction relation declared for "alpha" and "gamma"',
+        'no faction relation declared for "beta" and "gamma"',
+      ]),
+    );
   });
 });
 ```
