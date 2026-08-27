@@ -129,10 +129,9 @@ const base = {
   shieldEquipped: false,
 };
 
-// The brief's `only()` returned `{ actionId: string } | undefined`, so
-// every `.attackBonus` / `.damage` / range access below was a TS2339 compile
-// error. Made generic over the element type instead — every call site and
-// assertion below is byte-identical to the brief.
+// Generic over the element type: an `only()` returning
+// `{ actionId: string } | undefined` would make every `.attackBonus` /
+// `.damage` / range access below a TS2339 compile error.
 const only = <T extends { actionId: string }>(
   weaponId: string,
   attacks: readonly T[],

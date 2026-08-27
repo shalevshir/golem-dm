@@ -39,13 +39,11 @@ function uuids(): () => string {
 }
 
 /**
- * A tactical double good enough for Task 10 to build on: it proposes a legal
- * Dodge for whichever actor it is asked about. C-15: the plan's original
- * `portsWith` set `tactical` to a stub that always rejects, on the theory
- * that nothing in Task 9's cases reaches it — true today, but the moment
- * Task 10 appends the enemy loop after every successful player turn, every
- * one of those cases reaches this port. A working default means Task 10
- * does not have to revisit every Task 9 test to fix `portsWith`.
+ * A tactical double that proposes a legal Dodge for whichever actor it is
+ * asked about. Deliberately a working default rather than an always-rejecting
+ * stub: `runEnemyTurns` fires after every successful player turn, so every
+ * test that plays a turn reaches this port — including the ones that care
+ * about nothing but the player's own half of the turn.
  */
 function defaultTactical(): TacticalAgent {
   return {
@@ -152,13 +150,13 @@ function syntheticEvent(sequence: number): GameEvent {
 
 /**
  * A tactical port that proposes exactly the given turns, one per call to
- * `proposeTurn`, in order. Every element must be a full `ExecuteTurn` — C-1:
+ * `proposeTurn`, in order. Every element must be a full `ExecuteTurn`:
  * `tacticalRationaleEnglish` is required, not optional, so an untyped
  * fixture would fail at runtime and a typed one fails `pnpm typecheck`.
  *
- * C-2: `TokenUsage` is `{ promptTokens, completionTokens, totalTokens }`
- * (`packages/agents/src/providers/usage.ts`), not `{ inputTokens,
- * outputTokens }`.
+ * `TokenUsage` is `{ promptTokens, completionTokens, totalTokens }`
+ * (`packages/agents/src/providers/usage.ts`) — there are no `inputTokens` /
+ * `outputTokens` fields.
  */
 function agentProposing(turns: readonly ExecuteTurn[]): TacticalAgent {
   const port = createFakePort({
@@ -177,9 +175,9 @@ function agentProposing(turns: readonly ExecuteTurn[]): TacticalAgent {
 
 /**
  * goblin-a's first proposal moves to an off-grid tile — illegal on any
- * geometry, unlike the brief's original "attack a target 45 ft away"
- * fixture, which stopped being illegal once C-14 moved goblin-ambush's
- * combatants into melee range of each other. The agent's own retry-once
+ * geometry. An "attack a target out of reach" fixture would not be:
+ * `goblin-ambush` spawns its combatants within melee reach of one another,
+ * so such an attack is legal there. The agent's own retry-once
  * loop (step 7a, `packages/agents/src/tactical/index.ts`) recovers with a
  * legal dodge; goblin-b then dodges cleanly on the first attempt.
  */
@@ -340,7 +338,7 @@ function abortingTactical(): TacticalAgent {
  * Resolves with a legal dodge after `delayMs` — never aborted, just slow.
  * Used to prove `enemyTurn` shares ONE deadline between the tactical call
  * and the narration that follows it, rather than giving each its own fresh
- * `turnTimeoutMs` (the review's IMPORTANT finding): a tactical call that
+ * `turnTimeoutMs`: a tactical call that
  * eats most of the budget should leave the following narration almost none
  * of it, not a brand new window.
  */
@@ -442,14 +440,14 @@ describe("handleCommand — join", () => {
     expect(frames[1]?.type).toBe("turn_affordances");
   });
 
-  // C-16: the spec's §Reconnect says "without resumeFrom, OR when it predates
+  // The spec's §Reconnect says "without resumeFrom, OR when it predates
   // the retained log: campaign_state at the newest snapshot, then the events
   // since [the snapshot]". This is the second branch — it is what makes the
   // schema's own claim about reconnect behaviour true. Simulated by writing
   // straight to the store (bypassing handleCommand) so the test can pin exact
   // sequence numbers rather than depending on how many events one dodge turn
   // produces.
-  it("falls back to the newest snapshot when resumeFrom predates the log (C-16)", async () => {
+  it("falls back to the newest snapshot when resumeFrom predates the log", async () => {
     const store = createInMemoryEventStore();
     const campaign = await freshCampaign(store);
 
@@ -529,12 +527,11 @@ describe("handleCommand — structured action", () => {
   // `portsWith`, so nothing about a successful dodge is nondeterministic;
   // there is no excuse for a weaker assertion here.
   //
-  // C-18: a "successful turn" now cascades — the hero's own six events are
-  // immediately followed by the hostile sweep (Task 10's `runEnemyTurns`),
-  // so the exact sequence is hero's six plus five each for goblin-a and
-  // goblin-b (no `player_input`; only a human client sends that). This test
-  // predates the enemy loop; its assertion is widened to match, not
-  // weakened — it is still the full sequence, not a prefix.
+  // A "successful turn" cascades — the hero's own six events are immediately
+  // followed by the hostile sweep (`runEnemyTurns`), so the exact sequence is
+  // hero's six plus five each for goblin-a and goblin-b (no `player_input`;
+  // only a human client sends that). The assertion covers the whole cascade
+  // rather than the hero's own prefix.
   it("appends the exact event type sequence for a successful turn", async () => {
     const store = createInMemoryEventStore();
     const campaign = await freshCampaign(store);
@@ -639,7 +636,7 @@ describe("handleCommand — structured action", () => {
   // `portsWith` happens to need no trimming, so this only catches a real
   // regression here, not a quirk of that one port.
   //
-  // C-18: one hero dodge now yields three `narrative_emitted` events (the
+  // One hero dodge yields three `narrative_emitted` events (the
   // hero's own, then each hostile's), each with its own `streamId`. The
   // guarantee is per-stream, so this checks every one of them against only
   // its own `narrative_token` frames rather than the whole turn's tokens.
@@ -672,13 +669,11 @@ describe("handleCommand — structured action", () => {
     expect((await store.readSince("s1", GENESIS_SEQUENCE)).length).toBe(afterFirst);
   });
 
-  // The brief's original illegal-turn fixture (an "attack" on goblin-a) relied
-  // on goblin-ambush's old geometry, ~45 ft apart, so target_out_of_reach
-  // always fired. Task 8's C-14 fix moved the goblins to melee range of the
-  // hero so the encounter is actually fightable — which means that same
-  // attack is now legal. Per the brief's own fallback note, use an
-  // unambiguously illegal turn instead: a movement segment to an off-grid
-  // tile, which is illegal on any geometry.
+  // `goblin-ambush` spawns the goblins within melee reach of the hero, so the
+  // encounter is actually fightable and an "attack goblin-a" turn is LEGAL
+  // there — it cannot stand in for an illegal one. This uses a movement
+  // segment to an off-grid tile instead: illegal on any geometry, whatever
+  // the encounter's spawn distances become.
   it("rejects an illegal turn without advancing the turn", async () => {
     const store = createInMemoryEventStore();
     const campaign = await freshCampaign(store);
@@ -703,8 +698,8 @@ describe("handleCommand — structured action", () => {
     const rejected = frames.find((each) => each.type === "rejected");
     if (rejected === undefined) throw new Error("Expected a rejected frame");
     // Pinned to the real engine reason, not just "some rejection happened":
-    // an off-grid tile is illegal on any geometry, so unlike the brief's
-    // original out-of-reach fixture, C-14 cannot silently un-break this by
+    // an off-grid tile is illegal on any geometry, so a later change to
+    // `goblin-ambush`'s spawn distances cannot silently un-break this test by
     // making the proposed turn legal again.
     expect(rejected.reasons).toEqual(["destination_off_grid"]);
     expect(encounterOf(campaign).currentActorIndex).toBe(before);
@@ -731,8 +726,8 @@ describe("handleCommand — structured action", () => {
     const frames = await drain(handleCommand(campaign, dodge("hero"), portsWith(store)));
 
     // An existing code, not a new one. `not_your_turn` is already what a
-    // player gets for acting after a fight has ended (`state/conclusion.ts`,
-    // C-37) and the client already treats it as a stale click it must not
+    // player gets for acting after a fight has ended (`state/conclusion.ts`)
+    // and the client already treats it as a stale click it must not
     // surface (`ErrorBanner.tsx`) — which is exactly right here, since a
     // campaign with no board pushes no affordances to click in the first
     // place.
@@ -752,7 +747,7 @@ describe("handleCommand — structured action", () => {
     expect(campaign.nextSequence).toBe(1);
   });
 
-  // C-29: the store throws two error classes on a bad append, neither with a
+  // The store throws two error classes on a bad append, neither with a
   // dedicated ServerErrorCode — both must fold onto internal_error. Simulated
   // by pre-occupying the sequence the turn's own player_input event would
   // take, the way a concurrent writer on the same campaign would.
@@ -767,7 +762,8 @@ describe("handleCommand — structured action", () => {
     // does not advance the turn, so control is still the hero's, and the
     // client has already nulled its affordances against the frames `emit`
     // streamed before the throw — without the trailing frame the board goes
-    // inert on the player's own turn (the C-1 soft-lock, rarer route).
+    // inert on the player's own turn — the inert-board soft-lock, by a
+    // rarer route.
     expect(frames[0]).toEqual({
       type: "error",
       clientMessageId: "c1",
@@ -789,7 +785,7 @@ describe("handleCommand — structured action", () => {
   // The third class, new with a durable store: a dropped connection, a lock
   // or statement timeout, a deadlock, or a stored row that no longer parses.
   // Unhandled it reaches ws.ts's catch-all, which sends internal_error and
-  // restores nothing — the C-1 soft-lock by a third route.
+  // restores nothing — the same inert-board soft-lock by a third route.
   it("turns an EventStoreUnavailableError from the store into an internal_error frame", async () => {
     const store = createInMemoryEventStore();
     const campaign = await freshCampaign(store);
@@ -817,8 +813,9 @@ describe("handleCommand — structured action", () => {
 });
 
 describe("handleCommand — snapshot cadence", () => {
-  // `SNAPSHOT_EVERY`'s only production use is inside `emit`; the C-16 test
-  // above writes its snapshot by hand via `store.putSnapshot` and proves
+  // `SNAPSHOT_EVERY`'s only production use is inside `emit`; the
+  // resumeFrom-predates-the-log test above writes its snapshot by hand via
+  // `store.putSnapshot` and proves
   // nothing about the pipeline actually calling it. Fast-forward the
   // campaign's own sequence counter so the hero's dodge turn's six events
   // land on 45..50 and the last one crosses the boundary.
@@ -827,8 +824,8 @@ describe("handleCommand — snapshot cadence", () => {
   // — it does not require a contiguous log — so this is a legitimate way to
   // reach the boundary without a 44-turn setup.
   //
-  // C-18: the hero's turn is immediately followed by the hostile sweep
-  // (Task 10), which keeps advancing `campaign.state` past sequence 50
+  // The hero's turn is immediately followed by the hostile sweep, which
+  // keeps advancing `campaign.state` past sequence 50
   // within this same `handleCommand` call — by the time `drain` resolves,
   // `campaign.state` reflects the whole cascade, not just the moment the
   // snapshot was taken. So the expected state is captured live, the instant
@@ -968,13 +965,13 @@ describe("handleCommand — enemy turns", () => {
     expect(rejected[0]?.payload).toMatchObject({ actorId: "goblin-a", stage: "engine" });
   });
 
-  // C-20: the brief's original version of this test asserted only
-  // `validated.toHaveLength(3)` against a scenario that produced no
-  // rejections at all — it checked nothing about stamping. This drives a
-  // real rejection (goblin-a's first proposal is an off-grid move, illegal
-  // on any geometry) and asserts the resulting `action_rejected` payload
-  // names the model that actually produced it, read from the routing the
-  // ports were configured with rather than a hardcoded literal —
+  // This drives a REAL rejection (goblin-a's first proposal is an off-grid
+  // move, illegal on any geometry) rather than asserting a bare count of
+  // validated turns: in a scenario that produces no rejection at all such a
+  // count passes while checking nothing about stamping. It asserts the
+  // resulting `action_rejected` payload names the model that actually
+  // produced it, read from the routing the ports were configured with
+  // rather than a hardcoded literal —
   // `DEFAULT_MODEL_ROUTING.tactical` is a placeholder step 7b's benchmark
   // will change.
   it("stamps action_rejected events with the model that produced them", async () => {
@@ -1105,7 +1102,8 @@ describe("handleCommand — enemy turns", () => {
   });
 });
 
-// Important 2 (task 14 review round 2): C-23's "must actually emit" had
+// The per-turn metrics requirement (`apps/server/CLAUDE.md`: tokens in/out,
+// latency, retries, cost "emitted as structured logs from day one") once
 // rested entirely on code reading — no test constructed a `TurnPorts` with
 // `metrics` and drove a turn through it. A `reduce` that summed
 // `promptTokens` into `completionTokens`, or a call site placed on a branch
@@ -1148,9 +1146,10 @@ describe("handleCommand — tactical metrics", () => {
     expect(recorded.map((each) => each.actorId)).toEqual(["goblin-a", "goblin-b"]);
 
     for (const metrics of recorded) {
-      // `agentProposing`'s fixture (C-2) scripts exactly this usage per
-      // billed attempt, and each goblin's proposed dodge is legal on the
-      // first try — one billed attempt, zero retries. Distinct
+      // `agentProposing`'s fixture scripts exactly this `TokenUsage`
+      // (`{ promptTokens, completionTokens, totalTokens }`) per billed
+      // attempt, and each goblin's proposed dodge is legal on the first try
+      // — one billed attempt, zero retries. Distinct
       // prompt/completion/total values (10/5/15) mean a transposition bug
       // (e.g. summing promptTokens into completionTokens) shows up as a
       // wrong number here rather than passing by coincidence.
@@ -1427,7 +1426,7 @@ describe("handleCommand — turn timeout", () => {
     expect(encounterOf(campaign).round).toBe(2);
   }, 10_000);
 
-  // The review's IMPORTANT finding: the tactical call and the narration
+  // The tactical call and the narration
   // that follows it must share ONE 10s budget, not each get their own —
   // apps/server/CLAUDE.md's "hard turn timeout 10s" and the spec's "A 10s
   // hard cap wraps the narrative stream and the tactical call" both read as
@@ -1438,8 +1437,8 @@ describe("handleCommand — turn timeout", () => {
   // budget's worth of wall-clock time, not the ~1.5-2x a pair of
   // independent budgets per enemy turn would take.
   //
-  // Review round 3: `turnTimeoutMs` and `slowTactical`'s delay were scaled
-  // up 2.5x from the original 80ms/60ms (to 200ms/150ms), and the
+  // `turnTimeoutMs` and `slowTactical`'s delay are scaled up 2.5x from an
+  // initial 80ms/60ms (to 200ms/150ms), and the
   // threshold with them — not because the pipeline needs a bigger budget,
   // but because this is a wall-clock assertion and its discrimination is a
   // RATIO (shared band vs. doubled band), not an absolute gap. At 80ms the
@@ -1466,12 +1465,12 @@ describe("handleCommand — turn timeout", () => {
       turnTimeoutMs: 200,
     };
 
-    // Review round 2: this used to time the whole `drain(...)`, but since
-    // Task 4 that drain ends with a `turn_affordances` frame — pure
-    // computation (`affordancesFor` probing ~143 candidate tiles through
-    // `validateExecuteTurn`) that no deadline governs. Folding that fixed
-    // ~100ms of real work into the budget-sharing assertion erased the
-    // margin the comment above describes. Consuming the generator by hand
+    // Timing the whole `drain(...)` would be wrong: that drain ends with a
+    // `turn_affordances` frame — pure computation (`affordancesFor` probing
+    // ~143 candidate tiles through `validateExecuteTurn`) that no deadline
+    // governs. Folding that fixed ~100ms of real work into the budget-sharing
+    // assertion erases the margin the comment above describes. Consuming the
+    // generator by hand
     // and stamping a timestamp only on frames the turn timeout actually
     // governs — i.e. everything except `turn_affordances` — excludes that
     // trailing computation by construction, so this keeps measuring the
@@ -1500,7 +1499,7 @@ describe("handleCommand — turn timeout", () => {
     // goblin-b (~200ms) is roughly 600ms. Two independent budgets per enemy
     // turn would instead be hero (~200ms) + goblin-a (150 + 200 = 350ms) +
     // goblin-b (350ms), or roughly 900ms. Measured wall-clock reality runs
-    // higher than either estimate (see the "Review round 3" comment above
+    // higher than either estimate (see the budget-scaling comment above
     // for the actual figures and the real headroom the 750ms threshold
     // gives against each scenario).
     expect(elapsed).toBeLessThan(750);
@@ -1523,7 +1522,7 @@ describe("handleCommand — narration degradation ladder", () => {
     expect(emitted.source).toBe("model");
     expect(emitted.text).toBe(tokens.join(""));
     expect(emitted.text).toBe("אלדד פוגע בגובלין לוחם.");
-    // Fix round 1, Finding 2: this is the `model` rung's own promptVersion
+    // The `model` rung's own promptVersion
     // check — see the "stamps the prompt version" test's comment below for
     // why it isn't checked only there.
     expect(emitted.promptVersion).toBe(NARRATIVE_PROMPT_VERSION);
@@ -1538,7 +1537,7 @@ describe("handleCommand — narration degradation ladder", () => {
     expect(emitted.text).not.toMatch(/[a-zA-Z]/);
   });
 
-  // Fix round 1, Finding 3: whitespace is not the same as nothing —
+  // Whitespace is not the same as nothing —
   // `narrate` (pipeline.ts) checks `text.trim() === ""`, not `text === ""`,
   // specifically so a provider that emits only `" "`/`"\n"` still falls back
   // rather than being treated as a (nonsensical) complete narration.
@@ -1560,12 +1559,12 @@ describe("handleCommand — narration degradation ladder", () => {
     expect(emitted.text).toBe(tokens.join(""));
     expect(emitted.text).toContain("… ");
     expect(emitted.text.trimEnd().endsWith(".")).toBe(true);
-    // Fix round 1, Finding 2: the `completed` rung's own promptVersion check.
+    // The `completed` rung's own promptVersion check.
     expect(emitted.promptVersion).toBe(NARRATIVE_PROMPT_VERSION);
   });
 
-  // Fix round 1, Finding 1: `NARRATION_TERMINATORS` (pipeline.ts) is
-  // `[".", "!", "?", "…"]`, and only "." had a test. A later "simplify" to
+  // `NARRATION_TERMINATORS` (pipeline.ts) is
+  // `[".", "!", "?", "…"]`, and covering only "." is not enough. A later "simplify" to
   // e.g. `/[.!?]$/` would silently drop "…" and nothing here would notice —
   // a model narration that legitimately trails off ("אלדד מהסס…") would then
   // be misclassified `completed`, get a doubled ellipsis appended, and be
@@ -1580,8 +1579,8 @@ describe("handleCommand — narration degradation ladder", () => {
   });
 
   // This covers the `deterministic` rung; the `model` and `completed` rungs
-  // are covered by their own promptVersion assertions above (Fix round 1,
-  // Finding 2) rather than re-running a turn here — every payload every
+  // are covered by their own promptVersion assertions above rather than
+  // re-running a turn here — every payload every
   // rung can produce is checked, split across the tests that already build
   // each one, instead of duplicating three `runOneTurn` calls in one test.
   it("stamps the prompt version on every narration whatever produced it", async () => {
@@ -1714,13 +1713,13 @@ describe("handleCommand — turn_affordances", () => {
       handleCommand(campaign, { type: "join", campaignId: "s1" }, portsWith(store)),
     );
     expect(frames.some((each) => each.type === "turn_affordances")).toBe(false);
-    // Review round 1, item 4: pin that the join still produced its normal
+    // Pin that the join still produced its normal
     // response — absence-only would also pass a join that yields nothing.
     expect(frames.at(-1)?.type).toBe("campaign_state");
   });
 
-  // Review round 1, item 1: the original `if (index !== -1)` guard let this
-  // test pass vacuously — deleting `yield* playerAffordances();` from the
+  // An `if (index !== -1)` guard here would let this test pass vacuously —
+  // deleting `yield* playerAffordances();` from the
   // `structured_action` case left the whole suite green, because nothing
   // else in this file drives a `structured_action` far enough to observe
   // the second yield point (the e2e reconnect test only covers `join`).

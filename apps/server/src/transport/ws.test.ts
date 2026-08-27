@@ -31,7 +31,7 @@ async function startServer(overrides?: { narrative?: NarrativePort }) {
     n += 1;
     return `00000000-0000-4000-8000-${String(n).padStart(12, "0")}`;
   };
-  // C-1/C-2: `ExecuteTurn.tacticalRationaleEnglish` has no `.optional()` and
+  // `ExecuteTurn.tacticalRationaleEnglish` has no `.optional()` and
   // `TokenUsage` is `{ promptTokens, completionTokens, totalTokens }`, not
   // `{ inputTokens, outputTokens }` — see `packages/agents/src/providers/
   // testing/fake-port.ts` and `packages/schemas/src/actions.ts`. Getting
@@ -115,7 +115,7 @@ function framesUntil(
       reject(new Error(`timed out after ${String(frames.length)} frames`));
     }, FRAME_TIMEOUT_MS);
     function onMessage(data: Buffer | string): void {
-      // Important 3: parsed against the real schema, not cast — the branch
+      // Parsed against the real schema, not cast — the branch
       // exists to freeze this wire contract, so a frame that violates
       // `ServerFrame` must fail the test, not silently satisfy `.type`
       // checks the way `JSON.parse(...) as ServerFrame` would let it.
@@ -142,7 +142,7 @@ function framesUntil(
 
 /**
  * Send `join` and resolve once the server acks with its first reply.
- * Bounded and diagnostic (Minor 7, task 14 round 2): the ad hoc
+ * Bounded and diagnostic: the ad hoc
  * `new Promise<void>((resolve) => socket.once("message", resolve))` this
  * replaces had no timeout and no reject path, so a regression here used to
  * surface as vitest's generic timeout instead of a message naming what
@@ -318,9 +318,9 @@ describe("websocket transport", () => {
     socket.close();
   });
 
-  // Important 1 (task 14 review round 2): C-36a requires the transport to
-  // DRAIN `handleCommand` to completion, never abandon it mid-turn. Every
-  // test above passes even under the exact violation C-36a forbids:
+  // The transport must DRAIN `handleCommand` to completion, never abandon it
+  // mid-turn. Every test above passes even under the exact violation that
+  // rule forbids:
   //
   //   for await (const frame of handleCommand(...)) {
   //     send(frame);
@@ -335,7 +335,7 @@ describe("websocket transport", () => {
   // not from the socket: once the client closes there is nothing left to
   // receive frames on, but a compliant handler keeps the generator running
   // and keeps appending regardless.
-  it("keeps appending the enemy sweep after the client closes mid-turn (C-36a)", async () => {
+  it("keeps appending the enemy sweep after the client closes mid-turn", async () => {
     const { app, url, store } = await startServer();
     const campaignId = await createCampaignOver(app);
     const socket = await connect(url);
@@ -382,16 +382,16 @@ describe("websocket transport", () => {
       if (Date.now() > deadline) {
         throw new Error(
           "goblin-a's action_validated was never appended after the socket closed " +
-            "— the handler abandoned handleCommand instead of draining it (C-36a)",
+            "— the handler abandoned handleCommand instead of draining it",
         );
       }
       await new Promise((resolve) => setTimeout(resolve, 10));
     }
   });
 
-  // CRITICAL-1: the in-flight guard must be scoped to the CAMPAIGN, not the
-  // socket. Campaigns are shared across sockets on purpose (`http.ts`'s
-  // `live` cache — two WS connections onto the same campaign, Task 14), and
+  // The in-flight guard must be scoped to the CAMPAIGN, not the socket.
+  // Campaigns are shared across sockets on purpose (`http.ts`'s `live`
+  // cache — two WS connections onto the same campaign), and
   // `nextSequence`/`campaign.state` live on that one shared `Campaign` object,
   // advanced in place. A guard that lives per-socket (a `let busy = false`
   // closed over inside `app.get("/ws", ...)`) cannot see a second socket's
@@ -405,7 +405,7 @@ describe("websocket transport", () => {
   // suspended inside `narrate()` (pipeline.ts) well after `player_input` and
   // `action_validated`/`dice_rolled`/`state_delta_applied` have already been
   // appended and `currentActorIndex` still points at the hero (turn_advanced
-  // is the LAST event of a turn) — exactly the window the finding describes.
+  // is the LAST event of a turn) — exactly the window this test needs.
   // Socket B, joined to the SAME campaign, sends its own hero action inside
   // that window.
   //
@@ -415,7 +415,7 @@ describe("websocket transport", () => {
   // A already passed — it gets played as a real turn instead of
   // `turn_in_progress`, and the log ends up with two `player_input` events
   // for "hero" in the same round.
-  it("rejects a same-campaign command from a SECOND socket while the first is mid-turn, without duplicating the turn in the log (CRITICAL-1)", async () => {
+  it("rejects a same-campaign command from a SECOND socket while the first is mid-turn, without duplicating the turn in the log", async () => {
     const { app, url, store } = await startServer({ narrative: delayedNarrative(400) });
     const campaignId = await createCampaignOver(app);
 
@@ -481,8 +481,9 @@ describe("websocket transport", () => {
     socketB.close();
   });
 
-  // General coverage for `turn_in_progress` (finding 8: it was the only
-  // `ServerErrorCode` with zero tests) on the simpler, same-socket path: a
+  // General coverage for `turn_in_progress` (otherwise the only
+  // `ServerErrorCode` with no test of its own) on the simpler, same-socket
+  // path: a
   // second message on the SAME connection while the first is still
   // resolving is also rejected, not queued (spec §Concurrency — a queued
   // stale click would land against a changed board).
@@ -539,14 +540,14 @@ describe("websocket transport", () => {
     socket.close();
   });
 
-  // Post-review regression fix: `join` must NOT compete for the per-campaign
-  // lock. `join` (pipeline.ts) is read-only — latestSnapshot/readSince,
-  // yielding campaign_state/event frames, never `emit` — so it cannot itself
-  // duplicate a turn, the only hazard CRITICAL-1's lock exists to prevent.
-  // Claiming the lock for `join` regressed the spec's own §Reconnect
-  // requirement: C-36a keeps a turn's `handleCommand` draining — lock held —
-  // for the whole hero turn plus the entire enemy sweep even after the
-  // originating socket is gone, so a client that drops mid-turn and
+  // `join` must NOT compete for the per-campaign lock. `join` (pipeline.ts)
+  // is read-only — latestSnapshot/readSince, yielding campaign_state/event
+  // frames, never `emit` — so it cannot itself duplicate a turn, the only
+  // hazard that lock exists to prevent. Claiming the lock for `join` breaks
+  // the spec's own §Reconnect requirement: a turn's `handleCommand` keeps
+  // draining — lock held — for the whole hero turn plus the entire enemy
+  // sweep even after the originating socket is gone, so a client that drops
+  // mid-turn and
   // reconnects would have its OWN `join` rejected with `turn_in_progress`
   // instead of getting the `campaign_state` restore `protocol.ts`'s
   // `JoinMessage` doc-comment promises.

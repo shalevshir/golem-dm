@@ -47,10 +47,10 @@ function event(
   };
 }
 
-// C-12: the brief's four-field `Combatant` fixture cannot parse — `Combatant`
-// requires `speedFeet`, `maxHp`, `currentHp` and `armorClass` with no
-// defaults, and defaults nine more fields that zod would materialise onto
-// the output, breaking a `toEqual` against the bare input. This factory
+// A partial `Combatant` fixture cannot parse: `Combatant` requires
+// `speedFeet`, `maxHp`, `currentHp` and `armorClass` with no defaults, and
+// defaults nine more fields that zod materialises onto the output, breaking
+// a `toEqual` against the bare input. This factory
 // builds a complete fixture (shape copied from
 // `packages/rules-engine/src/combat/test-fixtures.ts`); every assertion
 // below that cares about shape compares against the *parsed* value
@@ -136,12 +136,11 @@ describe("reduce", () => {
     expect(boardOf(next).round).toBe(2);
   });
 
-  // Regression for the defect Task 11's replay properties caught:
-  // `applyTurn` sets `actionEconomy: plan.economyAfter` on whoever just
-  // acted, spending it, and nothing used to clear it again — so a
-  // combatant's second-ever turn was rejected `action_already_used`
-  // forever, and no campaign could ever complete a second round (see this
-  // task's report). `startTurn()` is the SRD's "fresh economy for a new
+  // Regression guard: `applyTurn` sets `actionEconomy: plan.economyAfter` on
+  // whoever just acted, spending it. Without something clearing it again a
+  // combatant's second-ever turn is rejected `action_already_used` forever,
+  // and no campaign can complete a second round.
+  // `startTurn()` is the SRD's "fresh economy for a new
   // turn" — mirrors `tools/sim/src/engine/encounter.ts`'s reset at the same
   // logical moment.
   const SPENT_ECONOMY = {
@@ -242,10 +241,8 @@ describe("reduce", () => {
     expect(withActors).toEqual(before);
   });
 
-  // Fix 3's two new refusals, plus the parse each bracket case now runs.
-  // Deliberately narrow — the broader bracket-invariant coverage (combat
-  // outside a bracket, a second encounter_started, resolve clearing the
-  // bracket) is plan Task 6, not this fix.
+  // The two bracket-id refusals, plus the payload parse each bracket case
+  // runs.
   it("throws when encounter_resolved names a different encounter than the one open", () => {
     // `base`'s open encounter is "e1"; this event closes "e2" instead — the
     // same corrupt-log class `resolveEncounter` itself cannot produce (it
@@ -320,9 +317,9 @@ describe("reduce", () => {
     // Non-overlap is what makes `encounter: EncounterState | null` correct
     // rather than a map keyed by encounter id: at most one bracket runs at
     // a time, so a second `encounter_started` while one is open is a
-    // corrupt log, not a second fight starting. The payload is valid —
-    // unlike Run 1's malformed-payload test — so the already-open guard is
-    // the only thing that can throw here.
+    // corrupt log, not a second fight starting. The payload here is valid,
+    // unlike the malformed-payload cases above, so the already-open guard is
+    // the only thing that can throw.
     const secondStart = event(18, "encounter_started", { encounterId: "e2" });
     expect(() => reduce(base, secondStart)).toThrow(
       /names encounter e2, but encounter e1 is already open/,

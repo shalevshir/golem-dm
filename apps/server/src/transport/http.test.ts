@@ -47,13 +47,12 @@ describe("POST /campaigns", () => {
   });
 
   it("appends nothing to the store for an unknown encounterId", async () => {
-    // Fix 2 regression guard: before the fix, `createCampaign` appended
-    // `campaign_started` before `buildEncounterById` ever ran inside
-    // `startEncounter`, so an unknown id still wrote a durable orphan
-    // `game_events` row for a campaign id nobody was ever given. The 404
-    // assertion above does not discriminate that bug on its own — the
-    // endpoint already returned 404 before this fix too — so this asserts
-    // the append-nothing half directly against the store.
+    // `createCampaign` appends `campaign_started` unconditionally, so unless
+    // `create` validates the encounter id BEFORE calling it, an unknown id
+    // still writes a durable orphan `game_events` row for a campaign id
+    // nobody is ever given. The 404 assertion above cannot discriminate that
+    // on its own — the endpoint answers 404 either way — so this asserts the
+    // append-nothing half directly against the store.
     const { app, store } = appWith();
     const appendSpy = vi.spyOn(store, "append");
 
@@ -88,7 +87,7 @@ describe("POST /campaigns", () => {
     "responds 500 for any error other than UnknownEncounterError, even one whose " +
       "message starts with the same words",
     async () => {
-      // Guards the C-34 fix itself: a handler that detected the 404 case with
+      // Guards the 404 discrimination itself: a handler that detected it with
       // `message.startsWith("Unknown encounter")` instead of `instanceof
       // UnknownEncounterError` would misroute this to 404. The message is
       // deliberately chosen to collide with that regex.
@@ -136,10 +135,11 @@ describe("CampaignRegistry", () => {
     expect(readSince).not.toHaveBeenCalled();
   });
 
-  // CRITICAL-1 unit coverage: `tryBegin`/`end` are the actual mutual-exclusion
-  // primitive `ws.ts` builds its per-campaign guard on — see
-  // `ws.test.ts`'s "CRITICAL-1" test for the end-to-end proof over real
-  // sockets that this closes the corrupted-log hazard.
+  // `tryBegin`/`end` are the actual mutual-exclusion primitive `ws.ts` builds
+  // its per-campaign guard on — see `ws.test.ts`'s "rejects a same-campaign
+  // command from a SECOND socket while the first is mid-turn" for the
+  // end-to-end proof over real sockets that this closes the corrupted-log
+  // hazard.
   it("tryBegin claims a campaign's in-flight slot exactly once until end releases it", () => {
     const { registry } = appWith();
     expect(registry.tryBegin("s1")).toBe(true);
@@ -223,7 +223,7 @@ describe("GET /encounters/:encounterId", () => {
     ]);
 
     const hero = body.combatants.find((each) => each.combatantId === "hero");
-    // The hero is a real CharacterSheet (C-13 is closed); a character sheet
+    // The hero is a real CharacterSheet; a character sheet
     // is authored in Hebrew and has no English name, so `characterStatBlock`
     // uses the characterId as `nameEnglish`.
     expect(hero?.nameEnglish).toBe("hero");

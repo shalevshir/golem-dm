@@ -2,31 +2,30 @@
 // asserted once over the real socket with a mocked provider. If this passes,
 // a human with a client can play the fight.
 //
-// This corrects four defects in the task brief that would otherwise make the
-// test hang or pass for the wrong reason (task-corrections.md, "Task 15 —
-// end-to-end" plus addendum C-31/C-37/C-38):
+// Four properties of the system shape this test; a version that ignored any
+// of them would hang or pass for the wrong reason:
 //
-//   1. C-31 — `applyTurn`'s `applyDamage` call in
+//   1. `applyTurn`'s `applyDamage` call in
 //      packages/rules-engine/src/encounter/resolve.ts pins `diesAtZeroHp:
 //      true` unconditionally for every combatant (death saves are
 //      implemented but not driven by the encounter pipeline —
 //      RULES_REFERENCE.md §8's gap), so the hero DIES at 0 HP rather than
 //      falling unconscious, and that is exactly what makes the fight
 //      terminate at all. `goblin-ambush`'s hero is a real character spawn
-//      (Task 14) and so carries a real `characterId` — which is exactly
+//      and so carries a real `characterId` — which is exactly
 //      why the pin is load-bearing rather than incidental: without it, a
 //      combatant with a `characterId` would fall Unconscious at 0 HP
 //      instead, and with death saves undriven here the fight would have
 //      nothing left to conclude on. This file asserts "one faction left
 //      standing", never a party win.
-//   2. C-37 — once the hero dies, `runEnemyTurns` (pipeline.ts) returns at
+//   2. Once the hero dies, `runEnemyTurns` (pipeline.ts) returns at
 //      its `livingFactions.size < 2` check with `currentActorIndex` still
 //      pointing at a hostile. No terminal event is emitted, and the next
 //      player `structured_action` comes back `not_your_turn`. Conclusion is
 //      therefore read from the server's own projection (`loadCampaign`)
 //      after every command, never inferred from a socket frame that would
 //      never arrive.
-//   3. C-38 — `EncounterDefinition.maxRounds` is data nothing reads; there
+//   3. `EncounterDefinition.maxRounds` is data nothing reads; there
 //      is no round cap anywhere in the pipeline. `MAX_HERO_COMMANDS` below
 //      is this test's own bound, with a diagnostic failure message if it is
 //      exceeded.
@@ -86,11 +85,12 @@ async function startServer(): Promise<{ app: FastifyInstance; url: string; store
   };
 
   // Always attack the hero — from both goblins. `goblin-a`'s calls read this
-  // script directly and get a legal scimitar attack on turn 1 (C-14: the
-  // corrected `goblin-ambush` geometry puts it in melee reach). `goblin-b`'s
+  // script directly and get a legal scimitar attack on turn 1 (`goblin-ambush`
+  // spawns it within melee reach of the hero). `goblin-b`'s
   // calls also read this same script, whose `actorId: "goblin-a"` mismatches
   // its own combatantId — `validate-turn.ts`'s `actor_mismatch` rejects both
-  // of its attempts (C-1's agent burns exactly two before falling back), and
+  // of its attempts (the agent's retry-once loop burns exactly two before
+  // falling back), and
   // `deterministicFallback` (packages/agents/src/tactical/fallback.ts)
   // attacks the nearest legal target, which is also the hero. Either path
   // damages only the hero, which is what makes the outcome deterministic
@@ -105,9 +105,9 @@ async function startServer(): Promise<{ app: FastifyInstance; url: string; store
           mainAction: { actionType: "attack" as const, actionId: "scimitar", targetIds: ["hero"] },
           tacticalRationaleEnglish: "Fixture: always press the attack on the hero.",
         },
-        // C-2: TokenUsage is { promptTokens, completionTokens, totalTokens }
-        // (packages/agents/src/providers/usage.ts), not the plan's
-        // { inputTokens, outputTokens }.
+        // TokenUsage is { promptTokens, completionTokens, totalTokens }
+        // (packages/agents/src/providers/usage.ts) — there are no
+        // inputTokens/outputTokens fields to use instead.
         usage: { promptTokens: 1, completionTokens: 1, totalTokens: 2 },
       },
     })),
@@ -199,8 +199,8 @@ class FrameLog {
 
   constructor(socket: WebSocket) {
     socket.on("message", (data: Buffer | string) => {
-      // Important 3: parsed against the real schema, not cast — see
-      // `ws.test.ts`'s identical fix for the full rationale.
+      // Parsed against the real schema, not cast — see `ws.test.ts`'s
+      // identical parse for the full rationale.
       const frame = ServerFrame.parse(JSON.parse(String(data)));
       this.frames.push(frame);
       for (const waiter of [...this.waiters]) {
@@ -270,7 +270,7 @@ function livingFactions(state: CampaignState): ReadonlySet<string> {
 
 /**
  * Polls the server's own projection (`loadCampaign`, folding the real event
- * log) until `predicate` holds. C-37: after the hero dies the pipeline
+ * log) until `predicate` holds. After the hero dies the pipeline
  * wedges without emitting a terminal event, so conclusion has to be read
  * from the store, never inferred from a socket frame that will not arrive.
  *
@@ -329,17 +329,17 @@ describe("end to end", () => {
   //   - `ack.type !== "campaign_state"`: join not wired to the registry, or
   //     answering everything with a generic error.
   //   - `hero.status !== "dead"` / `hero.currentHp !== 0`: the death-vs-
-  //     unconscious branch (C-31) regressed, or damage stopped clamping at 0.
+  //     unconscious branch regressed, or damage stopped clamping at 0.
   //   - `livingFactions(...)` not exactly `{"hostile"}`: the party won (this
   //     encounter structurally cannot let that happen — the hero only
   //     dodges — so this would mean `reduce`/`applyTurn` broke faction or
   //     status bookkeeping), or both sides died, or neither did.
   //   - no `dice_rolled` event: the goblins never actually attacked (a
-  //     silent regression back to C-14's un-fightable geometry, or the
+  //     silent regression to spawns too far apart to reach, or the
   //     tactical fallback broke).
   //   - `log.frames.some(error)`: a malformed message, a rejected turn, or a
   //     `not_your_turn` leaked into a run that should never produce one —
-  //     this is the guard against C-24's failure mode, where a stream of
+  //     this is the guard against the failure mode where a stream of
   //     `error` frames would satisfy a bare `frames.length > N`.
   //   - non-monotonic or duplicate `event` sequences: the transport
   //     reordered or double-delivered frames.
@@ -352,7 +352,7 @@ describe("end to end", () => {
     const ack = await joinAndAck(socket, log, campaignId);
     expect(ack.type).toBe("campaign_state");
 
-    // C-38: nothing under apps/server/src or packages/rules-engine/src
+    // Nothing under apps/server/src or packages/rules-engine/src
     // enforces EncounterDefinition.maxRounds — this constant is the ONLY
     // bound on how many hero commands this test will send. 20 is generous:
     // two scimitars at +4 vs the hero's AC 16 (Chain Mail — same AC the
@@ -402,21 +402,21 @@ describe("end to end", () => {
     if (concluded === undefined) {
       throw new Error(
         `Combat did not conclude within ${String(MAX_HERO_COMMANDS)} hero commands. ` +
-          "EncounterDefinition.maxRounds is inert data (C-38) — nothing in the pipeline " +
+          "EncounterDefinition.maxRounds is inert data — nothing in the pipeline " +
           "enforces a round cap, so this bound is the only thing standing between a " +
           "genuinely wedged pipeline and a test that hangs forever.",
       );
     }
 
-    // The final projection: one faction left standing, and — per C-31 — it
-    // is necessarily the hostile one, since the hero (scripted to only
-    // dodge) never dealt damage. Never asserted as a party win.
+    // The final projection: one faction left standing, and necessarily the
+    // hostile one, since the hero (scripted to only dodge) never dealt
+    // damage. Never asserted as a party win.
     expect(livingFactions(concluded.state)).toEqual(new Set(["hostile"]));
 
     const hero = encounterOf(concluded).combatants.find((c) => c.combatantId === "hero");
     if (hero === undefined) throw new Error("hero missing from the final projection");
     expect(hero.currentHp).toBe(0);
-    // C-31: applyTurn's applyDamage call in
+    // applyTurn's applyDamage call in
     // packages/rules-engine/src/encounter/resolve.ts pins diesAtZeroHp true
     // unconditionally (death saves are implemented but not driven by the
     // encounter pipeline — RULES_REFERENCE.md §8's gap), so the hero dies
@@ -427,8 +427,8 @@ describe("end to end", () => {
     // detail.
     expect(hero.status).toBe("dead");
 
-    // Real combat happened — not merely 20+ frames of any kind (C-24's
-    // failure mode: dice_rolled fires on every turn including a Dodge, so
+    // Real combat happened — not merely 20+ frames of any kind (dice_rolled
+    // fires on every turn including a Dodge, so
     // a bare event count proves nothing; length alone would also pass on a
     // stream of nothing but `error` frames).
     const events = await store.readSince(campaignId, -1);
@@ -465,12 +465,11 @@ describe("end to end", () => {
     // fire first and report nothing but a line number.
   }, 30_000);
 
-  // C-25: the brief's two reconnect assertions
-  // (`live.length > cut` — a length always exceeds a sequence index — and
-  // `folded.combatants.length === clientState.combatants.length` — the
-  // combatant count never changes over this fight) cannot fail regardless
-  // of what the transport does. This proves the stronger, spec-required
-  // property instead: fold the FIRST client's own snapshot plus every event
+  // Two obvious reconnect assertions cannot fail regardless of what the
+  // transport does: `live.length > cut` (a length always exceeds a sequence
+  // index) and `folded.combatants.length === clientState.combatants.length`
+  // (the combatant count never changes over this fight). This proves the
+  // stronger, spec-required property instead: fold the FIRST client's own snapshot plus every event
   // frame either socket actually received, and assert that reproduces the
   // server's own projection exactly — not a count, the whole state — and
   // separately proves the second socket received real content by requiring
@@ -503,10 +502,10 @@ describe("end to end", () => {
     send(firstSocket, heroDodge("t1"));
 
     // Close the instant the hero's OWN turn_advance arrives — strictly
-    // before the enemy sweep starts (same technique as ws.test.ts's C-36a
-    // test). That leaves a genuine gap: `handleCommand` drains to
-    // completion regardless of the socket (C-36a, proven there — this file
-    // relies on it rather than re-proving it), so both goblins' turns keep
+    // before the enemy sweep starts (same technique as ws.test.ts's
+    // drain-after-close test). That leaves a genuine gap: `handleCommand`
+    // drains to completion regardless of the socket (proven there — this
+    // file relies on it rather than re-proving it), so both goblins' turns keep
     // appending to the store while this client is gone. Cutting off only
     // after the whole round had already finished — this file's first draft
     // did exactly that, using the round's own end as `cut` — leaves the
@@ -552,7 +551,7 @@ describe("end to end", () => {
     );
     const roundEndSequence = afterRound.nextSequence - 1;
 
-    // Review round 1, item 3: whether the reconnecting join also gets a
+    // Whether the reconnecting join also gets a
     // trailing `turn_affordances` frame is keyed on the exact same
     // condition `waitForProjection`'s predicate above just used to decide
     // the round was over — not re-derived, and not assumed. If the hero
@@ -576,7 +575,7 @@ describe("end to end", () => {
     // round actually ended at, which is strictly past `cut` by construction
     // (the enemy sweep alone is several events).
     //
-    // Review round 1, item 2: when a trailing `turn_affordances` frame is
+    // When a trailing `turn_affordances` frame is
     // expected, the wait does not settle on the last `event` frame alone —
     // it also waits for that trailing frame to actually arrive. Settling
     // early relied on the trailing frame reaching this socket in the same
@@ -596,10 +595,10 @@ describe("end to end", () => {
     );
 
     // No snapshot exists yet (SNAPSHOT_EVERY is 50; one round is nowhere
-    // close), so `join`'s snapshot-fallback branch (C-16) does not fire —
+    // close), so `join`'s snapshot-fallback branch does not fire —
     // every frame the second client gets back is a plain `event` replay of
     // exactly what it missed, never a resent campaign_state or an error.
-    // Task 4: when the round this join catches up on ends back on the
+    // When the round this join catches up on ends back on the
     // hero's own turn (with the hero alive), `join` also pushes one
     // trailing `turn_affordances` frame after the replayed events — the one
     // frame in this log that is not an `event`.

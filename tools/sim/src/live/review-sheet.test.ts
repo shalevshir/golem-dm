@@ -21,7 +21,7 @@ const INPUT = {
 };
 
 describe("renderReviewSheet", () => {
-  // --- Fix round 1: Minor 7 — exactly one trailing newline, no more -----
+  // --- Exactly one trailing newline, no more ---------------------------
   // index.ts's `process.stdout.write` no longer appends its own "\n" on top
   // of this — the committed artifact must not gain a trailing blank line.
 
@@ -31,7 +31,7 @@ describe("renderReviewSheet", () => {
     expect(sheet.endsWith("\n\n")).toBe(false);
   });
 
-  // --- The brief's own three tests, verbatim ---------------------------
+  // --- Content coverage: what the sheet must surface ------------------
 
   it("puts each Hebrew sample next to the English beats that produced it", () => {
     const sheet = renderReviewSheet(INPUT);
@@ -163,8 +163,7 @@ describe("renderReviewSheet", () => {
     expect(sheet).toContain("את גובלין לוחם");
   });
 
-  // --- Fix round 1: Important 1 — the sheet no longer claims completeness
-  // it does not have -------------------------------------------------------
+  // --- The sheet must not claim completeness it does not have -----------
 
   it("no longer claims to cover every Hebrew string this change ships", () => {
     const sheet = renderReviewSheet(INPUT);
@@ -177,9 +176,8 @@ describe("renderReviewSheet", () => {
     expect(sheet).toContain("data/characters/*.json");
   });
 
-  // --- Fix round 2: Important 1 (re-opened) — the note written to fix the
-  // overclaim contained a new overclaim, and its correction path was inert
-  // ---------------------------------------------------------------------
+  // --- The completeness note must not itself overclaim, and its correction
+  // path must not be inert ------------------------------------------------
 
   it("no longer claims the hero's Hebrew name is printed in every sample", () => {
     // False for 2 of 9 SCRIPTED_BRIEFS entries: the ranger acts alone with
@@ -204,7 +202,7 @@ describe("renderReviewSheet", () => {
     expect(sheet).toContain("both files together");
   });
 
-  // --- Fix round 1: Minor 5 — pin the document's own scaffolding ---------
+  // --- Pin the document's own scaffolding -------------------------------
 
   it("pins the four top-level headings in their required order", () => {
     // Deleting `## Names` or moving `HOW_TO_REVIEW`'s section elsewhere
@@ -222,7 +220,7 @@ describe("renderReviewSheet", () => {
     expect(glossaryAndConditions).toBeGreaterThan(names);
   });
 
-  // --- Fix round 1: Minor 8 — say how many samples were dropped ----------
+  // --- Say how many samples were dropped --------------------------------
 
   it("states how many samples errored and were omitted, when erroredSampleCount is given", () => {
     const sheet = renderReviewSheet({ ...INPUT, erroredSampleCount: 3 });
@@ -230,7 +228,7 @@ describe("renderReviewSheet", () => {
   });
 
   it("uses singular wording for exactly one errored sample", () => {
-    // Fix round 2, Minor 2: the realistic live shape (this test suite's
+    // The realistic live shape (this test suite's
     // own words, in narrative.test.ts) is one transient failure among
     // otherwise-clean samples — not every call failing at once — so the
     // singular case is the common one, not an edge case.

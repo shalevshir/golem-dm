@@ -34,11 +34,11 @@ function uuids(): () => string {
 
 /**
  * A tactical double that proposes a legal Dodge for whichever actor is
- * asked, mirroring `pipeline.test.ts`'s `defaultTactical` (C-15). Unlike a
+ * asked, mirroring `pipeline.test.ts`'s `defaultTactical`. Unlike a
  * `createFakePort` script, this never runs out and never risks proposing a
- * turn stamped with the wrong `actorId` (the brief's `dodgeFor("goblin-a")`
- * hardcoded a single actor into every scripted reply) — every property below
- * can run as many rounds as it needs.
+ * turn stamped with the wrong `actorId` — a `dodgeFor("goblin-a")` helper
+ * would hardcode a single actor into every scripted reply — so every
+ * property below can run as many rounds as it needs.
  */
 function defaultTactical(): TacticalAgent {
   return {
@@ -113,9 +113,9 @@ interface PlayOptions {
  * Plays `rounds` full rounds against an EXISTING campaign: one player Dodge
  * from "hero", followed by whatever `handleCommand`'s enemy sweep does in
  * response (both goblins dodge too, via `defaultTactical`, so nobody ever
- * takes damage and the fight never concludes on its own — C-38: nothing
- * enforces a round cap, so the bound here is this loop's own `rounds`
- * argument, not the pipeline's). Only the hero's turn is driven from the
+ * takes damage and the fight never concludes on its own — nothing enforces
+ * a round cap, so the bound here is this loop's own `rounds` argument, not
+ * the pipeline's). Only the hero's turn is driven from the
  * outside; the hostile turns are the pipeline's own doing, exactly as they
  * would be for a real client.
  *
@@ -174,10 +174,10 @@ async function startedCampaign(store: EventStore, options: PlayOptions = {}): Pr
  * counter, so it never shares an object reference with anything `playRounds`
  * produced.
  *
- * C-26 / C-35: `reduce` never writes `campaignId`, `rootSeed`, `encounterId`,
- * `grid` or `turnOrder`, and Task 8 removed the `state` field that used to
- * ride along in the sequence-0 payload (keeping it aliased live campaign
- * state into the store by reference). The only remaining correct source for
+ * `reduce` never writes `campaignId`, `rootSeed`, `encounterId`, `grid` or
+ * `turnOrder`, and the sequence-0 payload carries no `state` field — one
+ * would alias live campaign state into the store by reference. The only
+ * correct source for
  * "the state `fold` starts from" is the campaign API itself: `createCampaign`
  * plus `startEncounter` build exactly that state, the same way
  * `loadCampaign` rebuilds it before folding the rest of a log on top.
@@ -206,13 +206,12 @@ describe("replay properties", () => {
   });
 
   it("a reconnect at any sequence leaves the client's fold equal to the server's", async () => {
-    // C-21 (blocking): the brief's version obtained "the client's state" by
-    // calling `loadCampaign` — which always folds the WHOLE log regardless
-    // of `cut` — then folded a no-op empty array, then folded the tail on
-    // top of a state that already included it. That double-application is
-    // idempotent for the one field the test checked (`combatants`, a full
-    // overwrite each `state_delta_applied`), so the loop could not detect a
-    // fork no matter what `cut` was.
+    // Obtaining "the client's state" from `loadCampaign` would not
+    // discriminate: it always folds the WHOLE log regardless of `cut`, so
+    // folding a no-op empty array and then the tail re-applies events the
+    // state already includes. That double-application is idempotent for
+    // `combatants` (a full overwrite each `state_delta_applied`), so such a
+    // loop cannot detect a fork no matter what `cut` is.
     //
     // This instead implements the spec's property (3) directly: build a
     // *client* state by folding, from an independently-constructed genesis,
@@ -220,8 +219,8 @@ describe("replay properties", () => {
     // compare the FULL projection (not a subset) against the server's own
     // `live.state`. Because the two states never share an object reference
     // until this comparison, an aliasing or non-idempotent-`reduce` bug
-    // (exactly what C-26 required Task 8 to design around) would show up
-    // here as a genuine mismatch, at whichever `cut` first exposed it.
+    // would show up here as a genuine mismatch, at whichever `cut` first
+    // exposed it.
     const store = createInMemoryEventStore();
     const live = await playRounds(store, 3);
     const events = await store.readSince("s1", -1); // ascending, includes sequence 0
@@ -259,18 +258,16 @@ describe("replay properties", () => {
   });
 
   it("a different rootSeed produces a different event stream for the same commands", async () => {
-    // C-21 (blocking): the brief's version asserted only
-    // `campaign.state.world.rootSeed === 99` right after passing `rootSeed: 99`
-    // in — a tautology about the input that cannot fail regardless of what
-    // the pipeline does with it.
+    // Asserting `campaign.state.world.rootSeed === 99` right after passing
+    // `rootSeed: 99` in would be a tautology about the input, unable to fail
+    // regardless of what the pipeline does with it.
     //
-    // My first replacement for it was ALSO non-discriminating, for a
-    // different reason (review caught it): it compared the full event
-    // arrays from `readSince`, which include sequence 0 — whose payload is
-    // `{ rootSeed }` (`CampaignStartedPayload`, `@ai-dm/schemas`). With
-    // rootSeed 42 vs. 99, that one event already differs before a single
-    // turn plays, so
-    // `.not.toEqual` on the whole array passes even if `rootSeed` never
+    // Comparing the full event arrays from `readSince` is ALSO
+    // non-discriminating, for a different reason: they include sequence 0 —
+    // whose payload is `{ rootSeed }` (`CampaignStartedPayload`,
+    // `@ai-dm/schemas`). With rootSeed 42 vs. 99 that one event already
+    // differs before a single turn plays, so `.not.toEqual` on the whole
+    // array passes even if `rootSeed` never
     // reaches `seedFor` at all (e.g. a regression hardcoding
     // `ports.seedFor(42, sequence)` in the pipeline) — exactly the bug this
     // property exists to catch.
@@ -280,11 +277,10 @@ describe("replay properties", () => {
     // (`pipeline.ts`'s `enemyTurn`/`structured_action` handling) — which
     // has no sequence-0 freebie to hide behind: it only differs if
     // `campaign.state.world.rootSeed` actually reached `seedFor` for every one of
-    // these turns. Verified by injecting the regression this comment used
-    // to only assume: hardcoding `seedFor` in `portsWith` to
+    // these turns. Confirmed by injecting the regression rather than
+    // assuming it: hardcoding `seedFor` in `portsWith` to
     // `(_rootSeed, sequence) => 42 * 1000 + sequence` (ignoring its
-    // `rootSeed` argument entirely) makes this assertion fail, as it
-    // should — see this task's report.
+    // `rootSeed` argument entirely) makes this assertion fail, as it should.
     const seed42 = createInMemoryEventStore();
     const seed99 = createInMemoryEventStore();
     await playRounds(seed42, 3, { rootSeed: 42 });
@@ -311,9 +307,8 @@ describe("snapshots", () => {
     // `action_already_used`, and only the rejection's 2 events
     // (`player_input`, `action_rejected`) landed per attempt instead of a
     // full turn's ~5-6. Fixed in `reduce.ts`'s `scene_changed` /
-    // `turn_advanced` case (see this task's report); this asserts what the
-    // property should actually exercise now that a campaign can play more
-    // than one round.
+    // `turn_advanced` case; this asserts what the property should actually
+    // exercise now that a campaign can play more than one round.
     await playRounds(store, 5);
 
     const snapshot = await store.latestSnapshot("s1");
@@ -336,11 +331,10 @@ describe("snapshots", () => {
     // unnoticed.
     expect(snapshot.sequence).toBe(SNAPSHOT_EVERY);
 
-    // C-22 / C-35: get the fold's starting state from the campaign API, not
-    // from a cast on the genesis event's payload — sequence 0 no longer
-    // carries a `state` field (Task 8 removed it to kill the aliasing
-    // hazard; see `@ai-dm/schemas`' `CampaignStartedPayload`, which replaced
-    // the old `GenesisPayload` this comment used to name). Reintroducing a
+    // Get the fold's starting state from the campaign API, not from a cast
+    // on the genesis event's payload — sequence 0 carries no `state` field
+    // (see `@ai-dm/schemas`' `CampaignStartedPayload`), because one would
+    // alias live campaign state into the store. Reintroducing a
     // `state` field to make a cast like
     // `(genesis.payload as { state: unknown }).state` work would undo that
     // fix, so this drops the cast entirely.
@@ -439,7 +433,7 @@ describe("seed determinism across a bracket", () => {
     // would reproduce identically across the two independent stores
     // (satisfying assertion 1) while silently replaying encounter A's own
     // seeds for encounter B, and every existing test would still pass.
-    // Verified by injecting exactly that regression — see this task's report.
+    // Confirmed by injecting exactly that regression, not by assuming it.
     //
     // `aSpanA` is guarded non-empty too, the same way and for the same
     // reason as `bSpanA` above: without it, a regression that emptied
@@ -453,11 +447,11 @@ describe("seed determinism across a bracket", () => {
   });
 });
 
-// Task 7, step 2 (projection half): the charter's append -> replay ->
-// identical-projection round-trip, over a campaign spanning two encounters —
-// a log a single `fold` provably cannot handle (`encounter_started` is a
-// guard-only no-op without the catalogue substitution `loadCampaign`
-// performs; see this task's report for the verified throw). Lives here,
+// The charter's append -> replay -> identical-projection round-trip, over a
+// campaign spanning two encounters — a log a single `fold` provably cannot
+// handle (`encounter_started` is a guard-only no-op without the catalogue
+// substitution `loadCampaign` performs, and folding one without it throws).
+// Lives here,
 // not in `packages/memory`, because building a real second board needs
 // `startEncounter`/`buildEncounterById`, which live in `apps/server` and
 // which `@ai-dm/memory` may never import (dependency direction).

@@ -965,9 +965,9 @@ combat with a UI that can still send them.
    [`docs/decisions/0004-campaign-vs-session-identity.md`](docs/decisions/0004-campaign-vs-session-identity.md),
    ACCEPTED. Load-bearing; everything below depends on it.
 1. **Schemas and the `WorldState`/`EncounterState` split**, new event types,
-   `reduce` refactor — while the log is small and no users exist. **Landed**
-   on branch `step-11-campaign-state-split` (all 8 tasks; not yet merged to
-   `main`).
+   `reduce` refactor — while the log is small and no users exist. **Merged to
+   `main`** 2026-08-27 as `e6577d1` (all 8 tasks), CI green with Postgres at
+   1304 passed / 0 skipped / 90 files.
    [`docs/superpowers/specs/2026-08-23-campaign-state-split-design.md`](docs/superpowers/specs/2026-08-23-campaign-state-split-design.md),
    plan at
    [`docs/superpowers/plans/2026-08-23-campaign-state-split.md`](docs/superpowers/plans/2026-08-23-campaign-state-split.md).
