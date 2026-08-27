@@ -1,0 +1,14 @@
+[
+  {
+    "factionId": "ashen-guild",
+    "nameEnglish": "The Ashen Guild",
+    "nameHebrew": "גילדת האפר",
+    "descriptionEnglish": "Charcoal burners and smelters who hold the hill kilns above Emberfall. They pay well, they pay on time, and they never explain what the ore is for."
+  },
+  {
+    "factionId": "river-wardens",
+    "nameEnglish": "The River Wardens",
+    "nameHebrew": "שומרי הנהר",
+    "descriptionEnglish": "The families who keep the weir and the fish ladders. They were here before the kilns and they intend to be here after."
+  }
+]
