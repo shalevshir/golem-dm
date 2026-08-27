@@ -980,6 +980,9 @@ combat with a UI that can still send them.
    [`docs/superpowers/plans/2026-08-27-world-content-loader.md`](docs/superpowers/plans/2026-08-27-world-content-loader.md).
 3. **Scene engine:** predicates, edge legality, declared effects. Pure,
    golden tests, no LLM.
+   [`docs/superpowers/specs/2026-08-27-scene-engine-design.md`](docs/superpowers/specs/2026-08-27-scene-engine-design.md),
+   plan at
+   [`docs/superpowers/plans/2026-08-27-scene-engine.md`](docs/superpowers/plans/2026-08-27-scene-engine.md).
 4. **Intent router, `free_text`, out-of-combat ability checks.**
 5. **The combat bridge:** `encounter_started` / `encounter_resolved`,
    deterministic seed derivation.

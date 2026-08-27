@@ -4,6 +4,10 @@
 
 Pure, deterministic D&D 5e mechanics: dice, checks/saves, attack resolution, action economy, conditions, grid/pathfinding/LoS/cover. This package is the **only** authority on rule legality and math — it validates every `ExecuteTurn` the LLM proposes and is the single gate before state mutation.
 
+It is also the only authority on **campaign** legality: `scene/` evaluates the
+quest graph's predicates and applies its declared effects (`PROJECT_PLAN.md`
+§4.7), the same propose-then-validate contract one level above combat.
+
 **Boundary — strictly enforced:**
 
 - Pure functions only. No I/O, no network, no LLM calls, no `Date.now()`, no ambient randomness.
@@ -16,6 +20,10 @@ Pure, deterministic D&D 5e mechanics: dice, checks/saves, attack resolution, act
 - `checks/` — ability checks, saves, DCs, proficiency
 - `combat/` — attack resolution, damage/temp-HP order, conditions, action-economy state machine, `ExecuteTurn` validation (returns machine-readable rejection reasons for the agent retry loop)
 - `spatial/` — grid, A* (5 ft/tile, difficult terrain ×2, diagonals per ADR-0003), LoS/cover (Bresenham house rule, swappable — keep the algorithm behind an interface)
+- `scene/` — the scene engine: quest-graph traversal, `WorldPredicate`
+  evaluation, `WorldEffect` application, clamped faction-band arithmetic.
+  Holds `AuthoredWorld` and `pairKey`, which `apps/server`'s `loadWorld`
+  produces and re-exports.
 
 ## Rule references
 

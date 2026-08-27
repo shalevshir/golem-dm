@@ -1272,12 +1272,23 @@ assertions fail, then restore and confirm green before the next.
 
 | Sabotage | Must fail |
 |---|---|
-| `evaluatePredicate`'s `faction_band_at_least` branch → `return true` | `refuses a traversal whose faction gate is not met`, `marks the closed edge closed`, `agrees with traverseEdge`, `names every unmet precondition` |
+| `evaluatePredicate`'s `faction_band_at_least` branch → `return true` | `refuses a traversal whose faction gate is not met`, `marks the closed edge closed`, `names every unmet precondition` |
 | `evaluatePredicate`'s `node_completed` branch → `return true` | `evaluates the target's preconditions after the current node completes`, `refuses a start node that requires its own completion`, `names every unmet precondition` |
 | `entryRejections`' `.filter(...)` → `.filter(() => false)` | every `precondition_unmet` assertion above |
 | `traverseEdge`'s `no_such_edge` guard deleted | `refuses an edge the current node does not have`, `refuses an edge to a node that does not exist` |
 | `startScene`'s `if (rejections.length > 0)` deleted | both `startScene on a world it cannot open` cases |
 | `entryRejections`' `no_such_node` branch → `return []` | `refuses a starting node id that resolves to nothing` |
+
+`agrees with traverseEdge` is deliberately not listed against the
+`faction_band_at_least` row above: it was predicted there originally, and
+execution proved that prediction wrong — the test stayed green under that
+sabotage. Both `availableEdges` and `traverseEdge` call the same
+`entryRejections`, so a bug inside that shared evaluator flips both sides of
+the comparison together and the equality still holds. The test is a
+mutual-consistency check between the two callers, not a correctness check on
+the evaluator itself — it cannot catch a shared-helper bug, only a bug where
+the two callers disagree with each other. It stays in the suite as a guard
+against `availableEdges` and `traverseEdge` being reimplemented apart.
 
 **If any sabotage leaves the suite green, that branch has no test.** Write one
 before moving on — that is the finding this whole plan is shaped around, and
@@ -1850,12 +1861,12 @@ here exist in git whether or not this file is read again.
 | Task | Commits | Result |
 |---|---|---|
 | 1 Baseline | — | 93 files, 1335 passed, 30 skipped; typecheck and eslint 0. Fresh worktree needed `pnpm install` first. |
-| 2 Move + band arithmetic | | |
-| 3 Traversal | | |
-| 4 Refusal path | | |
-| 5 Loader start check | | |
-| 6 End-to-end arc | | |
-| 7 Docs sweep | | |
+| 2 Move + band arithmetic | `e03dbc2` | Review clean first pass. 94 files, 1343 passed. |
+| 3 Traversal | `ced41f4` | Review clean first pass (one Important finding deferred into Task 4 by controller ruling). 94 files, 1353 passed. |
+| 4 Refusal path | `ddc4e7c`, `d0b37b6` | One fix round — the faction gate had no *passing* case, so `>` instead of `>=` would have shipped green. 11 sabotage rows run; 2 of the plan's own predictions were wrong. 94 files, 1371 passed. `src/scene` reached 100% lines. |
+| 5 Loader start check | `dd1ac08` | Review clean first pass. 94 files, 1371 passed. |
+| 6 End-to-end arc | `5c6df06` | Review clean first pass; reviewer independently re-derived both branches' arithmetic. 95 files, 1377 passed. |
+| 7 Docs sweep | this commit | Sweep of every "scene engine"/`AuthoredWorld`/`pairKey` hit outside `packages/memory/CLAUDE.md` (excluded per controller instruction — someone else's uncommitted edit). Postgres run (migrated onto scratch `aidm_step3`): 95 files, 1407 passed, **0 skipped**, `packages/memory` 62/62. Without `DATABASE_URL`: 95 files, 1377 passed, 30 skipped. `pnpm typecheck` and `npx eslint packages apps tools` both exit 0. |
 
 ---
 
