@@ -186,9 +186,11 @@ rather than a convention, matching how `CombatWorld` documents itself as
 ```ts
 export function shiftBand(band: FactionBand, delta: number): FactionBand;
 export function relationBetween(
-  state: SceneState, a: string, b: string,
+  world: AuthoredWorld, state: SceneState, a: string, b: string,
 ): FactionBand | undefined;
-export function evaluatePredicate(predicate: WorldPredicate, state: SceneState): boolean;
+export function evaluatePredicate(
+  world: AuthoredWorld, state: SceneState, predicate: WorldPredicate,
+): boolean;
 export function startScene(world: AuthoredWorld): SceneTransition;
 export function availableEdges(world: AuthoredWorld, state: SceneState): SceneOptions;
 export function traverseEdge(world: AuthoredWorld, state: SceneState, to: string): SceneTransition;
@@ -231,11 +233,15 @@ explain is data, not an exception. A rejection carries every failed
 precondition, not the first — same argument as `WorldContentError` carrying
 every defect.
 
-`applyEffect` takes the world as well as the state, because the band a shift
-starts from is authored: a `SceneState` folded out of the event log may carry
-only the pairs that have actually changed, and reading the state alone would
-make a shift over an unchanged pair silently do nothing. The authored relation
-is the baseline; the state is the overlay. `completeCurrentNode` likewise
+**The authored relation is the baseline; the state is the overlay.** A
+`SceneState` folded out of the event log may carry only the pairs that have
+actually changed, since the rest are already in `world.json`, so reading the
+state alone would make an unrecorded pair look like it has no standing at all
+— silently closing every gate over it and cancelling every shift. That rule is
+written once, in `relationBetween`, and every reader of a band goes through it:
+`evaluatePredicate` and `applyEffect` both take the world for no other reason.
+A second copy of `state ?? world` anywhere is the invariant-4 duplicate.
+`completeCurrentNode` likewise
 re-checks its node's own preconditions before applying its effects — entry is
 gated by `startScene` and `traverseEdge`, but those stop being the only
 producers of a `SceneState` the moment step 4 folds one out of the log.
@@ -304,12 +310,13 @@ inferring through a traversal. `evaluatePredicate`'s
 `faction_band_at_least` comparison uses `indexOf` on the same table, so the
 comparison and the shift cannot disagree about what the scale is.
 
-`relationBetween` returns `undefined` for a pair the map does not hold. In a
-world produced by `loadWorld` that cannot happen — the loader refuses a
-missing pair and a self-pair. In a hand-built `SceneState` it can, and a
-`faction_band_at_least` predicate over an unknown pair evaluates **false**:
-the gate is a claim that standing is at least some band, and an unknown
-standing does not establish it.
+`relationBetween` returns `undefined` only for a pair that neither the state
+nor the authored world holds. In a world produced by `loadWorld` that cannot
+happen — the loader refuses a missing pair and a self-pair — so reaching it
+means a hand-built world, and a `faction_band_at_least` predicate over such a
+pair evaluates **false**: the gate is a claim that standing is at least some
+band, and an unknown standing does not establish it. A pair the *state* alone
+omits is not unknown; it reads at its authored band, per Decision 4.
 
 ### 7. `loadWorld` gains one check: the starting node must be enterable
 

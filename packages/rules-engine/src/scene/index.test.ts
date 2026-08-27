@@ -81,18 +81,23 @@ describe("shiftBand", () => {
 });
 
 describe("relationBetween", () => {
+  // `linearWorld()` declares only alpha/beta, so neither pair below is in the
+  // authored baseline and these cases read the state alone. The baseline's own
+  // behaviour is covered in the `evaluatePredicate` block.
+  const world = linearWorld();
+
   it("finds a relation asked in either order", () => {
     const state = stateWith([["ashen-guild", "river-wardens", "cold"]]);
-    expect(relationBetween(state, "ashen-guild", "river-wardens")).toBe("cold");
-    expect(relationBetween(state, "river-wardens", "ashen-guild")).toBe("cold");
+    expect(relationBetween(world, state, "ashen-guild", "river-wardens")).toBe("cold");
+    expect(relationBetween(world, state, "river-wardens", "ashen-guild")).toBe("cold");
   });
 
   // Unreachable through `loadWorld`, which refuses a missing pair and a
-  // self-pair. Reachable through a hand-built SceneState, which is what step
-  // 4 will assemble from a projection.
-  it("returns undefined for a pair it does not hold", () => {
+  // self-pair. Reachable through a hand-built world, which is what step 4
+  // assembles alongside a projected state.
+  it("returns undefined for a pair neither the state nor the world holds", () => {
     const state = stateWith([["ashen-guild", "river-wardens", "cold"]]);
-    expect(relationBetween(state, "ashen-guild", "nobody")).toBeUndefined();
+    expect(relationBetween(world, state, "ashen-guild", "nobody")).toBeUndefined();
   });
 });
 
@@ -121,7 +126,7 @@ describe("startScene", () => {
     expect(state.currentNodeId).toBe("start");
     expect(state.day).toBe(1);
     expect(state.completedNodeIds.size).toBe(0);
-    expect(relationBetween(state, "alpha", "beta")).toBe("neutral");
+    expect(relationBetween(world, state, "alpha", "beta")).toBe("neutral");
   });
 });
 
@@ -142,7 +147,9 @@ describe("traverseEdge", () => {
   it("evaluates the target's preconditions after the current node completes", () => {
     const world = linearWorld();
     const opening = stateOf(startScene(world));
-    expect(evaluatePredicate({ kind: "node_completed", nodeId: "start" }, opening)).toBe(false);
+    expect(
+      evaluatePredicate(world, opening, { kind: "node_completed", nodeId: "start" }),
+    ).toBe(false);
     expect(traverseEdge(world, opening, "middle").valid).toBe(true);
   });
 
@@ -152,7 +159,7 @@ describe("traverseEdge", () => {
     state = stateOf(traverseEdge(world, state, "end"));
     expect(state.currentNodeId).toBe("end");
     expect(state.day).toBe(3); // 1 + middle's advance_calendar of 2
-    expect(relationBetween(state, "alpha", "beta")).toBe("cold"); // neutral - 1
+    expect(relationBetween(world, state, "alpha", "beta")).toBe("cold"); // neutral - 1
   });
 
   it("does not mutate the state it was given", () => {
@@ -220,7 +227,7 @@ describe("completeCurrentNode", () => {
     const before = stateOf(startScene(world));
     const after = stateOf(completeCurrentNode(world, before));
     expect(after.relations).toEqual(before.relations);
-    expect(relationBetween(after, "gamma", "delta")).toBeUndefined();
+    expect(relationBetween(world, after, "gamma", "delta")).toBeUndefined();
   });
 
   // A `SceneState` folded out of the event log may carry only the pairs that
@@ -256,9 +263,9 @@ describe("completeCurrentNode", () => {
       relations: new Map(),
       day: 1,
     };
-    expect(relationBetween(partial, "alpha", "beta")).toBeUndefined();
+    expect(partial.relations.get(pairKey("alpha", "beta"))).toBeUndefined();
     const after = stateOf(completeCurrentNode(world, partial));
-    expect(relationBetween(after, "alpha", "beta")).toBe("cold");
+    expect(relationBetween(world, after, "alpha", "beta")).toBe("cold");
   });
 
   // Entry is gated by `startScene` and `traverseEdge`, but they stop being the
@@ -278,7 +285,7 @@ describe("completeCurrentNode", () => {
     expect(transition.rejections).toHaveLength(1);
     expect(transition.rejections[0]?.reason).toBe("precondition_unmet");
     // middle carries a -1 shift and a +2 day advance; neither may have run.
-    expect(relationBetween(stranded, "alpha", "beta")).toBe("neutral");
+    expect(relationBetween(world, stranded, "alpha", "beta")).toBe("neutral");
     expect(stranded.day).toBe(1);
   });
 });
@@ -334,9 +341,11 @@ function rejectionsOf(transition: SceneTransition): readonly SceneRejection[] {
 }
 
 describe("evaluatePredicate", () => {
-  // Shared by every case below: alpha/beta sit at `hostile`, which is the
-  // band index 1 out of `war, hostile, cold, neutral, cordial, friendly,
-  // allied`. Fixed once so the three cases below read as one scale.
+  // `linearWorld()` authors alpha/beta at `neutral` (index 3); the state below
+  // records them at `hostile` (index 1), out of `war, hostile, cold, neutral,
+  // cordial, friendly, allied`. The two deliberately DISAGREE, so every case
+  // here also says which of them a gate reads.
+  const world = linearWorld();
   const state: SceneState = {
     currentNodeId: "start",
     completedNodeIds: new Set<string>(),
@@ -344,16 +353,50 @@ describe("evaluatePredicate", () => {
     day: 1,
   };
 
-  // `blockedWorld()`'s `faction_band_at_least` pair is always declared, and
-  // the `relationBetween` test for an unknown pair goes through
-  // `relationBetween` directly, not `evaluatePredicate`. This is the only
-  // path that reaches `evaluatePredicate`'s own `band === undefined` guard.
-  it("treats a faction pair the state does not hold as gate-closed, not gate-open", () => {
+  // The state is an overlay on the authored baseline, not the other way
+  // round. An inverted lookup would read `neutral` here and open a gate the
+  // campaign has actually closed — and would pass every other case in this
+  // block, since `neutral` outranks both bands they ask for.
+  it("reads the state's band, not the authored one, for a pair the state records", () => {
+    expect(relationBetween(world, state, "alpha", "beta")).toBe("hostile");
     expect(
-      evaluatePredicate(
-        { kind: "faction_band_at_least", factionA: "gamma", factionB: "delta", band: "cordial" },
-        state,
-      ),
+      evaluatePredicate(world, state, {
+        kind: "faction_band_at_least",
+        factionA: "alpha",
+        factionB: "beta",
+        band: "cold",
+      }),
+    ).toBe(false);
+  });
+
+  // The other half: a pair the state has not recorded falls back to the band
+  // the author declared, rather than reading as "no standing at all". A
+  // projection that stores only what changed would otherwise close every gate
+  // over every untouched pair.
+  it("falls back to the authored band for a pair the state omits", () => {
+    const partial: SceneState = { ...state, relations: new Map() };
+    expect(relationBetween(world, partial, "alpha", "beta")).toBe("neutral");
+    expect(
+      evaluatePredicate(world, partial, {
+        kind: "faction_band_at_least",
+        factionA: "alpha",
+        factionB: "beta",
+        band: "cold",
+      }),
+    ).toBe(true);
+  });
+
+  // Neither the state nor the authored world declares gamma/delta, which is
+  // the only way the `band === undefined` guard is reachable now that the
+  // authored relation backs every lookup.
+  it("treats a pair neither the state nor the world holds as gate-closed", () => {
+    expect(
+      evaluatePredicate(world, state, {
+        kind: "faction_band_at_least",
+        factionA: "gamma",
+        factionB: "delta",
+        band: "cordial",
+      }),
     ).toBe(false);
   });
 
@@ -364,19 +407,23 @@ describe("evaluatePredicate", () => {
   // other test and strands that node.
   it("opens a gate when the pair sits at exactly the required band", () => {
     expect(
-      evaluatePredicate(
-        { kind: "faction_band_at_least", factionA: "alpha", factionB: "beta", band: "hostile" },
-        state,
-      ),
+      evaluatePredicate(world, state, {
+        kind: "faction_band_at_least",
+        factionA: "alpha",
+        factionB: "beta",
+        band: "hostile",
+      }),
     ).toBe(true);
   });
 
   it("opens a gate when the pair sits above the required band", () => {
     expect(
-      evaluatePredicate(
-        { kind: "faction_band_at_least", factionA: "alpha", factionB: "beta", band: "war" },
-        state,
-      ),
+      evaluatePredicate(world, state, {
+        kind: "faction_band_at_least",
+        factionA: "alpha",
+        factionB: "beta",
+        band: "war",
+      }),
     ).toBe(true);
   });
 });

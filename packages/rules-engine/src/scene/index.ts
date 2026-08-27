@@ -63,16 +63,27 @@ export function shiftBand(band: FactionBand, delta: number): FactionBand {
 /**
  * Standing between two factions, asked in either order.
  *
- * `undefined` for a pair the state does not hold. A world from `loadWorld`
- * cannot produce that — it refuses a missing pair and a self-pair — but a
- * hand-assembled state can, and step 4 assembles one from a projection.
+ * The authored relation is the baseline and the state is the overlay: a
+ * `SceneState` folded out of the event log may carry only the pairs that have
+ * actually changed, since the rest are already in `world.json`. Reading the
+ * state alone would make an unrecorded pair look like it has no standing at
+ * all — which silently closes every gate over it and cancels every shift.
+ *
+ * This is the ONE place that rule is written. Every reader of a band goes
+ * through here, so a second copy of `state ?? world` anywhere is a bug.
+ *
+ * `undefined` only when neither the state nor the authored world declares the
+ * pair. A world from `loadWorld` cannot produce that — it refuses a missing
+ * pair and a self-pair — so reaching it means a hand-built world.
  */
 export function relationBetween(
+  world: AuthoredWorld,
   state: SceneState,
   a: string,
   b: string,
 ): FactionBand | undefined {
-  return state.relations.get(pairKey(a, b));
+  const key = pairKey(a, b);
+  return state.relations.get(key) ?? world.relations.get(key);
 }
 
 /**
@@ -83,15 +94,21 @@ export function relationBetween(
  * evaluating true — the same exhaustiveness discipline `reduce.ts` and the
  * loader's `predicateRefs` rely on. Do not add a `default`.
  */
-export function evaluatePredicate(predicate: WorldPredicate, state: SceneState): boolean {
+export function evaluatePredicate(
+  world: AuthoredWorld,
+  state: SceneState,
+  predicate: WorldPredicate,
+): boolean {
   switch (predicate.kind) {
     case "node_completed":
       return state.completedNodeIds.has(predicate.nodeId);
     case "faction_band_at_least": {
-      const band = relationBetween(state, predicate.factionA, predicate.factionB);
+      const band = relationBetween(world, state, predicate.factionA, predicate.factionB);
       // An unknown standing does not establish that standing is at least
       // anything. False, not a throw: the caller is a router deciding what to
       // offer, and an unknown pair makes a gate closed rather than broken.
+      // With the authored baseline behind it this now means a pair NEITHER
+      // the state nor the world declares, which authored content cannot be.
       if (band === undefined) return false;
       return FACTION_BANDS.indexOf(band) >= FACTION_BANDS.indexOf(predicate.band);
     }
@@ -169,7 +186,7 @@ function entryRejections(
     ];
   }
   return node.preconditions
-    .filter((precondition) => !evaluatePredicate(precondition, state))
+    .filter((precondition) => !evaluatePredicate(world, state, precondition))
     .map((precondition) => ({
       reason: "precondition_unmet" as const,
       message: `entering "${nodeId}" requires ${describePredicate(precondition)}`,
@@ -197,11 +214,9 @@ function describePredicate(predicate: WorldPredicate): string {
  * `traverseEdge` and `completeCurrentNode`, which is a stronger test than
  * calling it directly would be.
  *
- * It takes `world` for the band a shift starts from: a `SceneState` folded
- * out of the event log may carry only the pairs that have actually changed,
- * since the rest are already in `world.json`. Reading the state alone would
- * make a shift over an unchanged pair silently do nothing, so the authored
- * relation is the baseline and the state is the overlay.
+ * It takes `world` because a shift starts from the band `relationBetween`
+ * reports, which is the authored relation overlaid by the state rather than
+ * the state alone.
  */
 function applyEffect(
   world: AuthoredWorld,
@@ -210,14 +225,14 @@ function applyEffect(
 ): SceneState {
   switch (effect.kind) {
     case "shift_faction_relation": {
-      const key = pairKey(effect.factionA, effect.factionB);
-      const current = state.relations.get(key) ?? world.relations.get(key);
+      const current = relationBetween(world, state, effect.factionA, effect.factionB);
       // Still a no-op when neither the state nor the authored world declares
       // the pair, rather than an invention: `loadWorld` refuses an effect
       // naming an unknown faction, so reaching this means a hand-built world,
       // and inventing `neutral` here would put a relation in the map that no
       // author declared.
       if (current === undefined) return state;
+      const key = pairKey(effect.factionA, effect.factionB);
       const relations = new Map(state.relations);
       relations.set(key, shiftBand(current, effect.delta));
       return { ...state, relations };

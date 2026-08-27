@@ -49,7 +49,7 @@ describe("the Emberfall arc", () => {
     const state = stateOf(startScene(world));
     expect(state.currentNodeId).toBe("arrival");
     expect(state.day).toBe(1);
-    expect(relationBetween(state, "ashen-guild", "river-wardens")).toBe("cold");
+    expect(relationBetween(world, state, "ashen-guild", "river-wardens")).toBe("cold");
   });
 
   it("offers both branches from arrival, both open", () => {
@@ -69,13 +69,13 @@ describe("the Emberfall arc", () => {
     let state = stateOf(traverseEdge(world, stateOf(startScene(world)), "guild-offer"));
     state = stateOf(traverseEdge(world, state, "the-weir"));
     expect(state.day).toBe(1);
-    expect(relationBetween(state, "ashen-guild", "river-wardens")).toBe("hostile");
+    expect(relationBetween(world, state, "ashen-guild", "river-wardens")).toBe("hostile");
 
     state = stateOf(traverseEdge(world, state, "reckoning"));
     expect(state.currentNodeId).toBe("reckoning");
     state = stateOf(completeCurrentNode(world, state));
     // reckoning: +2 bands from hostile, +2 days from 1.
-    expect(relationBetween(state, "ashen-guild", "river-wardens")).toBe("neutral");
+    expect(relationBetween(world, state, "ashen-guild", "river-wardens")).toBe("neutral");
     expect(state.day).toBe(3);
     expect(edgesOf(availableEdges(world, state))).toEqual([]);
   });
@@ -86,12 +86,12 @@ describe("the Emberfall arc", () => {
     let state = stateOf(traverseEdge(world, stateOf(startScene(world)), "warden-warning"));
     state = stateOf(traverseEdge(world, state, "the-weir"));
     expect(state.day).toBe(2);
-    expect(relationBetween(state, "ashen-guild", "river-wardens")).toBe("cold");
+    expect(relationBetween(world, state, "ashen-guild", "river-wardens")).toBe("cold");
 
     state = stateOf(traverseEdge(world, state, "reckoning"));
     state = stateOf(completeCurrentNode(world, state));
     // reckoning: +2 bands from cold, +2 days from 2.
-    expect(relationBetween(state, "ashen-guild", "river-wardens")).toBe("cordial");
+    expect(relationBetween(world, state, "ashen-guild", "river-wardens")).toBe("cordial");
     expect(state.day).toBe(4);
   });
 
@@ -109,8 +109,8 @@ describe("the Emberfall arc", () => {
     const warden = play("warden-warning");
     expect(guild.day).not.toBe(warden.day);
     expect(
-      relationBetween(guild, "ashen-guild", "river-wardens"),
-    ).not.toBe(relationBetween(warden, "ashen-guild", "river-wardens"));
+      relationBetween(world, guild, "ashen-guild", "river-wardens"),
+    ).not.toBe(relationBetween(world, warden, "ashen-guild", "river-wardens"));
   });
 
   // reckoning's gate asks for at least `hostile`, and `hostile` is the LOWEST
