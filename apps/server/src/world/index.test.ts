@@ -4,11 +4,12 @@ import { dataDir } from "../encounters/srd.js";
 import { loadWorld, pairKey, WorldContentError } from "./index.js";
 
 describe("loadWorld", () => {
-  // This is the only test that exercises the walk-up for `data/world`: if
-  // `dataDir` could not find it above this file (e.g. because it stopped one
-  // directory too early after a `dist/` layout change), this load would fail
-  // with "Could not find data/world above this file" rather than returning a
-  // parsed world.
+  // A default parameter re-evaluates on every call, so every no-argument
+  // `loadWorld()` below re-walks up for `data/world`, not just this one — but
+  // this is the test that would name it: if `dataDir` could not find it above
+  // this file (e.g. because it stopped one directory too early after a
+  // `dist/` layout change), this load would fail with "Could not find
+  // data/world above this file" rather than returning a parsed world.
   it("finds and parses the authored world", () => {
     const world = loadWorld();
     expect(world.worldId).toBe("emberfall");

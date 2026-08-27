@@ -76,8 +76,8 @@ export const NpcDefinition = z.object({
   nameHebrew: z.string().min(1),
   /**
    * Hebrew narration is gendered, so a narrator that does not know an NPC's
-   * gender conjugates wrong — the reason `MonsterStatBlock` carries this
-   * field (`srd.ts:64`). Locations and factions do not: a town is narrated
+   * gender conjugates wrong — the reason `CreatureStatBlock` carries this
+   * field (`srd.ts:67`). Locations and factions do not: a town is narrated
    * about, not conjugated around, and the field would have no consumer.
    */
   grammaticalGender: GrammaticalGender,
