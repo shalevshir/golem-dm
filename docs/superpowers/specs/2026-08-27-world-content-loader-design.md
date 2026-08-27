@@ -260,7 +260,7 @@ reader of `data/srd/` already knows. A diff to the arc then does not touch the
 NPCs.
 
 The fixture world nests under `data/world/` rather than sitting beside it
-because the loader reads six named paths and never scans a directory, so
+because the loader reads five named JSON paths and never scans a directory, so
 nested fixtures are inert. `README.md` carries the
 `data/characters/README.md` instruction verbatim in spirit: broken on purpose,
 do not fix it.

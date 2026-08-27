@@ -833,7 +833,7 @@ defects at once — dangling ids, a duplicated id, a missing faction pair. It
 exists so `loadWorld`'s refusal path has something to refuse, and
 `apps/server/src/world/index.test.ts` asserts that every one of its defects is
 named in a single error. **Do not fix it.** The real loader never reads it: it
-reads six named files under `data/world/` and never scans a directory.
+reads five named JSON files under `data/world/` and never scans a directory.
 ```
 
 - [ ] **Step 5: Run the tests to verify they pass**
@@ -1085,7 +1085,7 @@ pnpm typecheck && npx eslint packages apps tools && echo "LINT+TYPES OK"
 git add apps/server/src/world apps/server/src/encounters/srd.ts
 git commit -m "feat(server): load the authored world from data/world/
 
-loadWorld reads six named files, parses each against its schema and
+loadWorld reads five named JSON files, parses each against its schema and
 indexes them by id, caching per directory. No cross-referencing yet —
 that is the next two commits.
 
