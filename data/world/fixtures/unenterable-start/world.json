@@ -1,0 +1,8 @@
+{
+  "worldId": "unenterable-start",
+  "startingDay": 1,
+  "startingNodeId": "start",
+  "factionRelations": [
+    { "factionA": "alpha", "factionB": "beta", "band": "cold" }
+  ]
+}

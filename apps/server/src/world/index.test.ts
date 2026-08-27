@@ -187,3 +187,33 @@ describe("loadWorld refusing faction relations", () => {
     );
   });
 });
+
+const UNENTERABLE = join(
+  dataDir(join("data", "world")),
+  "fixtures",
+  "unenterable-start",
+);
+
+describe("loadWorld's start-node check", () => {
+  // The hazard step 2 recorded and left open: `startingNodeId` pointing at a
+  // node gated on its own completion loads clean and yields a world with no
+  // enterable entry point. Cross-referencing cannot see it — every id
+  // resolves — so it takes an evaluator, which is why the check lands with
+  // step 3 and not with step 2.
+  it("refuses a world whose starting node can never be entered", () => {
+    const problems = problemsFrom(UNENTERABLE);
+    expect(problems).toHaveLength(1);
+    expect(problems[0]).toContain("startingNodeId");
+    expect(problems[0]).toContain("start");
+  });
+
+  // "leaves the broken-references fixture's problem count untouched" is not
+  // written separately: "reports exactly these seventeen problems and no
+  // others" above already pins both the count and the exact wording of every
+  // one of them, which is strictly stronger — it fails on a count change AND
+  // on a wording change. Rerunning it here would assert the same thing twice.
+
+  it("still loads the authored world", () => {
+    expect(loadWorld().startingNodeId).toBe("arrival");
+  });
+});

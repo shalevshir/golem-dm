@@ -41,3 +41,10 @@ exists so `loadWorld`'s refusal path has something to refuse, and
 `apps/server/src/world/index.test.ts` asserts that every one of its defects is
 named in a single error. **Do not fix it.** The real loader never reads it: it
 reads five named JSON files under `data/world/` and never scans a directory.
+
+`fixtures/unenterable-start/` is a world that cross-references perfectly and
+still cannot be played: its `startingNodeId` names a node gated on its own
+completion, so nothing can ever enter it. Every id in it resolves — that is
+the point. It exists so `loadWorld`'s start-node check has something to
+refuse, and `apps/server/src/world/index.test.ts` asserts it produces exactly
+one problem. **Do not fix it.**

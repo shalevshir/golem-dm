@@ -22,7 +22,7 @@ import {
   WorldManifest,
 } from "@ai-dm/schemas";
 import type { FactionBand, WorldEffect, WorldPredicate } from "@ai-dm/schemas";
-import { pairKey } from "@ai-dm/rules-engine";
+import { pairKey, startScene } from "@ai-dm/rules-engine";
 import type { AuthoredWorld } from "@ai-dm/rules-engine";
 import { dataDir } from "../encounters/srd.js";
 
@@ -221,6 +221,33 @@ export function loadWorld(dir: string = dataDir(WORLD_DIR_RELATIVE)): AuthoredWo
         problems.push(
           `${where} effect ${effect.factionA}/${effect.factionB} relates a faction to itself`,
         );
+      }
+    }
+  }
+
+  // A world can cross-reference perfectly and still have no way in: a
+  // starting node gated on its own completion resolves every id it names and
+  // can never be entered. Cross-referencing cannot see that — it takes an
+  // evaluator, which is why this check arrives with §4.7's step 3 rather than
+  // with the loader itself.
+  //
+  // Only over a world that is otherwise sound. Evaluating preconditions
+  // across dangling ids describes a graph already known to be broken, and a
+  // dangling `startingNodeId` would be reported twice in two wordings.
+  if (problems.length === 0) {
+    const opening = startScene({
+      worldId: manifest.worldId,
+      startingDay: manifest.startingDay,
+      startingNodeId: manifest.startingNodeId,
+      factions,
+      locations,
+      npcs,
+      questNodes,
+      relations,
+    });
+    if (!opening.valid) {
+      for (const rejection of opening.rejections) {
+        problems.push(`world.json startingNodeId is unenterable: ${rejection.message}`);
       }
     }
   }
