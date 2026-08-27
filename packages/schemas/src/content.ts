@@ -41,8 +41,9 @@ export const ContentId = z.string().regex(/^[a-z0-9]+(?:[-_][a-z0-9]+)*$/);
  * reliably than a number, and because a coarse bucket is much easier to
  * assert on than a score.
  *
- * No arithmetic ships here. Shifting a band is clamped evaluation and belongs
- * to §4.7's step 3 scene engine; a helper written now would have no caller.
+ * No arithmetic ships here. Shifting a band is clamped evaluation and lives in
+ * §4.7's step 3 scene engine as `shiftBand` (`@ai-dm/rules-engine`), which
+ * this package may not import (invariant 5).
  */
 export const FACTION_BANDS = [
   "war",

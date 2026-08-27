@@ -7,7 +7,6 @@ import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
-  FACTION_BANDS,
   FactionDefinition,
   LocationDefinition,
   NpcDefinition,
@@ -65,58 +64,5 @@ describe("the authored world", () => {
     const effectKinds = new Set(nodes.flatMap((n) => n.effects.map((e) => e.kind)));
     expect(predicateKinds).toEqual(new Set(["node_completed", "faction_band_at_least"]));
     expect(effectKinds).toEqual(new Set(["shift_faction_relation", "advance_calendar"]));
-  });
-
-  // Standing in for §4.7 step 3's not-yet-built predicate evaluator: nothing
-  // in this codebase evaluates `faction_band_at_least` today, so a changed
-  // `delta` or starting `band` could make reckoning's gate unwinnable on
-  // every path and nothing would notice until step 3 exists. Every number
-  // below is read out of the shipped JSON rather than hard-coded, so an edit
-  // to any of them re-runs this same check against the new values instead of
-  // going stale.
-  it("reckoning's faction_band_at_least gate is satisfiable on both paths through the arc", () => {
-    const manifest = WorldManifest.parse(readJson("world.json"));
-    const nodes = QuestNode.array().parse(readJson("arc.json"));
-
-    // `FACTION_BANDS.indexOf(band) - 3` is the -3..+3 score; step 3's engine
-    // clamps to that range when applying a shift, so this test does too.
-    const score = (band: (typeof FACTION_BANDS)[number]): number => FACTION_BANDS.indexOf(band) - 3;
-    const clamp = (n: number): number => Math.max(-3, Math.min(3, n));
-
-    const reckoning = nodes.find((each) => each.nodeId === "reckoning");
-    if (!reckoning) throw new Error("arc.json must define a reckoning node");
-    const gate = reckoning.preconditions.find((each) => each.kind === "faction_band_at_least");
-    if (!gate) throw new Error("reckoning must have a faction_band_at_least precondition");
-
-    const startRelation = manifest.factionRelations.find(
-      (each) => each.factionA === gate.factionA && each.factionB === gate.factionB,
-    );
-    if (!startRelation) {
-      throw new Error(`world.json has no relation between ${gate.factionA} and ${gate.factionB}`);
-    }
-    const requiredScore = score(gate.band);
-    const startScore = score(startRelation.band);
-
-    // The shift a node's own `shift_faction_relation` effect applies to the
-    // gated pair, or 0 if it has none — true of `warden-warning`, whose only
-    // effect is `advance_calendar`.
-    const deltaAt = (nodeId: string): number => {
-      const node = nodes.find((each) => each.nodeId === nodeId);
-      if (!node) throw new Error(`arc.json must define a ${nodeId} node`);
-      const shift = node.effects.find(
-        (each) =>
-          each.kind === "shift_faction_relation" &&
-          each.factionA === gate.factionA &&
-          each.factionB === gate.factionB,
-      );
-      if (!shift || shift.kind !== "shift_faction_relation") return 0;
-      return shift.delta;
-    };
-
-    const guildPathScore = clamp(startScore + deltaAt("guild-offer"));
-    const wardenPathScore = clamp(startScore + deltaAt("warden-warning"));
-
-    expect(guildPathScore).toBeGreaterThanOrEqual(requiredScore);
-    expect(wardenPathScore).toBeGreaterThanOrEqual(requiredScore);
   });
 });

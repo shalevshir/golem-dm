@@ -9,9 +9,12 @@
 // for the browser by `apps/web`, so `node:fs` fits in neither.
 //
 // Nothing in the running pipeline calls this yet. §4.7's step 3 scene engine
-// is the first consumer, and it takes the result injected — the way
-// `buildEncounter` takes `statBlocks` and `characters` — rather than reaching
-// for the filesystem itself.
+// is built and this loader now calls INTO it (`startScene`, below) to check
+// the starting node is enterable — but the engine itself still takes the
+// world injected, the way `buildEncounter` takes `statBlocks` and
+// `characters`, rather than reaching for the filesystem itself. The
+// direction of the dependency is `apps/server` → `@ai-dm/rules-engine`, never
+// the other way (invariant 5).
 import { readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import {
@@ -120,9 +123,11 @@ function readJson(dir: string, file: string): unknown {
 }
 
 // Parsed once per directory. The files never change at runtime, and the
-// reason to cache is concrete rather than habitual: the moment §4.7's step 3
-// wires this in, an uncached whole-world reread per deliberation is exactly
-// the O(encounters) blocking cold-load I/O that step 1's review flagged in
+// reason to cache is concrete rather than habitual: step 3 landed without
+// wiring this loader into the running pipeline (deliberately — see its
+// spec's "What this must not make worse"), but the moment a future step
+// does, an uncached whole-world reread per deliberation is exactly the
+// O(encounters) blocking cold-load I/O that step 1's review flagged in
 // `loadCampaign` as a pattern not to repeat.
 const cache = new Map<string, AuthoredWorld>();
 
@@ -225,35 +230,6 @@ export function loadWorld(dir: string = dataDir(WORLD_DIR_RELATIVE)): AuthoredWo
     }
   }
 
-  // A world can cross-reference perfectly and still have no way in: a
-  // starting node gated on its own completion resolves every id it names and
-  // can never be entered. Cross-referencing cannot see that — it takes an
-  // evaluator, which is why this check arrives with §4.7's step 3 rather than
-  // with the loader itself.
-  //
-  // Only over a world that is otherwise sound. Evaluating preconditions
-  // across dangling ids describes a graph already known to be broken, and a
-  // dangling `startingNodeId` would be reported twice in two wordings.
-  if (problems.length === 0) {
-    const opening = startScene({
-      worldId: manifest.worldId,
-      startingDay: manifest.startingDay,
-      startingNodeId: manifest.startingNodeId,
-      factions,
-      locations,
-      npcs,
-      questNodes,
-      relations,
-    });
-    if (!opening.valid) {
-      for (const rejection of opening.rejections) {
-        problems.push(`world.json startingNodeId is unenterable: ${rejection.message}`);
-      }
-    }
-  }
-
-  if (problems.length > 0) throw new WorldContentError(dir, problems);
-
   const world: AuthoredWorld = {
     worldId: manifest.worldId,
     startingDay: manifest.startingDay,
@@ -264,6 +240,26 @@ export function loadWorld(dir: string = dataDir(WORLD_DIR_RELATIVE)): AuthoredWo
     questNodes,
     relations,
   };
+
+  // A world can cross-reference perfectly and still have no way in: a
+  // starting node gated on its own completion resolves every id it names and
+  // can never be entered. Cross-referencing cannot see that — it takes an
+  // evaluator, which is why this check arrives with §4.7's step 3 rather than
+  // with the loader itself.
+  //
+  // Only over a world that is otherwise sound. Evaluating preconditions
+  // across dangling ids describes a graph already known to be broken, and a
+  // dangling `startingNodeId` would be reported twice in two wordings.
+  if (problems.length === 0) {
+    const opening = startScene(world);
+    if (!opening.valid) {
+      for (const rejection of opening.rejections) {
+        problems.push(`world.json startingNodeId is unenterable: ${rejection.message}`);
+      }
+    }
+  }
+
+  if (problems.length > 0) throw new WorldContentError(dir, problems);
 
   cache.set(cacheKey, world);
   return world;
