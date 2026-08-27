@@ -4,6 +4,8 @@
   "startingNodeId": "no-such-node",
   "factionRelations": [
     { "factionA": "alpha", "factionB": "beta", "band": "cold" },
-    { "factionA": "beta", "factionB": "alpha", "band": "war" }
+    { "factionA": "beta", "factionB": "alpha", "band": "war" },
+    { "factionA": "alpha", "factionB": "no-such-faction", "band": "neutral" },
+    { "factionA": "gamma", "factionB": "gamma", "band": "neutral" }
   ]
 }

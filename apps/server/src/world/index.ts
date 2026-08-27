@@ -180,7 +180,36 @@ export function loadWorld(dir: string = dataDir(WORLD_DIR_RELATIVE)): AuthoredWo
 
   const relations = new Map<string, FactionBand>();
   for (const entry of manifest.factionRelations) {
-    relations.set(pairKey(entry.factionA, entry.factionB), entry.band);
+    const where = `faction relation ${entry.factionA}/${entry.factionB}`;
+    checkRef({ kind: "faction", id: entry.factionA }, where);
+    checkRef({ kind: "faction", id: entry.factionB }, where);
+    if (entry.factionA === entry.factionB) {
+      problems.push(`${where} relates a faction to itself`);
+      continue;
+    }
+    const key = pairKey(entry.factionA, entry.factionB);
+    if (relations.has(key)) {
+      problems.push(
+        `duplicate faction relation for "${entry.factionA}" and "${entry.factionB}"`,
+      );
+      continue;
+    }
+    relations.set(key, entry.band);
+  }
+
+  // Every unordered pair of distinct factions must be declared, so "what is
+  // the standing between X and Y" is always answerable from the file and
+  // there is no default rule for the step 3 engine to invent. Exhaustive
+  // declaration is one line at two factions and untenable somewhere around
+  // eight, at which point an undeclared pair should default to `neutral` and
+  // this should become a warning rather than a refusal.
+  const factionIds = Array.from(factions.keys()).sort();
+  for (const [index, a] of factionIds.entries()) {
+    for (const b of factionIds.slice(index + 1)) {
+      if (!relations.has(pairKey(a, b))) {
+        problems.push(`no faction relation declared for "${a}" and "${b}"`);
+      }
+    }
   }
 
   checkRef({ kind: "quest node", id: manifest.startingNodeId }, "world.json startingNodeId");

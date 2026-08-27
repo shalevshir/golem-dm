@@ -134,3 +134,38 @@ describe("loadWorld refusing broken content", () => {
     expect(problemsFrom(BROKEN).length).toBeGreaterThan(0);
   });
 });
+
+describe("loadWorld refusing faction relations", () => {
+  it.each([
+    'duplicate faction relation for "beta" and "alpha"',
+    'faction relation alpha/no-such-faction references unknown faction "no-such-faction"',
+    "faction relation gamma/gamma relates a faction to itself",
+    'no faction relation declared for "alpha" and "gamma"',
+    'no faction relation declared for "beta" and "gamma"',
+  ])("names: %s", (problem) => {
+    expect(problemsFrom(BROKEN)).toContain(problem);
+  });
+
+  // The complete set, so a check that starts reporting something extra —
+  // or stops reporting something — fails here rather than passing quietly.
+  it("reports exactly these fourteen problems and no others", () => {
+    expect(new Set(problemsFrom(BROKEN))).toEqual(
+      new Set([
+        'duplicate npc id "twin"',
+        'world.json startingNodeId references unknown quest node "no-such-node"',
+        'npc twin references unknown location "no-such-place"',
+        'npc twin references unknown faction "no-such-faction"',
+        'quest node start references unknown location "nowhere-at-all"',
+        'quest node start edge references unknown quest node "no-such-node"',
+        'quest node start precondition references unknown quest node "no-such-node"',
+        'quest node start precondition references unknown faction "no-such-faction"',
+        'quest node start effect references unknown faction "no-such-faction"',
+        'duplicate faction relation for "beta" and "alpha"',
+        'faction relation alpha/no-such-faction references unknown faction "no-such-faction"',
+        "faction relation gamma/gamma relates a faction to itself",
+        'no faction relation declared for "alpha" and "gamma"',
+        'no faction relation declared for "beta" and "gamma"',
+      ]),
+    );
+  });
+});
