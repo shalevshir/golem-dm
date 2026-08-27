@@ -40,4 +40,4 @@ defects at once — dangling ids, a duplicated id, a missing faction pair. It
 exists so `loadWorld`'s refusal path has something to refuse, and
 `apps/server/src/world/index.test.ts` asserts that every one of its defects is
 named in a single error. **Do not fix it.** The real loader never reads it: it
-reads six named files under `data/world/` and never scans a directory.
+reads five named JSON files under `data/world/` and never scans a directory.
