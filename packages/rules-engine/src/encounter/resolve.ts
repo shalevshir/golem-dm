@@ -195,13 +195,13 @@ export function applyTurn(input: ApplyTurnInput): ApplyTurnResult {
         damage += extraTrace.total;
       }
 
-      // Correction C-31: every combatant dies at 0 HP, PCs included — not just
-      // monsters. Death saving throws are not implemented
-      // (RULES_REFERENCE.md §8's gap), so letting a PC fall Unconscious
-      // instead would strand it with nothing that ever resolves that state.
-      // `diesAtZeroHp` is therefore pinned `true` unconditionally, not read
-      // off `target.characterId`, until death saves exist. `rollDeathSave`
-      // exists in `../combat/`; this file does not drive it.
+      // Every combatant dies at 0 HP, PCs included — not just monsters.
+      // `rollDeathSave` exists in `../combat/`, but nothing in the encounter
+      // pipeline drives it (RULES_REFERENCE.md §8's gap), so letting a PC
+      // fall Unconscious instead would strand it with nothing that ever
+      // resolves that state. `diesAtZeroHp` is therefore pinned `true`
+      // unconditionally, not read off `target.characterId`, until death
+      // saves are actually driven from here.
       const applied = applyDamage(
         { currentHp: target.currentHp, maxHp: target.maxHp, tempHp: target.tempHp },
         damage,

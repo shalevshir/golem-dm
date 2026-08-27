@@ -232,12 +232,12 @@ describe("applyTurn", () => {
     expect(world.combatants.find((each) => each.combatantId === "guard_1")?.status).toBe("dead");
   });
 
-  it("kills a PC outright at 0 HP too -- death saves are implemented but not driven by the pipeline (C-31)", () => {
+  it("kills a PC outright at 0 HP too -- death saves are implemented but not driven by the pipeline", () => {
     // Same fixture as "kills a monster outright at 0 HP", but the target now
-    // carries a populated characterId. Before the pin, resolve.ts read
-    // `diesAtZeroHp: target.characterId === undefined`, which is false here --
-    // this would have failed with status "unconscious". The pin makes it
-    // "dead" regardless of characterId.
+    // carries a populated characterId. Reading
+    // `diesAtZeroHp: target.characterId === undefined` would be false here
+    // and leave the target "unconscious"; the unconditional pin in resolve.ts
+    // makes it "dead" regardless of characterId.
     const wounded = {
       ...built.world,
       combatants: built.world.combatants.map((each) =>

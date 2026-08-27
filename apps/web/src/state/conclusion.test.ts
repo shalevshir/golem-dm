@@ -24,10 +24,10 @@ describe("conclusionOf", () => {
   });
 
   it("is defeat when the party is wiped out", () => {
-    // The expected outcome (C-31): `diesAtZeroHp` is pinned true
-    // unconditionally, so the hero dies at 0 HP rather than falling
-    // Unconscious, and two goblins out-damage one level-3 fighter. No
-    // terminal frame is ever emitted (C-37) — the pipeline simply stops
+    // The expected outcome: `diesAtZeroHp` is pinned true unconditionally,
+    // so the hero dies at 0 HP rather than falling Unconscious, and two
+    // goblins out-damage one level-3 fighter. No terminal frame is ever
+    // emitted — the pipeline simply stops
     // answering — so this must be read from the projection and rendered as
     // a normal ending, not an error.
     expect(

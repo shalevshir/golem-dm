@@ -169,14 +169,14 @@ describe("main — --live", () => {
       expect(sample.hebrew).toBe("");
       expect(sample.errorCode).toBe("provider_error");
     }
-    // Fix round 1, finding 4: every one of these 9 streams failed on a
-    // missing key, so none had a non-errored attempt whose usage could have
+    // Every one of these 9 streams failed on a missing key, so none had a
+    // non-errored attempt whose usage could have
     // gone missing — `costIsUnderreported` stays false. It would have been
     // a misleading "cost is under-reported" warning for a run that billed
     // nothing at all, printed right below narrative-report.ts's own
     // erroredSamples callout, which already says what actually happened.
     expect(report.usage.costIsUnderreported).toBe(false);
-    // The exact scenario the review found: with every one of these 9 streams
+    // The exact scenario this guards: with every one of these 9 streams
     // failing on a missing key, a harness that folded errored samples into
     // the discipline counters would report `nonHebrewOutputs` equal to the
     // sample count here — indistinguishable from a prompt that answered in
@@ -236,7 +236,7 @@ describe("main — --mode narrative --review-sheet", () => {
     expect(sheet).toContain("אלדד עומד במקומו.");
     expect(sheet).toContain("### Weapons");
     expect(sheet).toContain("### Conditions");
-    // Fix round 1, Minor 7: process.stdout.write must not add its own "\n"
+    // `process.stdout.write` must not add its own "\n"
     // on top of renderReviewSheet's — that appended a trailing blank line
     // to the committed artifact.
     expect(sheet.endsWith("\n")).toBe(true);

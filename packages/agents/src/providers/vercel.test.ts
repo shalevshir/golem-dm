@@ -115,8 +115,8 @@ describe("generateStructured", () => {
     });
   });
 
-  // The brief's requirement: a malformed tool call is a typed error value, not
-  // a thrown string the caller has to pattern-match on.
+  // A malformed tool call must surface as a typed error value, not a thrown
+  // string the caller has to pattern-match on.
   it("surfaces a schema-violating tool call as a typed error", async () => {
     const port = portFor(returningToolCall({ ...legalTurn, actorId: 7 }));
 

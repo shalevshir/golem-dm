@@ -33,7 +33,7 @@ describe("buildTurn", () => {
   });
 
   it("carries an English rationale the player never authored", () => {
-    // `ExecuteTurn.tacticalRationaleEnglish` is required (C-1) and English by
+    // `ExecuteTurn.tacticalRationaleEnglish` is required and English by
     // invariant 2, while the player is typing Hebrew or not typing at all. So
     // the client synthesises a factual description of what was selected — it
     // exists so the log and the agent path carry the same shape.
