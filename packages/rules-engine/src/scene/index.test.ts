@@ -246,23 +246,50 @@ function rejectionsOf(transition: SceneTransition): readonly SceneRejection[] {
 }
 
 describe("evaluatePredicate", () => {
+  // Shared by every case below: alpha/beta sit at `hostile`, which is the
+  // band index 1 out of `war, hostile, cold, neutral, cordial, friendly,
+  // allied`. Fixed once so the three cases below read as one scale.
+  const state: SceneState = {
+    currentNodeId: "start",
+    completedNodeIds: new Set<string>(),
+    relations: new Map([[pairKey("alpha", "beta"), "hostile"]]),
+    day: 1,
+  };
+
   // `blockedWorld()`'s `faction_band_at_least` pair is always declared, and
   // the `relationBetween` test for an unknown pair goes through
   // `relationBetween` directly, not `evaluatePredicate`. This is the only
   // path that reaches `evaluatePredicate`'s own `band === undefined` guard.
   it("treats a faction pair the state does not hold as gate-closed, not gate-open", () => {
-    const state: SceneState = {
-      currentNodeId: "start",
-      completedNodeIds: new Set<string>(),
-      relations: new Map([[pairKey("alpha", "beta"), "hostile"]]),
-      day: 1,
-    };
     expect(
       evaluatePredicate(
         { kind: "faction_band_at_least", factionA: "gamma", factionB: "delta", band: "cordial" },
         state,
       ),
     ).toBe(false);
+  });
+
+  // The `>=` boundary, and the case the shipped arc actually depends on:
+  // `reckoning`'s gate asks for at least `hostile` and the arc leaves the
+  // pair at exactly `hostile` before it. Nothing else in this suite puts a
+  // faction gate in its open state, so `>` masquerading as `>=` passes every
+  // other test and strands that node.
+  it("opens a gate when the pair sits at exactly the required band", () => {
+    expect(
+      evaluatePredicate(
+        { kind: "faction_band_at_least", factionA: "alpha", factionB: "beta", band: "hostile" },
+        state,
+      ),
+    ).toBe(true);
+  });
+
+  it("opens a gate when the pair sits above the required band", () => {
+    expect(
+      evaluatePredicate(
+        { kind: "faction_band_at_least", factionA: "alpha", factionB: "beta", band: "war" },
+        state,
+      ),
+    ).toBe(true);
   });
 });
 
