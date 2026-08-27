@@ -268,6 +268,46 @@ describe("completeCurrentNode", () => {
     expect(relationBetween(world, after, "alpha", "beta")).toBe("cold");
   });
 
+  // The precondition check must not defeat the idempotency above. A node whose
+  // own effect shifts the pair its own gate reads would, on a second call,
+  // re-evaluate that gate against the band its first call produced — and
+  // refuse a completion that has already happened.
+  it("stays idempotent for a node whose effects invalidate its own gate", () => {
+    const world: AuthoredWorld = {
+      ...linearWorld(),
+      startingNodeId: "self-undoing",
+      relations: new Map([[pairKey("alpha", "beta"), "cordial"]]),
+      questNodes: new Map([
+        [
+          "self-undoing",
+          {
+            nodeId: "self-undoing",
+            titleEnglish: "Self-undoing",
+            sceneEnglish: "A node that shifts the pair its own gate reads.",
+            locationId: "here",
+            preconditions: [
+              {
+                kind: "faction_band_at_least",
+                factionA: "alpha",
+                factionB: "beta",
+                band: "cordial",
+              },
+            ],
+            effects: [
+              { kind: "shift_faction_relation", factionA: "alpha", factionB: "beta", delta: -4 },
+            ],
+            edges: [],
+          },
+        ],
+      ]),
+    };
+    const once = stateOf(completeCurrentNode(world, stateOf(startScene(world))));
+    expect(relationBetween(world, once, "alpha", "beta")).toBe("war");
+    const twice = stateOf(completeCurrentNode(world, once));
+    expect(relationBetween(world, twice, "alpha", "beta")).toBe("war");
+    expect(twice.completedNodeIds.size).toBe(once.completedNodeIds.size);
+  });
+
   // Entry is gated by `startScene` and `traverseEdge`, but they stop being the
   // only producers of a `SceneState` once step 4 folds one out of the log —
   // and completing a node is what applies its effects.

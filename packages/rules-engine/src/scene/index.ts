@@ -363,6 +363,12 @@ export function completeCurrentNode(
   if (current === undefined) {
     return { valid: false, rejections: [missingCurrentNode(state)] };
   }
+  // Already completed: a no-op, and the precondition check below must NOT run.
+  // A node whose own effects invalidate its own gate — a `cordial` gate over a
+  // pair its effect shifts down — would otherwise refuse its own second call,
+  // which is the idempotency this function promises. The gate belongs to the
+  // transition into a node, not to the state of already being past it.
+  if (state.completedNodeIds.has(current.nodeId)) return { valid: true, state };
   const rejections = entryRejections(world, state, state.currentNodeId);
   if (rejections.length > 0) return { valid: false, rejections };
   return { valid: true, state: completed(world, current, state) };
