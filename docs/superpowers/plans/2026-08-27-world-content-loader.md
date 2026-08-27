@@ -1533,15 +1533,17 @@ describe("loadWorld refusing faction relations", () => {
 
   // The complete set, so a check that starts reporting something extra —
   // or stops reporting something — fails here rather than passing quietly.
-  it("reports exactly these twelve problems and no others", () => {
+  it("reports exactly these fourteen problems and no others", () => {
     expect(new Set(problemsFrom(BROKEN))).toEqual(
       new Set([
         'duplicate npc id "twin"',
         'world.json startingNodeId references unknown quest node "no-such-node"',
         'npc twin references unknown location "no-such-place"',
         'npc twin references unknown faction "no-such-faction"',
+        'quest node start references unknown location "nowhere-at-all"',
         'quest node start edge references unknown quest node "no-such-node"',
         'quest node start precondition references unknown quest node "no-such-node"',
+        'quest node start precondition references unknown faction "no-such-faction"',
         'quest node start effect references unknown faction "no-such-faction"',
         'duplicate faction relation for "beta" and "alpha"',
         'faction relation alpha/no-such-faction references unknown faction "no-such-faction"',
@@ -1560,7 +1562,9 @@ describe("loadWorld refusing faction relations", () => {
 corepack enable && pnpm --filter @ai-dm/server test world
 ```
 
-Expected: FAIL — five problems are missing and the set assertion reports seven of twelve.
+Expected: FAIL — five problems are missing and the set assertion reports nine of fourteen.
+
+The nine Task 5 already reports include two added by its own fix round, which closed a gap where `QuestNode.locationId` and the `faction_band_at_least` branch of `predicateRefs` had no failing-path coverage at all.
 
 - [ ] **Step 4: Replace the relations loop**
 
