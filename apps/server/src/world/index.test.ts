@@ -100,8 +100,10 @@ describe("loadWorld refusing broken content", () => {
     'world.json startingNodeId references unknown quest node "no-such-node"',
     'npc twin references unknown location "no-such-place"',
     'npc twin references unknown faction "no-such-faction"',
+    'quest node start references unknown location "nowhere-at-all"',
     'quest node start edge references unknown quest node "no-such-node"',
     'quest node start precondition references unknown quest node "no-such-node"',
+    'quest node start precondition references unknown faction "no-such-faction"',
     'quest node start effect references unknown faction "no-such-faction"',
   ])("names: %s", (problem) => {
     expect(problemsFrom(BROKEN)).toContain(problem);

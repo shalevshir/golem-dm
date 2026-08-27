@@ -3,8 +3,16 @@
     "nodeId": "start",
     "titleEnglish": "Start",
     "sceneEnglish": "A fixture node whose every outbound reference is wrong.",
-    "locationId": "somewhere",
-    "preconditions": [{ "kind": "node_completed", "nodeId": "no-such-node" }],
+    "locationId": "nowhere-at-all",
+    "preconditions": [
+      { "kind": "node_completed", "nodeId": "no-such-node" },
+      {
+        "kind": "faction_band_at_least",
+        "factionA": "alpha",
+        "factionB": "no-such-faction",
+        "band": "cold"
+      }
+    ],
     "effects": [
       {
         "kind": "shift_faction_relation",
