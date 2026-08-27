@@ -123,7 +123,7 @@ export function affordancesFor(
     // once a kill happens. Unconscious is unreachable no longer because
     // combatants lack a `characterId` — a character spawn populates a real
     // one now (`combatantFromStatBlock`, ../encounter/build.ts's
-    // `resolveSpawn`). The reason is correction C-31: `applyTurn`'s
+    // `resolveSpawn`). The reason is that `applyTurn`'s
     // `applyDamage` call in `../encounter/resolve.ts` pins `diesAtZeroHp:
     // true` unconditionally (death saves are implemented but not driven by
     // the encounter pipeline — RULES_REFERENCE.md §8's gap), so nobody, PC

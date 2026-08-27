@@ -204,7 +204,7 @@ export type CatalogueAction = z.infer<typeof CatalogueAction>;
  * The response body of `GET /encounters/:encounterId`. It is HTTP rather
  * than a frame because it is static per encounter — pushing it on the socket
  * would re-send unchanging text on every turn of every campaign, on a
- * connection that already carries a `CampaignState` which only grows (C-30).
+ * connection that already carries a `CampaignState` which only grows.
  * A client fetches it once at join and caches it for the campaign.
  *
  * It is also the one contract in this file that both ends *parse*: every

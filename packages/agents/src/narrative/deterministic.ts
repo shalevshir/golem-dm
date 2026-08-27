@@ -47,7 +47,7 @@ function form(key: string, creature: NarratedCreature): string {
  * fight, and "dead" and "unconscious" have to read as distinctly different
  * news. The verb agrees with the TARGET, not the attacker.
  *
- * `"alive"` needs nothing said about it. The brief's `statusAfter` cannot be
+ * `"alive"` needs nothing said about it, and `statusAfter` cannot be
  * `"fled"` — see `port.ts`.
  */
 function statusSentence(beat: Extract<NarrationBeat, { kind: "attack" }>): string | undefined {

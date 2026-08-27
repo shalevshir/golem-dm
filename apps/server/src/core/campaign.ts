@@ -7,7 +7,7 @@
 // to its Bresenham default — but `worldFor` is where that field would come
 // from if it were populated, which is the mechanism this comment documents.)
 //
-// C-26: `reduce` never writes `world.campaignId`, `world.rootSeed`,
+// `reduce` never writes `world.campaignId`, `world.rootSeed`,
 // `encounter.encounterId`, `encounter.grid` or `encounter.turnOrder` — no
 // event branch touches those five fields, and neither `campaign_started` nor
 // `encounter_started` fills the state it declares (that is what makes
@@ -216,8 +216,8 @@ export async function createCampaign(input: CreateCampaignInput): Promise<Campai
  * Opens a bracket on an existing campaign, in place. Mutates rather than
  * returns a fresh record because campaigns are shared objects — two sockets
  * alias the same `Campaign` and `pipeline.ts`'s `emit` already advances
- * `state`/`nextSequence` on it in place (`http.ts`'s `CampaignRegistry`,
- * CRITICAL-1). Returning a copy here would leave the registry and every live
+ * `state`/`nextSequence` on it in place (`http.ts`'s `CampaignRegistry`).
+ * Returning a copy here would leave the registry and every live
  * socket holding the pre-encounter one.
  *
  * The catalogue lookup runs first and the fold guard runs second, both before

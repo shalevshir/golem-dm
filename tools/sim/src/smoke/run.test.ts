@@ -49,9 +49,9 @@ describe("runSmoke", () => {
     expect(legality?.afterRetry).toBe(1);
     expect(legality?.fallback).toBe(2);
 
-    // Pins Correction 1 / Task 12 Step 8: encounter mode's `beforeTurn` must
-    // hand the runner the real board so a legal baseline can be scripted. A
-    // regression to the pre-Step-8 shape (scripting from a null board) makes
+    // Encounter mode's `beforeTurn` must hand the runner the real board so a
+    // legal baseline can be scripted. A regression that scripts from a null
+    // board instead makes
     // every encounter turn fall straight to the deterministic fallback, which
     // still validates — so `encounter.turns > 0` alone would not catch it.
     // Exact counts catch it more precisely than `firstTry > 0` did: any

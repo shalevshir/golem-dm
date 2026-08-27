@@ -53,16 +53,16 @@ const conditionNamesHebrew = new Map(
 // not through `@ai-dm/agents`' `createTimingPort`. That decorator's
 // `timings` is an append-only array with no drain/reset API — wrapping the
 // provider in it here and never reading it back would be exactly the dead
-// code and unbounded growth task-corrections.md's C-23 flagged in the
-// original plan. `TurnProposalResult.usage` and this file's own wall-clock
+// code and unbounded growth. `TurnProposalResult.usage` and this file's own
+// wall-clock
 // around the tactical call already cover what `TimingPort` would have
 // offered for this purpose.
 
-// C-23/C-39: one structured log line per turn that reached the tactical
-// agent, written through the app's own pino logger rather than a bare
-// `process.stdout.write` (review finding, task 14 round 2: a bare JSON
-// object carries no `time`/`level`, ignores `LOG_LEVEL` entirely, and can't
-// be told apart from the pino lines Fastify writes to the same stream).
+// One structured log line per turn that reached the tactical agent, written
+// through the app's own pino logger rather than a bare `process.stdout.write`:
+// a bare JSON object carries no `time`/`level`, ignores `LOG_LEVEL` entirely,
+// and cannot be told apart from the pino lines Fastify writes to the same
+// stream.
 // The logger is filled in via a holder object, late-bound, because of the
 // ordering this file is stuck with: `metrics` has to exist before
 // `buildApp` is called (it goes into `ports`, one of `buildApp`'s inputs),

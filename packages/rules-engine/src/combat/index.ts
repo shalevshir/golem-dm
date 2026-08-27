@@ -58,8 +58,7 @@ export interface DamageOptions {
    * unconditionally instead — death saves are implemented (`rollDeathSave`)
    * but nothing yet drives them from the encounter pipeline, so letting a
    * player character fall Unconscious here would strand it with no way to
-   * resolve that state. Tracked as a known gap (correction C-31); see
-   * RULES_REFERENCE.md §8.
+   * resolve that state. Tracked as a known gap; see RULES_REFERENCE.md §8.
    */
   diesAtZeroHp?: boolean;
 }

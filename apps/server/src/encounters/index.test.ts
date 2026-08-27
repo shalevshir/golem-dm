@@ -39,11 +39,10 @@ describe("encounter catalogue", () => {
     expect(built.sceneEnglish).toContain("hillside");
   });
 
-  // C-14: the brief's original geometry (hero and goblins ~45 ft apart) makes
-  // every melee proposal illegal forever. Prove the corrected geometry does
-  // not have that problem by actually running a scripted melee attack through
-  // the real validator, from both sides, rather than assuming the tile math
-  // works out.
+  // Geometry with the hero and goblins ~45 ft apart would make every melee
+  // proposal illegal forever. Prove this encounter's geometry does not have
+  // that problem by actually running a scripted melee attack through the real
+  // validator, from both sides, rather than assuming the tile math works out.
   it("makes a scripted melee attack from the hero legal on turn 1", () => {
     const built = buildEncounterById("goblin-ambush");
     const hero = built.world.combatants.find((each) => each.combatantId === "hero");
@@ -52,7 +51,7 @@ describe("encounter catalogue", () => {
     const turn: ExecuteTurn = {
       actorId: "hero",
       // Longsword, not the borrowed guard's spear: the hero is a real
-      // CharacterSheet as of Task 14 (C-13 is closed).
+      // CharacterSheet.
       mainAction: { actionType: "attack", actionId: "longsword", targetIds: ["goblin-a"] },
       tacticalRationaleEnglish: "Test fixture.",
     };
@@ -83,7 +82,7 @@ describe("the goblin-ambush hero", () => {
     const hero = built.world.combatants.find((each) => each.combatantId === "hero");
     expect(hero?.characterId).toBe("hero");
     expect(hero?.maxHp).toBe(28);
-    // Chain Mail, matching the guard's AC so C-14's reach geometry is
+    // Chain Mail, matching the guard's AC so the reach geometry is
     // unaffected by the swap.
     expect(hero?.armorClass).toBe(16);
   });
@@ -96,8 +95,8 @@ describe("the goblin-ambush hero", () => {
 
   // The "legal melee attack on turn 1" case for the hero is already covered
   // by "makes a scripted melee attack from the hero legal on turn 1" above
-  // (same encounter, validator, actor and target, and the fuller C-14
-  // comment on why the geometry is tested at all) — not repeated here.
+  // (same encounter, validator, actor and target, and the fuller comment
+  // there on why the geometry is tested at all) — not repeated here.
 
   it("refuses to load a sheet whose stored values disagree with the derivation", () => {
     // Guards the cross-check being wired into loadCharacter at all, not just

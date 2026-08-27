@@ -61,10 +61,9 @@ function report(overrides: Partial<NarrativeRunReport> = {}): NarrativeRunReport
 
 describe("renderNarrativeMarkdown", () => {
   it("declares the cached-token-share gap unconditionally, even on a healthy run", () => {
-    // Regression check for the review's finding 2: this sentence used to
-    // live only inside the costIsUnderreported branch, which does not fire
-    // here (costIsUnderreported: false) — so the healthy-run markdown said
-    // nothing about the gap at all.
+    // This sentence must not live only inside the costIsUnderreported branch,
+    // which does not fire here (costIsUnderreported: false) — that would leave
+    // the healthy-run markdown saying nothing about the gap at all.
     const markdown = renderNarrativeMarkdown(
       report({ usage: { ...report().usage, costIsUnderreported: false } }),
     );
@@ -104,10 +103,9 @@ describe("renderNarrativeMarkdown", () => {
   });
 
   it("states the cost figure excludes cache-read tokens and is a lower bound, even on a healthy run", () => {
-    // Regression check for finding 4: this used to say nothing about
-    // cache-read exclusion at all, on a run where costIsUnderreported is
-    // false — exactly the run this benchmark's own cache-stable prompt
-    // produces in practice.
+    // Without this, the markdown says nothing about cache-read exclusion on a
+    // run where costIsUnderreported is false — exactly the run this
+    // benchmark's own cache-stable prompt produces in practice.
     const markdown = renderNarrativeMarkdown(
       report({ usage: { ...report().usage, costIsUnderreported: false } }),
     );
@@ -135,8 +133,7 @@ describe("renderNarrativeMarkdown", () => {
   });
 
   it("calls out errored samples and excludes them from the discipline denominator", () => {
-    // Regression check for finding 1's markdown-surfacing requirement: a
-    // reader must never mistake an errored-stream count for a discipline
+    // A reader must never mistake an errored-stream count for a discipline
     // failure under the "any non-zero count is a prompt bug" line.
     const markdown = renderNarrativeMarkdown(
       report({

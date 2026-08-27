@@ -10,10 +10,10 @@ import { loadMonster } from "./srd.js";
 
 export { loadCharacter, loadConditions, loadMonster };
 
-// Geometry per task-corrections.md C-14: the brief's original spawns (hero
-// [1,4], goblins [10,3]/[10,5], ~45 ft apart) put every combatant beyond the
-// 5 ft melee reach of a scimitar or spear, so every melee proposal is
-// rejected `target_out_of_reach` forever and the fight can never conclude.
+// Geometry is load-bearing. Spawns ~45 ft apart (say hero [1,4], goblins
+// [10,3]/[10,5]) put every combatant beyond the 5 ft melee reach of a
+// scimitar or spear, so every melee proposal is rejected
+// `target_out_of_reach` forever and the fight can never conclude.
 // Instead, mirror `tools/sim/src/scenarios/melee-brawl.ts`: everyone starts
 // within reach of each other on a 12x12 field. The hero sits between the two
 // goblins, each diagonally adjacent (Chebyshev distance 1 tile = 5 ft,
@@ -31,8 +31,8 @@ const GOBLIN_AMBUSH: EncounterDefinition = {
   width: 12,
   height: 12,
   spawns: [
-    // C-13 is closed: the hero is a real CharacterSheet in data/characters/,
-    // no longer the `guard` stat block standing in for one.
+    // The hero is a real CharacterSheet in data/characters/, not the `guard`
+    // stat block standing in for one.
     { combatantId: "hero", characterId: "hero", faction: "party", position: [5, 4] },
     { combatantId: "goblin-a", monsterId: "goblin_warrior", faction: "hostile", position: [6, 3] },
     { combatantId: "goblin-b", monsterId: "goblin_warrior", faction: "hostile", position: [6, 5] },
@@ -92,7 +92,7 @@ export function buildEncounterById(encounterId: string): BuiltEncounter {
  * The static per-encounter facts a client needs to label what it draws:
  * display names, max HP and faction. Static is the point — this is fetched
  * once over HTTP and cached, rather than re-sent on a socket that already
- * carries a `CampaignState` growing without bound (C-30). The shape itself
+ * carries a `CampaignState` growing without bound. The shape itself
  * lives in `@ai-dm/schemas` (`EncounterCatalogue`), not here — it is the one
  * response body a browser client also parses, so invariant 4 puts it in the
  * shared package rather than a hand-rolled interface duplicated on each end.

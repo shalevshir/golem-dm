@@ -131,9 +131,9 @@ describe("startEncounter", () => {
   });
 
   it("mutates the campaign it was handed rather than returning a copy", async () => {
-    // `http.ts`'s registry and every live socket alias one `Campaign` object
-    // (CRITICAL-1). A `startEncounter` that returned a fresh record would
-    // leave all of them holding the encounter-less one.
+    // `http.ts`'s registry and every live socket alias one `Campaign`
+    // object. A `startEncounter` that returned a fresh record would leave
+    // all of them holding the encounter-less one.
     const input = baseInput();
     const created = await createCampaign(input);
     const started = await startEncounter({

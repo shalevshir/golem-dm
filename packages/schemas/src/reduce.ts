@@ -195,7 +195,7 @@ export function reduce(state: CampaignState, event: GameEvent): CampaignState {
     // cannot fill its own bracket: the world it declares is rebuilt from its
     // payload before the fold begins, not folded out of it. That is what
     // keeps "fold from a snapshot plus events equals fold from the campaign's
-    // starting state" true (C-26).
+    // starting state" true.
     case "campaign_started":
     case "intent_classified":
     case "action_proposed":

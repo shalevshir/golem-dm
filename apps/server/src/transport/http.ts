@@ -19,9 +19,9 @@ export interface CampaignRegistry {
    * without side effects if it is already claimed — the caller must not
    * proceed with `handleCommand` in that case.
    *
-   * CRITICAL-1: campaigns are shared across sockets — `live` below is the
-   * mechanism that makes two WS connections (Task 14) alias the same
-   * `Campaign` object, with `nextSequence` advanced on it in place — so the
+   * Campaigns are shared across sockets — `live` below is the mechanism
+   * that makes two WS connections alias the same `Campaign` object, with
+   * `nextSequence` advanced on it in place — so the
    * mutual-exclusion guard belongs on the object that creates that sharing,
    * not on a per-socket flag in the transport (which cannot see a second
    * socket's in-flight command at all) and not on `Campaign` itself (a
@@ -53,13 +53,13 @@ export interface CampaignRegistryInput {
  * persistence spec. There is no eviction: every campaign created in a run
  * stays pinned here for the run's lifetime, each entry holding a full
  * `BuiltEncounter` plus a `CampaignState` whose `appliedClientMessageIds`
- * itself grows without bound (C-30). Unbounded growth within a run, not just
+ * itself grows without bound. Unbounded growth within a run, not just
  * across a restart — deliberately left to the persistence spec, not fixed
  * here.
  */
 export function createCampaignRegistry(input: CampaignRegistryInput): CampaignRegistry {
   const live = new Map<string, Campaign>();
-  // The per-campaign in-flight-command lock (CRITICAL-1). A plain `Set`: a
+  // The per-campaign in-flight-command lock. A plain `Set`: a
   // campaign id is a member exactly while some socket's `handleCommand` call
   // for it is running, from `tryBegin` to the matching `end`.
   const inFlight = new Set<string>();
@@ -173,9 +173,9 @@ export function registerHttpRoutes(app: FastifyInstance, registry: CampaignRegis
       campaign = await registry.create(body.data.encounterId);
     } catch (error) {
       // `registry.create` throws `UnknownEncounterError` for an id the
-      // catalogue does not know — that is the only case that is a 404. Since
-      // Fix 2, that error comes from `encounterById`'s guard at the top of
-      // `create`, which runs before anything is written; `startEncounter`'s
+      // catalogue does not know — that is the only case that is a 404. That
+      // error comes from `encounterById`'s guard at the top of `create`,
+      // which runs before anything is written; `startEncounter`'s
       // own `buildEncounterById` call further down can throw the same error
       // type in principle, but by the time it runs the id has already
       // cleared that guard, so it is unreachable in practice. Everything
@@ -192,7 +192,7 @@ export function registerHttpRoutes(app: FastifyInstance, registry: CampaignRegis
   });
 
   app.get<{ Params: { encounterId: string } }>("/encounters/:encounterId", (request, reply) => {
-    // C-34: `UnknownEncounterError` is the only 404. Everything else
+    // `UnknownEncounterError` is the only 404. Everything else
     // `encounterCatalogue` can throw — ENOENT from a missing SRD file, a
     // ZodError from a malformed one, any of `buildEncounter`'s validations —
     // is a genuine server fault and must not be reported as "not found".
