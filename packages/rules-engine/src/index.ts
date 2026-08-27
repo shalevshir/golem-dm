@@ -5,3 +5,4 @@ export * from "./combat/index.js";
 export * from "./spatial/index.js";
 export * from "./encounter/index.js";
 export * from "./character/index.js";
+export * from "./scene/index.js";

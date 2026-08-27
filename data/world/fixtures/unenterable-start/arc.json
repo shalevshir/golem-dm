@@ -1,0 +1,9 @@
+[
+  {
+    "nodeId": "start",
+    "titleEnglish": "Start",
+    "sceneEnglish": "The starting node, gated on its own completion. It can never be entered, so this world can never be played.",
+    "locationId": "here",
+    "preconditions": [{ "kind": "node_completed", "nodeId": "start" }]
+  }
+]

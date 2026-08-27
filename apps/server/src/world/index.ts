@@ -9,9 +9,12 @@
 // for the browser by `apps/web`, so `node:fs` fits in neither.
 //
 // Nothing in the running pipeline calls this yet. §4.7's step 3 scene engine
-// is the first consumer, and it takes the result injected — the way
-// `buildEncounter` takes `statBlocks` and `characters` — rather than reaching
-// for the filesystem itself.
+// is built and this loader now calls INTO it (`startScene`, below) to check
+// the starting node is enterable — but the engine itself still takes the
+// world injected, the way `buildEncounter` takes `statBlocks` and
+// `characters`, rather than reaching for the filesystem itself. The
+// direction of the dependency is `apps/server` → `@ai-dm/rules-engine`, never
+// the other way (invariant 5).
 import { readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import {
@@ -22,9 +25,21 @@ import {
   WorldManifest,
 } from "@ai-dm/schemas";
 import type { FactionBand, WorldEffect, WorldPredicate } from "@ai-dm/schemas";
+import { pairKey, startScene } from "@ai-dm/rules-engine";
+import type { AuthoredWorld } from "@ai-dm/rules-engine";
 import { dataDir } from "../encounters/srd.js";
 
 const WORLD_DIR_RELATIVE = join("data", "world");
+
+/**
+ * Re-exported from `@ai-dm/rules-engine`, where both moved when §4.7's step 3
+ * scene engine — pure, and forbidden from importing an app — became their
+ * consumer. `loadWorld` is what produces an `AuthoredWorld`, so a caller
+ * holding the loader should not have to know which package the type was
+ * hoisted into. There is still exactly one declaration of each.
+ */
+export { pairKey };
+export type { AuthoredWorld };
 
 /**
  * Thrown by `loadWorld` when content parses but does not hang together — a
@@ -103,49 +118,16 @@ function effectRefs(effect: WorldEffect): readonly ContentRef[] {
   }
 }
 
-/**
- * The authored world, indexed. `Map`s rather than arrays for the reason
- * `loadGear` returns them: every consumer looks content up by id.
- *
- * Declared here rather than in `@ai-dm/schemas` because it is neither a wire
- * shape nor a zod schema — it holds `Map`s. `SrdGear` is the identical case
- * and lives in `@ai-dm/rules-engine`, next to its consumer rather than in the
- * schema package. §4.7's step 3 scene engine takes this injected and can
- * rehome the type then.
- */
-export interface AuthoredWorld {
-  readonly worldId: string;
-  readonly startingDay: number;
-  readonly startingNodeId: string;
-  readonly factions: ReadonlyMap<string, FactionDefinition>;
-  readonly locations: ReadonlyMap<string, LocationDefinition>;
-  readonly npcs: ReadonlyMap<string, NpcDefinition>;
-  readonly questNodes: ReadonlyMap<string, QuestNode>;
-  /** Keyed by `pairKey`, so a relation is an unordered pair. */
-  readonly relations: ReadonlyMap<string, FactionBand>;
-}
-
 function readJson(dir: string, file: string): unknown {
   return JSON.parse(readFileSync(join(dir, file), "utf8"));
 }
 
-/**
- * Canonical key for an unordered faction pair, so declaring `A,B` and `B,A`
- * names one relation rather than two. `|` is safe as a delimiter because
- * `ContentId` forbids it.
- *
- * Exported because a `Map` keyed by a private convention is unusable by a
- * consumer. Step 3 may well want a `relationBetween(world, a, b)` wrapper
- * over it; that is one line and belongs with the code that needs it.
- */
-export function pairKey(a: string, b: string): string {
-  return a < b ? `${a}|${b}` : `${b}|${a}`;
-}
-
 // Parsed once per directory. The files never change at runtime, and the
-// reason to cache is concrete rather than habitual: the moment §4.7's step 3
-// wires this in, an uncached whole-world reread per deliberation is exactly
-// the O(encounters) blocking cold-load I/O that step 1's review flagged in
+// reason to cache is concrete rather than habitual: step 3 landed without
+// wiring this loader into the running pipeline (deliberately — see its
+// spec's "What this must not make worse"), but the moment a future step
+// does, an uncached whole-world reread per deliberation is exactly the
+// O(encounters) blocking cold-load I/O that step 1's review flagged in
 // `loadCampaign` as a pattern not to repeat.
 const cache = new Map<string, AuthoredWorld>();
 
@@ -248,8 +230,6 @@ export function loadWorld(dir: string = dataDir(WORLD_DIR_RELATIVE)): AuthoredWo
     }
   }
 
-  if (problems.length > 0) throw new WorldContentError(dir, problems);
-
   const world: AuthoredWorld = {
     worldId: manifest.worldId,
     startingDay: manifest.startingDay,
@@ -260,6 +240,26 @@ export function loadWorld(dir: string = dataDir(WORLD_DIR_RELATIVE)): AuthoredWo
     questNodes,
     relations,
   };
+
+  // A world can cross-reference perfectly and still have no way in: a
+  // starting node gated on its own completion resolves every id it names and
+  // can never be entered. Cross-referencing cannot see that — it takes an
+  // evaluator, which is why this check arrives with §4.7's step 3 rather than
+  // with the loader itself.
+  //
+  // Only over a world that is otherwise sound. Evaluating preconditions
+  // across dangling ids describes a graph already known to be broken, and a
+  // dangling `startingNodeId` would be reported twice in two wordings.
+  if (problems.length === 0) {
+    const opening = startScene(world);
+    if (!opening.valid) {
+      for (const rejection of opening.rejections) {
+        problems.push(`world.json startingNodeId is unenterable: ${rejection.message}`);
+      }
+    }
+  }
+
+  if (problems.length > 0) throw new WorldContentError(dir, problems);
 
   cache.set(cacheKey, world);
   return world;
