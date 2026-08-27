@@ -31,7 +31,7 @@ describe("renderReviewSheet", () => {
     expect(sheet.endsWith("\n\n")).toBe(false);
   });
 
-  // --- The brief's own three tests, verbatim ---------------------------
+  // --- Content coverage: what the sheet must surface ------------------
 
   it("puts each Hebrew sample next to the English beats that produced it", () => {
     const sheet = renderReviewSheet(INPUT);

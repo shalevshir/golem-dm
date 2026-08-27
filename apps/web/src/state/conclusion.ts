@@ -1,11 +1,11 @@
 // Is the fight over, and who won — read from the projection, never from a
 // frame. There IS no terminal frame: once the last party member dies,
 // `runEnemyTurns` returns at its `livingFactions.size < 2` check with no event
-// emitted, and every later command is answered `not_your_turn` (correction
-// C-37). A UI that waited for a victory frame would hang forever.
+// emitted, and every later command is answered `not_your_turn`. A UI that
+// waited for a victory frame would hang forever.
 //
-// The party is expected to LOSE (correction C-31): `diesAtZeroHp` is pinned
-// true unconditionally, so a PC dies at 0 HP rather than falling Unconscious
+// The party is expected to LOSE: `diesAtZeroHp` is pinned true
+// unconditionally, so a PC dies at 0 HP rather than falling Unconscious
 // — death saves are implemented but not driven by the encounter pipeline
 // (RULES_REFERENCE.md §8's gap). Defeat is a normal ending here, not an
 // error state.

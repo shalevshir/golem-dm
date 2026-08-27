@@ -20,11 +20,12 @@ export function registerWebSocketRoute(app: FastifyInstance, input: WebSocketRou
     let campaign: Campaign | null = null;
     // Per-SOCKET ordering guard only — see the two-guard comment in the
     // message handler below for why a per-campaign lock (via `registry`) is
-    // also required and this alone is not the CRITICAL-1 fix.
+    // also required, and why this alone cannot stop two sockets from playing
+    // the same campaign's turn twice.
     let localBusy = false;
 
     function send(frame: ServerFrame): void {
-      // C-36a: `handleCommand` is always drained to completion below, even
+      // `handleCommand` is always drained to completion below, even
       // once the client has gone — a half-drained generator mid-turn would
       // leave the rest of that turn's events unwritten. That means frames
       // can still arrive here after the socket has closed. Guarding here,
@@ -75,13 +76,13 @@ export function registerWebSocketRoute(app: FastifyInstance, input: WebSocketRou
         //    could reach `campaign === null` before the first event's own
         //    `await input.registry.get` below had resumed and `campaign` was
         //    ever assigned — misreporting a legitimate pipelined action as
-        //    `unknown_campaign` (review finding, task 14 round 2). Rejected
+        //    `unknown_campaign`. Rejected
         //    with `turn_in_progress`, not queued — see point 2.
         //
-        // 2. The `CampaignRegistry`'s per-CAMPAIGN lock (CRITICAL-1). Campaigns
-        //    are deliberately shared across sockets — `http.ts`'s `live`
-        //    cache is what lets two WS connections onto the same campaign
-        //    (Task 14) alias one mutable `Campaign` object, with
+        // 2. The `CampaignRegistry`'s per-CAMPAIGN lock. Campaigns are
+        //    deliberately shared across sockets — `http.ts`'s `live` cache
+        //    is what lets two WS connections onto the same campaign alias
+        //    one mutable `Campaign` object, with
         //    `nextSequence` advanced on it in place — so `localBusy` alone
         //    cannot prevent two different sockets bound to the same campaign
         //    from each passing their own turn-order check while the other's

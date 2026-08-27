@@ -227,7 +227,7 @@ describe("App", () => {
   });
 
   it("renders a defeat as a normal ending, not an error", async () => {
-    // C-31/C-37: the party is expected to lose, and NO terminal frame is ever
+    // The party is expected to lose, and NO terminal frame is ever
     // sent — the pipeline simply stops answering. The conclusion is therefore
     // read from the projection, and defeat renders as an ending, not a fault.
     await start();

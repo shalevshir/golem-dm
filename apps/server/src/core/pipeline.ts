@@ -57,8 +57,7 @@ export const SNAPSHOT_EVERY = 50;
  * agent — a player's `structured_action` makes no model call and has
  * nothing to report.
  *
- * Two of the spec's five fields are deliberately absent (task-corrections.md
- * addendum, C-23/C-39):
+ * Two of the spec's five fields are deliberately absent:
  * - Cached tokens: `TokenUsage` (`packages/agents/src/providers/usage.ts`)
  *   is exactly `{ promptTokens, completionTokens, totalTokens }` — no
  *   cache-read field exists anywhere in the port layer to report.
@@ -76,7 +75,7 @@ export interface TacticalTurnMetrics {
    * from `source` rather than folded into it: this dimension is "did the
    * turn resolve," `source` below is "which call produced it," and
    * conflating them made a failed proposal read as if it named a model
-   * tier it never actually had (review finding, task 14 round 2).
+   * tier it never actually had.
    */
   outcome: "ok" | TurnProposalFailure["kind"];
   /**
@@ -88,19 +87,20 @@ export interface TacticalTurnMetrics {
   /**
    * `usage.length`: attempts the provider actually BILLED for, not every
    * attempt the agent made. `createTacticalAgent`'s attempt loop
-   * (`packages/agents/src/tactical/index.ts:152`) only pushes onto `usage`
+   * (`packages/agents/src/tactical/index.ts`) only pushes onto `usage`
    * `if (result.error.usage !== undefined)` — an attempt that failed before
    * the provider reported any usage (e.g. `provider_error`) contributes no
-   * entry, so `usage.length` can undercount attempts. `index.test.ts:254`
-   * pins exactly this: a two-attempt run reporting `usage.length === 1`.
-   * Named for what it actually measures rather than "attempts" (review
-   * finding, task 14 round 2).
+   * entry, so `usage.length` can undercount attempts. `index.test.ts`'s
+   * "does not invent usage for a rejection the provider did not price" pins
+   * exactly this: a two-attempt run reporting `usage.length === 1`. Named
+   * for what it actually measures rather than "attempts".
    */
   billedAttempts: number;
   /**
    * `proposal.rejections.length`: every attempt the agent made, billed or
-   * not — the true retry count C-23 asks for, which `billedAttempts` alone
-   * would silently undercount whenever an attempt failed unbilled.
+   * not — the true retry count the metrics contract asks for, which
+   * `billedAttempts` alone would silently undercount whenever an attempt
+   * failed unbilled.
    */
   retries: number;
   promptTokens: number;
@@ -206,7 +206,7 @@ function clientMessageIdOf(command: ClientMessage): string | undefined {
  * an empty one, and the caller decides what to do when nothing arrived at
  * all.
  *
- * C-19: a naive version of this races `iterator.next()` against a fresh
+ * A naive version of this races `iterator.next()` against a fresh
  * `setTimeout` every loop iteration and never clears it on the fast path, so
  * a long stream leaves one live ~10s timer per chunk. Each iteration here
  * clears its own timer as soon as the race settles, win or lose, so nothing
@@ -318,7 +318,7 @@ export async function* handleCommand(
 
     // Compute the projection BEFORE persisting anything. `reduce` throws on
     // a malformed player_input / state_delta_applied / scene_changed
-    // payload (C-27, reduce.ts's `.parse` calls) — a throw here must fail
+    // payload (reduce.ts's `.parse` calls) — a throw here must fail
     // closed, before the event is written, not after. Otherwise a bad
     // payload lands in the log with no frame ever yielded for it, which is
     // exactly the append-without-yield window this function exists to rule
@@ -510,8 +510,8 @@ export async function* handleCommand(
       clearTimeout(timer);
     }
 
-    // C-23/C-39: `proposal.usage` is the only place token counts for this
-    // call exist — `enemyTurn` used to drop it on the floor. One line per
+    // `proposal.usage` is the only place token counts for this call exist;
+    // nothing else downstream can recover them. One line per
     // turn that reached the tactical agent, regardless of whether it ended
     // in a legal turn or a forfeit, since both cost real tokens.
     if (ports.metrics !== undefined) {
@@ -579,7 +579,7 @@ export async function* handleCommand(
    * party (or a fight that somehow never runs out of a second living
    * faction) still cannot spin more than `turnOrder.length + 1` iterations
    * here. The encounter's own termination — someone eventually dies — is a
-   * property of the combat math (C-31), not of this loop; this bound exists
+   * property of the combat math, not of this loop; this bound exists
    * purely so a defect in that math or in `reduce` cannot hang the pipeline.
    */
   async function* runEnemyTurns(): AsyncIterable<ServerFrame> {
@@ -687,7 +687,7 @@ export async function* handleCommand(
             return;
           }
 
-          // C-16 / spec §Reconnect: "without resumeFrom, or when it predates
+          // Spec §Reconnect: "without resumeFrom, or when it predates
           // the retained log: campaign_state at the newest snapshot, then the
           // events since [the snapshot]." A resumeFrom older than the newest
           // snapshot is exactly the case a store that eventually prunes old
@@ -698,7 +698,7 @@ export async function* handleCommand(
           // "predates the retained log" rather than a direct read of a
           // retention floor. That means a client only 3 events behind a
           // snapshot at sequence 50 still gets a whole `CampaignState` resent
-          // instead of 3 events — correct, but wasteful, and per C-30 that
+          // instead of 3 events — correct, but wasteful, and that
           // payload only grows over a campaign's lifetime. Gate this on a real
           // retention floor once the store has one.
           const snapshot = await ports.store.latestSnapshot(campaignId);
@@ -749,7 +749,7 @@ export async function* handleCommand(
       case "structured_action": {
         // Idempotency as a projection, not connection state: this survives a
         // reconnect, so a resent action after a dropped ack is dropped here
-        // rather than played twice. `reduce` (C-28) appends to
+        // rather than played twice. `reduce` appends to
         // `appliedClientMessageIds` unconditionally — it does not dedupe —
         // so this check is the only thing standing between a resend and a
         // second turn. It must run before anything else, including the
@@ -762,7 +762,7 @@ export async function* handleCommand(
         // covers — a click the affordance frame does not sanction, which the
         // client deliberately does not surface (`ErrorBanner.tsx`) — and it
         // is already the answer a player gets for acting after a fight has
-        // ended (`state/conclusion.ts`, C-37). A closed bracket is the same
+        // ended (`state/conclusion.ts`). A closed bracket is the same
         // moment, one event later.
         //
         // Refused with a frame rather than `encounterOf`'s throw because this
@@ -897,7 +897,7 @@ export async function* handleCommand(
       }
     }
   } catch (error) {
-    // C-29: the store throws three error classes on a failed append or read
+    // The store throws three error classes on a failed append or read
     // (SequenceConflictError, CampaignMismatchError, EventStoreUnavailableError).
     // None has a dedicated ServerErrorCode, so all fold onto internal_error.
     // Because this sits outside `emit`, a failed append never bumps
@@ -925,7 +925,7 @@ export async function* handleCommand(
       // affordance set — the frames `emit` already streamed before the
       // throw have nulled the client's, and an `error` frame does not
       // replace them. Without this the board goes inert on the player's
-      // own turn, which is exactly the C-1 soft-lock in a rarer costume.
+      // own turn — the inert-board soft-lock, in a rarer costume.
       yield* playerAffordances();
       return;
     }

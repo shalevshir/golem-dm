@@ -31,7 +31,7 @@ async function startServer(overrides?: { narrative?: NarrativePort }) {
     n += 1;
     return `00000000-0000-4000-8000-${String(n).padStart(12, "0")}`;
   };
-  // C-1/C-2: `ExecuteTurn.tacticalRationaleEnglish` has no `.optional()` and
+  // `ExecuteTurn.tacticalRationaleEnglish` has no `.optional()` and
   // `TokenUsage` is `{ promptTokens, completionTokens, totalTokens }`, not
   // `{ inputTokens, outputTokens }` — see `packages/agents/src/providers/
   // testing/fake-port.ts` and `packages/schemas/src/actions.ts`. Getting
@@ -389,9 +389,9 @@ describe("websocket transport", () => {
     }
   });
 
-  // CRITICAL-1: the in-flight guard must be scoped to the CAMPAIGN, not the
-  // socket. Campaigns are shared across sockets on purpose (`http.ts`'s
-  // `live` cache — two WS connections onto the same campaign, Task 14), and
+  // The in-flight guard must be scoped to the CAMPAIGN, not the socket.
+  // Campaigns are shared across sockets on purpose (`http.ts`'s `live`
+  // cache — two WS connections onto the same campaign), and
   // `nextSequence`/`campaign.state` live on that one shared `Campaign` object,
   // advanced in place. A guard that lives per-socket (a `let busy = false`
   // closed over inside `app.get("/ws", ...)`) cannot see a second socket's
@@ -405,7 +405,7 @@ describe("websocket transport", () => {
   // suspended inside `narrate()` (pipeline.ts) well after `player_input` and
   // `action_validated`/`dice_rolled`/`state_delta_applied` have already been
   // appended and `currentActorIndex` still points at the hero (turn_advanced
-  // is the LAST event of a turn) — exactly the window the finding describes.
+  // is the LAST event of a turn) — exactly the window this test needs.
   // Socket B, joined to the SAME campaign, sends its own hero action inside
   // that window.
   //
@@ -415,7 +415,7 @@ describe("websocket transport", () => {
   // A already passed — it gets played as a real turn instead of
   // `turn_in_progress`, and the log ends up with two `player_input` events
   // for "hero" in the same round.
-  it("rejects a same-campaign command from a SECOND socket while the first is mid-turn, without duplicating the turn in the log (CRITICAL-1)", async () => {
+  it("rejects a same-campaign command from a SECOND socket while the first is mid-turn, without duplicating the turn in the log", async () => {
     const { app, url, store } = await startServer({ narrative: delayedNarrative(400) });
     const campaignId = await createCampaignOver(app);
 
@@ -539,14 +539,14 @@ describe("websocket transport", () => {
     socket.close();
   });
 
-  // Post-review regression fix: `join` must NOT compete for the per-campaign
-  // lock. `join` (pipeline.ts) is read-only — latestSnapshot/readSince,
-  // yielding campaign_state/event frames, never `emit` — so it cannot itself
-  // duplicate a turn, the only hazard CRITICAL-1's lock exists to prevent.
-  // Claiming the lock for `join` regressed the spec's own §Reconnect
-  // requirement: C-36a keeps a turn's `handleCommand` draining — lock held —
-  // for the whole hero turn plus the entire enemy sweep even after the
-  // originating socket is gone, so a client that drops mid-turn and
+  // `join` must NOT compete for the per-campaign lock. `join` (pipeline.ts)
+  // is read-only — latestSnapshot/readSince, yielding campaign_state/event
+  // frames, never `emit` — so it cannot itself duplicate a turn, the only
+  // hazard that lock exists to prevent. Claiming the lock for `join` breaks
+  // the spec's own §Reconnect requirement: a turn's `handleCommand` keeps
+  // draining — lock held — for the whole hero turn plus the entire enemy
+  // sweep even after the originating socket is gone, so a client that drops
+  // mid-turn and
   // reconnects would have its OWN `join` rejected with `turn_in_progress`
   // instead of getting the `campaign_state` restore `protocol.ts`'s
   // `JoinMessage` doc-comment promises.

@@ -133,9 +133,9 @@ describe("CombatLog", () => {
     // getNodeText's direct-text-node-only reconstruction never isolates the
     // he.log.damage string as its own queryable node even when it DOES
     // render. An exact-string queryByText for it is therefore always null,
-    // regardless of whether the guard at CombatLog.tsx:65 actually
-    // suppressed the fragment -- it can't fail. A container-text substring
-    // check has no such blind spot.
+    // regardless of whether AttackLine's `damageRolls.length > 0` guard
+    // actually suppressed the fragment -- it can't fail. A container-text
+    // substring check has no such blind spot.
     expect(container.textContent).not.toContain(he.log.damage);
   });
 

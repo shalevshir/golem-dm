@@ -7,13 +7,13 @@ import type { HebrewNarrativeOptions, NarrativePort } from "@ai-dm/agents";
 import type * as AgentsModule from "@ai-dm/agents";
 import { runNarrativeBenchmark, SCRIPTED_BRIEFS } from "./narrative.js";
 
-// The brief's own fixture here named no field of the real `TokenUsage`
+// This fixture uses the real `TokenUsage` shape
 // ({ promptTokens, completionTokens, totalTokens } —
 // packages/agents/src/providers/usage.ts). `vitest run` does not typecheck
-// (esbuild transpiles without checking), so a mismatched fixture like the
-// brief's original still runs green while quietly turning every usage sum
-// into NaN; only `tsc --noEmit` would have caught it. Using the real shape
-// here so this suite is a check against that, not a second instance of it.
+// (esbuild transpiles without checking), so a fixture naming fields that do
+// not exist still runs green while quietly turning every usage sum into NaN;
+// only `tsc --noEmit` would catch it. Using the real shape here makes this
+// suite a check against that rather than an instance of it.
 const USAGE = { promptTokens: 900, completionTokens: 40, totalTokens: 940 };
 
 describe("runNarrativeBenchmark", () => {
@@ -216,8 +216,8 @@ describe("runNarrativeBenchmark", () => {
     });
     expect(report.samples).toHaveLength(SCRIPTED_BRIEFS.length);
     report.samples.forEach((sample, index) => {
-      // Task 16 needs the brief's own identity, not just an index into a
-      // corpus it would otherwise have to re-import in lockstep.
+      // The sample carries the brief's own identity, not just an index into
+      // a corpus a consumer would otherwise have to re-import in lockstep.
       expect(sample.source).toBe(SCRIPTED_BRIEFS[index]);
       expect(sample.beatsEnglish.length).toBeGreaterThan(0);
       expect(sample.hebrew).toBe("אלדד עומד במקומו.");
