@@ -1534,6 +1534,7 @@ describe("loadWorld refusing faction relations", () => {
   // The complete set, so a check that starts reporting something extra —
   // or stops reporting something — fails here rather than passing quietly.
   it("reports exactly these fourteen problems and no others", () => {
+    // Raised to seventeen by the whole-branch review's fix wave — see Outcomes.
     expect(new Set(problemsFrom(BROKEN))).toEqual(
       new Set([
         'duplicate npc id "twin"',
@@ -1740,6 +1741,52 @@ here exist in git whether or not this file is read again.
 | 5 Refusal: ids | `4cb2cce`, `65956f7`, `5da9c1e` | One fix round, on the plan's most valuable finding. 93 files, 1322 passed. |
 | 6 Refusal: faction pairs | `828acb1` | Review clean first pass. 93 files, 1328 passed. |
 | 7 Docs sweep | `c36378a`, `a55e8de` | Postgres run: 1358 passed, **0 skipped**, `packages/memory` 62/62. |
+| Whole-branch review + fix wave | `a672986`, `4e32294` | Two Important findings, three Minor. The exhaustive assertion went from fourteen problems to **seventeen**. |
+
+### What the whole-branch review found that seven task reviews did not
+
+**A third check that could not fail.** `checkRef` on a faction relation's
+`factionA` survived deletion with zero test failures — the fixture only ever
+put an unknown id in the `factionB` slot, so the mirror check was undefended
+while its sibling killed four tests. This is the same class Task 5's review
+caught twice, in the same file, missed by the same sweep. Three instances in
+one branch is not bad luck; it is what happens when a fixture is built by
+adding one defect per rule rather than by asking, for each check, "what input
+reaches this line". Step 3's plan should build its fixtures the second way.
+
+**A stale claim outside the sweep's search path.** `RULES_REFERENCE.md:276`
+still said "A `FactionRelation` score exists in `schemas` but is not
+consulted" after this branch deleted that schema — and `CLAUDE.md` mandates
+reading that file before any rules change. It survived because this plan's
+own verification grep was `grep -rn "FactionRelation\b" packages apps tools
+docs`, and the repo root is in none of those four directories. A sweep is only
+as good as its search path, and a path list that looks exhaustive is the
+easiest kind to under-specify.
+
+**A guarantee with a hole in it.** The loader refused a self-referential
+faction pair in the manifest but not inside a predicate or an effect, so a
+world could load clean and still hand step 3 an unqueryable pair — breaking
+the promise `data/world/README.md` makes in as many words. Closed in the fix
+wave.
+
+### Carried to step 3, not fixed here
+
+- **`pairKey` must move with `AuthoredWorld`.** Step 3's scene engine is pure
+  and belongs in `@ai-dm/rules-engine`, which may never import `apps/server`.
+  The spec already anticipates rehoming the type; it does not mention
+  `pairKey`, which encodes the relations map's key format. An engine handed
+  `ReadonlyMap<string, FactionBand>` and unable to import `pairKey` will
+  hand-write `a < b ? a|b : b|a` a second time — the invariant-4 duplicate.
+- **The shipped arc cannot exercise a blocked precondition.** `reckoning`'s
+  gate requires `hostile`; the lowest band reachable before it is exactly
+  `hostile`, so the gate can never fail. An evaluator hard-coded to return
+  `true` for `faction_band_at_least` would play the shipped world identically
+  and pass every test on this branch. Step 3's golden tests need their own
+  fixture world for the blocked path — `data/world/` cannot produce one.
+- **A quest node can be its own precondition.** `startingNodeId: "n1"` where
+  `n1` requires `node_completed: "n1"` loads clean and yields a world with no
+  enterable entry point. Orphan detection is a stated non-goal here; an
+  unreachable *start* node is arguably not the same thing.
 
 ### The three findings worth carrying forward
 
