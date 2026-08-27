@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { fold } from "@ai-dm/schemas";
-import type { GameEvent, ServerFrame, SessionState } from "@ai-dm/schemas";
+import type { GameEvent, ServerFrame, CampaignState, EncounterState } from "@ai-dm/schemas";
 import { applyFrame, initialClientState } from "./store.js";
 import type { ClientState } from "./store.js";
 import { combatant } from "./combatant-fixture.js";
@@ -10,16 +10,18 @@ import { combatant } from "./combatant-fixture.js";
 // actually change, and `reduce`'s `scene_changed` branch resets the up-next
 // actor's `actionEconomy` — a reset that is a silent no-op against an empty
 // `combatants` array.
-const genesis: SessionState = {
-  sessionId: "s1",
-  rootSeed: 3,
+const genesisEncounter: EncounterState = {
   encounterId: "goblin-ambush",
   grid: { width: 2, height: 1, tiles: [["normal", "normal"]] },
   combatants: [combatant("hero", "party", "alive"), combatant("goblin-a", "hostile", "alive")],
   turnOrder: ["hero", "goblin-a"],
   currentActorIndex: 0,
   round: 1,
-  appliedClientMessageIds: [],
+};
+
+const genesis: CampaignState = {
+  world: { campaignId: "s1", rootSeed: 3, appliedClientMessageIds: [] },
+  encounter: genesisEncounter,
 };
 
 function event(
@@ -29,7 +31,7 @@ function event(
 ): GameEvent {
   return {
     eventId: `00000000-0000-4000-8000-${String(sequence).padStart(12, "0")}`,
-    sessionId: "s1",
+    campaignId: "s1",
     sequence,
     timestamp: "2026-08-19T10:00:00.000Z",
     type,
@@ -98,7 +100,7 @@ describe("applyFrame", () => {
     ];
 
     let client = applyFrame(initialClientState, {
-      type: "session_state",
+      type: "campaign_state",
       sequence: 0,
       snapshot: genesis,
     });
@@ -108,16 +110,17 @@ describe("applyFrame", () => {
     expect(client.sequence).toBe(5);
     // Sanity check that the log actually moved the projection — otherwise
     // this test could silently degrade back into a no-op comparison.
-    expect(client.snapshot?.combatants).not.toEqual(genesis.combatants);
+    expect(client.snapshot?.encounter?.combatants).not.toEqual(genesisEncounter.combatants);
     expect(
-      client.snapshot?.combatants.find((each) => each.combatantId === "goblin-a")?.currentHp,
+      client.snapshot?.encounter?.combatants.find((each) => each.combatantId === "goblin-a")
+        ?.currentHp,
     ).toBe(4);
-    expect(client.snapshot?.round).toBe(2);
+    expect(client.snapshot?.encounter?.round).toBe(2);
   });
 
-  it("treats a session_state frame as authoritative and replaces state wholesale", () => {
+  it("treats a campaign_state frame as authoritative and replaces state wholesale", () => {
     let client = applyFrame(initialClientState, {
-      type: "session_state",
+      type: "campaign_state",
       sequence: 0,
       snapshot: genesis,
     });
@@ -125,7 +128,7 @@ describe("applyFrame", () => {
       type: "event",
       event: event(1, "player_input", { clientMessageId: "m1" }),
     });
-    expect(client.snapshot?.appliedClientMessageIds).toEqual(["m1"]);
+    expect(client.snapshot?.world.appliedClientMessageIds).toEqual(["m1"]);
 
     // A rejection recorded before the resync is a moment that predates the
     // authoritative snapshot; it must not survive to render afterward.
@@ -137,8 +140,11 @@ describe("applyFrame", () => {
     });
     expect(client.lastRejection).not.toBeNull();
 
-    const authoritative: SessionState = { ...genesis, round: 9, appliedClientMessageIds: ["x"] };
-    client = applyFrame(client, { type: "session_state", sequence: 12, snapshot: authoritative });
+    const authoritative: CampaignState = {
+      world: { ...genesis.world, appliedClientMessageIds: ["x"] },
+      encounter: { ...genesisEncounter, round: 9 },
+    };
+    client = applyFrame(client, { type: "campaign_state", sequence: 12, snapshot: authoritative });
 
     expect(client.snapshot).toEqual(authoritative);
     expect(client.sequence).toBe(12);
@@ -147,7 +153,7 @@ describe("applyFrame", () => {
 
   it("keeps the newest affordances and discards a stale one", () => {
     let client = applyFrame(initialClientState, {
-      type: "session_state",
+      type: "campaign_state",
       sequence: 10,
       snapshot: genesis,
     });
@@ -172,7 +178,7 @@ describe("applyFrame", () => {
 
   it("clears affordances when a new event moves the board past them", () => {
     let client = applyFrame(initialClientState, {
-      type: "session_state",
+      type: "campaign_state",
       sequence: 1,
       snapshot: genesis,
     });
@@ -193,7 +199,7 @@ describe("applyFrame", () => {
 
   it("accumulates narrative tokens and resets them on a new turn", () => {
     let client = applyFrame(initialClientState, {
-      type: "session_state",
+      type: "campaign_state",
       sequence: 0,
       snapshot: genesis,
     });
@@ -207,7 +213,7 @@ describe("applyFrame", () => {
 
   it("records an error and a rejection without disturbing the projection", () => {
     let client = applyFrame(initialClientState, {
-      type: "session_state",
+      type: "campaign_state",
       sequence: 5,
       snapshot: genesis,
     });
@@ -257,17 +263,17 @@ describe("applyFrame", () => {
       }).not.toThrow();
 
       // The input is untouched...
-      expect(frozen.snapshot?.appliedClientMessageIds).toEqual([]);
+      expect(frozen.snapshot?.world.appliedClientMessageIds).toEqual([]);
       expect(frozen.sequence).toBe(3);
       // ...and the fold still happened, against a new object.
-      expect(result?.snapshot?.appliedClientMessageIds).toEqual(["m1"]);
+      expect(result?.snapshot?.world.appliedClientMessageIds).toEqual(["m1"]);
       expect(result?.sequence).toBe(4);
     });
 
-    it("does not mutate a frozen state when applying a session_state frame", () => {
+    it("does not mutate a frozen state when applying a campaign_state frame", () => {
       const frozen: ClientState = deepFreeze({ ...initialClientState });
       const authoritative = deepFreeze(structuredClone(genesis));
-      const frame: ServerFrame = { type: "session_state", sequence: 7, snapshot: authoritative };
+      const frame: ServerFrame = { type: "campaign_state", sequence: 7, snapshot: authoritative };
 
       let result: ClientState | undefined;
       expect(() => {
@@ -285,7 +291,7 @@ describe("applyFrame", () => {
 describe("combatLog", () => {
   it("opens a group on action_validated and fills it in on dice_rolled", () => {
     let client = applyFrame(initialClientState, {
-      type: "session_state",
+      type: "campaign_state",
       sequence: 0,
       snapshot: genesis,
     });
@@ -340,7 +346,7 @@ describe("combatLog", () => {
 
   it("marks a forfeited turn when scene_changed arrives with no matching action_validated", () => {
     let client = applyFrame(initialClientState, {
-      type: "session_state",
+      type: "campaign_state",
       sequence: 0,
       snapshot: genesis, // currentActorIndex: 0 -> "hero" is up
     });
@@ -364,13 +370,16 @@ describe("combatLog", () => {
     // client must tell the two apart using snapshotBefore's combatant
     // status, not render a corpse's skipped turn as "the turn expired, no
     // action taken".
-    const deadGoblinUp: SessionState = {
+    const deadGoblinUp: CampaignState = {
       ...genesis,
-      combatants: [combatant("hero", "party", "alive"), combatant("goblin-a", "hostile", "dead")],
-      currentActorIndex: 1, // "goblin-a" is up, and dead
+      encounter: {
+        ...genesisEncounter,
+        combatants: [combatant("hero", "party", "alive"), combatant("goblin-a", "hostile", "dead")],
+        currentActorIndex: 1, // "goblin-a" is up, and dead
+      },
     };
     let client = applyFrame(initialClientState, {
-      type: "session_state",
+      type: "campaign_state",
       sequence: 0,
       snapshot: deadGoblinUp,
     });
@@ -388,7 +397,7 @@ describe("combatLog", () => {
 
   it("does not duplicate a group when scene_changed follows a normal action_validated", () => {
     let client = applyFrame(initialClientState, {
-      type: "session_state",
+      type: "campaign_state",
       sequence: 0,
       snapshot: genesis,
     });
@@ -419,7 +428,7 @@ describe("combatLog", () => {
   it("skips a malformed dice_rolled payload without throwing", () => {
     const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
     let client = applyFrame(initialClientState, {
-      type: "session_state",
+      type: "campaign_state",
       sequence: 0,
       snapshot: genesis,
     });
@@ -448,9 +457,9 @@ describe("combatLog", () => {
     warnSpy.mockRestore();
   });
 
-  it("clears combatLog on a session_state resync", () => {
+  it("clears combatLog on a campaign_state resync", () => {
     let client = applyFrame(initialClientState, {
-      type: "session_state",
+      type: "campaign_state",
       sequence: 0,
       snapshot: genesis,
     });
@@ -468,19 +477,19 @@ describe("combatLog", () => {
     });
     expect(client.combatLog).toHaveLength(1);
 
-    client = applyFrame(client, { type: "session_state", sequence: 12, snapshot: genesis });
+    client = applyFrame(client, { type: "campaign_state", sequence: 12, snapshot: genesis });
     expect(client.combatLog).toEqual([]);
   });
 
   // The counterpart to the test above, and what makes a reload able to keep
-  // its log: a `session_state` at exactly the sequence the client has already
+  // its log: a `campaign_state` at exactly the sequence the client has already
   // folded is not a move to a new moment, it is the same moment restated.
   // A reload rejoins with no `resumeFrom`, so the server answers with its
   // live projection at the newest sequence -- and a client whose restored
   // sequence matches it holds a log that describes precisely that state.
-  it("keeps combatLog and narrative when a session_state restates the sequence already folded", () => {
+  it("keeps combatLog and narrative when a campaign_state restates the sequence already folded", () => {
     let client = applyFrame(initialClientState, {
-      type: "session_state",
+      type: "campaign_state",
       sequence: 0,
       snapshot: genesis,
     });
@@ -499,7 +508,7 @@ describe("combatLog", () => {
     client = applyFrame(client, { type: "narrative_token", streamId: "n1", text: "השומר מתגונן." });
     expect(client.combatLog).toHaveLength(1);
 
-    client = applyFrame(client, { type: "session_state", sequence: 1, snapshot: genesis });
+    client = applyFrame(client, { type: "campaign_state", sequence: 1, snapshot: genesis });
     expect(client.combatLog).toHaveLength(1);
     expect(client.narrative).toBe("השומר מתגונן.");
     expect(client.narrativeStreamId).toBe("n1");
@@ -508,15 +517,15 @@ describe("combatLog", () => {
   // The other half of the same rule: a snapshot at a sequence the client
   // never reached describes a board that has moved on, so the narration of
   // the turn it holds is as stale as the log -- both go.
-  it("clears the narrative alongside combatLog when a session_state moves the sequence", () => {
+  it("clears the narrative alongside combatLog when a campaign_state moves the sequence", () => {
     let client = applyFrame(initialClientState, {
-      type: "session_state",
+      type: "campaign_state",
       sequence: 0,
       snapshot: genesis,
     });
     client = applyFrame(client, { type: "narrative_token", streamId: "n1", text: "השומר מתגונן." });
 
-    client = applyFrame(client, { type: "session_state", sequence: 12, snapshot: genesis });
+    client = applyFrame(client, { type: "campaign_state", sequence: 12, snapshot: genesis });
     expect(client.narrative).toBe("");
     expect(client.narrativeStreamId).toBeNull();
   });

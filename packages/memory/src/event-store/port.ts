@@ -1,40 +1,40 @@
 // The event log's storage boundary, and the two implementations' shared
 // contract. `append` is an atomic batch that conflicts on
-// (sessionId, sequence), which is exactly `game_events`' primary key — the
+// (campaignId, sequence), which is exactly `game_events`' primary key — the
 // Postgres store gets that atomicity from a transaction, the in-memory one
 // from validating the whole batch before mutating anything.
-import type { GameEvent, SessionState } from "@ai-dm/schemas";
+import type { GameEvent, CampaignState } from "@ai-dm/schemas";
 
 export class SequenceConflictError extends Error {
-  readonly sessionId: string;
+  readonly campaignId: string;
   readonly sequence: number;
 
-  constructor(sessionId: string, sequence: number) {
-    super(`Event ${String(sequence)} already exists for session ${sessionId}`);
+  constructor(campaignId: string, sequence: number) {
+    super(`Event ${String(sequence)} already exists for campaign ${campaignId}`);
     this.name = "SequenceConflictError";
-    this.sessionId = sessionId;
+    this.campaignId = campaignId;
     this.sequence = sequence;
   }
 }
 
 /**
- * Raised when an event's own `sessionId` disagrees with the session it was
+ * Raised when an event's own `campaignId` disagrees with the campaign it was
  * appended to. The log must never hold a row whose own payload contradicts
  * the stream containing it — a Postgres implementation that derives
- * `session_id` from the row rather than the call argument would silently
+ * `campaign_id` from the row rather than the call argument would silently
  * diverge from this one otherwise.
  */
-export class SessionMismatchError extends Error {
-  readonly sessionId: string;
-  readonly eventSessionId: string;
+export class CampaignMismatchError extends Error {
+  readonly campaignId: string;
+  readonly eventCampaignId: string;
 
-  constructor(sessionId: string, eventSessionId: string) {
+  constructor(campaignId: string, eventCampaignId: string) {
     super(
-      `Event has sessionId "${eventSessionId}", which does not match the session "${sessionId}" it was appended to`,
+      `Event has campaignId "${eventCampaignId}", which does not match the campaign "${campaignId}" it was appended to`,
     );
-    this.name = "SessionMismatchError";
-    this.sessionId = sessionId;
-    this.eventSessionId = eventSessionId;
+    this.name = "CampaignMismatchError";
+    this.campaignId = campaignId;
+    this.eventCampaignId = eventCampaignId;
   }
 }
 
@@ -62,10 +62,10 @@ export class EventStoreUnavailableError extends Error {
   }
 }
 
-/** A projected `SessionState`, cached at the log `sequence` it reflects. */
+/** A projected `CampaignState`, cached at the log `sequence` it reflects. */
 export interface EventSnapshot {
   sequence: number;
-  state: SessionState;
+  state: CampaignState;
 }
 
 export interface EventStore {
@@ -73,8 +73,8 @@ export interface EventStore {
    * Atomic over the batch. A turn emits several events and a crash mid-turn
    * must not leave half a turn in the log, so either all of them land or none.
    * Rejects with `SequenceConflictError` on a sequence collision (including a
-   * duplicate within the batch itself) or `SessionMismatchError` if an
-   * event's own `sessionId` disagrees with `sessionId`. Either rejection
+   * duplicate within the batch itself) or `CampaignMismatchError` if an
+   * event's own `campaignId` disagrees with `campaignId`. Either rejection
    * leaves the store exactly as it was before the call.
    *
    * A `payload` is stored by value, through a JSON round trip: the caller
@@ -86,15 +86,15 @@ export interface EventStore {
    * `contract.ts` holds both implementations to it, so a payload cannot
    * behave one way in a dev run and another on a deploy.
    */
-  append(sessionId: string, events: readonly GameEvent[]): Promise<void>;
+  append(campaignId: string, events: readonly GameEvent[]): Promise<void>;
   /** Everything with `sequence > afterSequence`, in ascending order. */
-  readSince(sessionId: string, afterSequence: number): Promise<GameEvent[]>;
-  latestSnapshot(sessionId: string): Promise<EventSnapshot | null>;
+  readSince(campaignId: string, afterSequence: number): Promise<GameEvent[]>;
+  latestSnapshot(campaignId: string): Promise<EventSnapshot | null>;
   /**
    * Keeps only the newest snapshot: a call whose `sequence` is less than or
    * equal to the one already stored is a no-op. Snapshots are a cache, never
    * authority — `fold(events)` must equal the snapshot at every snapshot
    * point, so this exists purely to speed up reconnect.
    */
-  putSnapshot(sessionId: string, sequence: number, state: SessionState): Promise<void>;
+  putSnapshot(campaignId: string, sequence: number, state: CampaignState): Promise<void>;
 }

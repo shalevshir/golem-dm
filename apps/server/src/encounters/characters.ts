@@ -38,7 +38,7 @@ export function loadCharacter(characterId: string): DerivedCharacter {
 
   // Parsed at this server boundary rather than left to the first validator
   // downstream (`apps/web`'s `net/api.ts`): a schema-invalid derivation
-  // should fail loudly here, at session creation, not as an opaque
+  // should fail loudly here, at campaign creation, not as an opaque
   // client-side catalogue rejection.
   const parsed = DerivedCharacter.parse(derived);
   cache.set(characterId, parsed);

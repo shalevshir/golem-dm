@@ -10,10 +10,10 @@ import { gameEvents } from "../schema.js";
 
 const url = process.env.DATABASE_URL;
 
-function eventFor(sessionId: string, sequence: number): GameEvent {
+function eventFor(campaignId: string, sequence: number): GameEvent {
   return {
     eventId: `00000000-0000-4000-8000-${String(sequence).padStart(12, "0")}`,
-    sessionId,
+    campaignId,
     sequence,
     timestamp: "2026-08-19T10:00:00.000Z",
     type: "player_input",
@@ -42,19 +42,19 @@ describe.skipIf(url === undefined || url === "")("postgres EventStore", () => {
   });
 
   // One store instance across every case: the contract suite mints a unique
-  // session id per case, which is what keeps them isolated on a shared table
+  // campaign id per case, which is what keeps them isolated on a shared table
   // and lets them run in parallel without truncation.
   describeEventStoreContract("contract", () => store);
 
   it("reports the conflicting sequence, not a guess", async () => {
-    const sessionId = `pg-detail-${String(Date.now())}`;
-    await store.append(sessionId, [eventFor(sessionId, 0), eventFor(sessionId, 1)]);
+    const campaignId = `pg-detail-${String(Date.now())}`;
+    await store.append(campaignId, [eventFor(campaignId, 0), eventFor(campaignId, 1)]);
 
     // The batch's head is 5, but the one that actually conflicts is 0 — a
     // store that reported the head would put a wrong number in a public
     // field that reaches the client.
     await expect(
-      store.append(sessionId, [eventFor(sessionId, 5), eventFor(sessionId, 0)]),
+      store.append(campaignId, [eventFor(campaignId, 5), eventFor(campaignId, 0)]),
     ).rejects.toMatchObject({
       name: "SequenceConflictError",
       sequence: 0,
@@ -69,9 +69,9 @@ describe.skipIf(url === undefined || url === "")("postgres EventStore", () => {
     // EventStoreUnavailableError. Deterministic — no pre-check is involved
     // and no concurrency is required, because the insert goes straight at
     // the primary key.
-    const sessionId = `pg-sqlstate-${String(Date.now())}`;
+    const campaignId = `pg-sqlstate-${String(Date.now())}`;
     const row = {
-      sessionId,
+      campaignId,
       sequence: 0,
       eventId: "00000000-0000-4000-8000-000000000000",
       timestamp: "2026-08-19T10:00:00.000Z",
@@ -120,16 +120,16 @@ function stubDb(options: {
 }
 
 describe("postgres EventStore — lost-race classification", () => {
-  const sessionId = "stub-session";
+  const campaignId = "stub-campaign";
   // Head is 5, collision is at 0: a store that reported the head would
   // satisfy every other assertion here and still be wrong.
-  const batch = [eventFor(sessionId, 5), eventFor(sessionId, 0)];
+  const batch = [eventFor(campaignId, 5), eventFor(campaignId, 0)];
 
   it("re-derives the sequence that actually conflicted, not the batch head", async () => {
     const store = createPostgresEventStore(
       stubDb({ transactionError: driverError("23505"), taken: [0] }),
     );
-    const error: unknown = await store.append(sessionId, batch).then(
+    const error: unknown = await store.append(campaignId, batch).then(
       () => null,
       (reason: unknown) => reason,
     );
@@ -144,13 +144,17 @@ describe("postgres EventStore — lost-race classification", () => {
     const store = createPostgresEventStore(
       stubDb({ transactionError: driverError("23505"), taken: [] }),
     );
-    await expect(store.append(sessionId, batch)).rejects.toBeInstanceOf(EventStoreUnavailableError);
+    await expect(store.append(campaignId, batch)).rejects.toBeInstanceOf(
+      EventStoreUnavailableError,
+    );
   });
 
   it("wraps a driver failure that is not a unique violation", async () => {
     // 57014 is statement_timeout: a real SQLSTATE, but not a conflict.
     const store = createPostgresEventStore(stubDb({ transactionError: driverError("57014") }));
-    await expect(store.append(sessionId, batch)).rejects.toBeInstanceOf(EventStoreUnavailableError);
+    await expect(store.append(campaignId, batch)).rejects.toBeInstanceOf(
+      EventStoreUnavailableError,
+    );
   });
 
   it("stays inside the three-class surface when the re-read itself fails", async () => {
@@ -162,6 +166,8 @@ describe("postgres EventStore — lost-race classification", () => {
     const store = createPostgresEventStore(
       stubDb({ transactionError: driverError("23505"), taken: [0], rereadFails: true }),
     );
-    await expect(store.append(sessionId, batch)).rejects.toBeInstanceOf(EventStoreUnavailableError);
+    await expect(store.append(campaignId, batch)).rejects.toBeInstanceOf(
+      EventStoreUnavailableError,
+    );
   });
 });

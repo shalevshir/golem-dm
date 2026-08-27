@@ -28,7 +28,7 @@ export const he = {
     move: "תנועה",
   },
   errors: {
-    unknown_session: "המשחק הזה כבר לא קיים.",
+    unknown_campaign: "המשחק הזה כבר לא קיים.",
     malformed_message: "שגיאת תקשורת בלקוח.",
     turn_in_progress: "התור עדיין מתבצע.",
     free_text_not_supported: "טקסט חופשי אינו נתמך עדיין.",

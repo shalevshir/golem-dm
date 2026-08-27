@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import type { SessionState, TurnAffordances } from "@ai-dm/schemas";
+import type { EncounterState, TurnAffordances } from "@ai-dm/schemas";
 import { combatant as buildCombatant } from "../state/combatant-fixture.js";
 import { Grid } from "./Grid.js";
 
@@ -12,9 +12,7 @@ function combatant(id: string, position: [number, number]) {
   return buildCombatant(id, id === "hero" ? "party" : "hostile", "alive", { position });
 }
 
-const snapshot: SessionState = {
-  sessionId: "s1",
-  rootSeed: 1,
+const snapshot: EncounterState = {
   encounterId: "goblin-ambush",
   grid: {
     width: 4,
@@ -25,7 +23,6 @@ const snapshot: SessionState = {
   turnOrder: ["hero", "goblin-a"],
   currentActorIndex: 0,
   round: 1,
-  appliedClientMessageIds: [],
 };
 
 const catalogue = [

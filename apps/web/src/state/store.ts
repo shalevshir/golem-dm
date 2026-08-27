@@ -1,10 +1,10 @@
 // The client's projection. It folds each `event` frame with the SAME `reduce`
 // the server runs — imported from `@ai-dm/schemas`, not reimplemented — and
-// treats a `session_state` frame as authoritative whenever one arrives.
+// treats a `campaign_state` frame as authoritative whenever one arrives.
 //
 // Folding rather than requesting a snapshot per turn is what preserves the
 // per-event granularity a turn animation needs; re-snapshotting on every
-// `session_state` is what bounds any divergence to a single turn instead of
+// `campaign_state` is what bounds any divergence to a single turn instead of
 // letting it persist silently.
 //
 // Pure: `applyFrame` never mutates its input, so React state updates and the
@@ -12,10 +12,16 @@
 import { z } from "zod";
 import { reduce } from "@ai-dm/schemas";
 import { ActionType, ActionValidatedPayload, AttackTrace, DiceRolledPayload } from "@ai-dm/schemas";
-import type { GameEvent, ServerFrame, SessionState, TurnAffordances } from "@ai-dm/schemas";
+import type {
+  GameEvent,
+  ServerFrame,
+  CampaignState,
+  EncounterState,
+  TurnAffordances,
+} from "@ai-dm/schemas";
 
 export interface ClientState {
-  snapshot: SessionState | null;
+  snapshot: CampaignState | null;
   /** The highest sequence folded. Drives `resumeFrom` on a reconnect. */
   sequence: number;
   affordances: TurnAffordances | null;
@@ -30,7 +36,7 @@ export interface ClientState {
 /**
  * One turn's worth of combat-log content, built client-side from
  * `action_validated` + `dice_rolled` + `scene_changed` events. Not part of
- * `SessionState` and not folded by `reduce()` -- purely additive display
+ * `CampaignState` and not folded by `reduce()` -- purely additive display
  * state, the same category as `narrative` below.
  *
  * A zod schema rather than a plain interface because `state/persistence.ts`
@@ -70,14 +76,17 @@ export const initialClientState: ClientState = {
  * function and remains correct: the game genuinely cannot render without
  * valid state, but it can render just fine with an incomplete log.
  *
- * `snapshotBefore` is the snapshot as it stood before THIS event -- needed
- * on `scene_changed: turn_advanced` to know whose turn just ended, since the
+ * `snapshotBefore` is the board as it stood before THIS event -- needed on
+ * `scene_changed: turn_advanced` to know whose turn just ended, since the
  * fold that actually updates `currentActorIndex` happens separately (in
- * `reduce`, called alongside this from `applyFrame`).
+ * `reduce`, called alongside this from `applyFrame`). It is the encounter
+ * rather than the whole projection because a combat log is about a fight and
+ * nothing in the world outside one; nullable because a campaign between
+ * fights has no board at all.
  */
 function foldCombatLog(
   log: readonly CombatLogTurn[],
-  snapshotBefore: SessionState,
+  snapshotBefore: EncounterState | null,
   event: GameEvent,
 ): CombatLogTurn[] {
   switch (event.type) {
@@ -122,6 +131,13 @@ function foldCombatLog(
       // dice_rolled and action_validated get no such upstream gate (reduce()
       // no-ops both), which is exactly why they need their own parse above.
       if (event.payload["kind"] !== "turn_advanced") return [...log];
+      // Unreachable in practice, for the same reason the missing .safeParse()
+      // above is safe: `reduce` throws on a `turn_advanced` folded with no
+      // encounter open, and `applyFrame` computes `snapshot` before
+      // `combatLog` in the same object literal -- so this branch never runs
+      // on a log the server produced. Display state no-ops rather than
+      // throwing where state itself would throw.
+      if (snapshotBefore === null) return [...log];
       const currentActorId = snapshotBefore.turnOrder[snapshotBefore.currentActorIndex];
       if (currentActorId === undefined) return [...log];
       const last = log.at(-1);
@@ -155,10 +171,10 @@ function foldCombatLog(
 
 export function applyFrame(state: ClientState, frame: ServerFrame): ClientState {
   switch (frame.type) {
-    case "session_state": {
+    case "campaign_state": {
       // Authoritative on arrival. Affordances computed against an older board
       // go with it — the server sends a fresh set if the player is up. A
-      // `session_state` only ever arrives on join or resync, so any
+      // `campaign_state` only ever arrives on join or resync, so any
       // transient UI state from before it — an in-flight error, a rejection
       // toast, prior combat-log entries — describes a moment that is now
       // stale; all are cleared with it rather than surviving to render as
@@ -172,7 +188,7 @@ export function applyFrame(state: ClientState, frame: ServerFrame): ClientState 
       // log and a narration describing precisely that sequence. Clearing
       // them there would throw away the only copy of history the server does
       // not project (neither the roll log nor the narration is part of
-      // `SessionState`). The equality is what keeps this honest: the moment
+      // `CampaignState`). The equality is what keeps this honest: the moment
       // the server's sequence and the client's disagree, the server wins and
       // both are dropped.
       const restated = frame.sequence === state.sequence;
@@ -199,7 +215,7 @@ export function applyFrame(state: ClientState, frame: ServerFrame): ClientState 
         // stale. The server pushes a replacement when control is the
         // player's, so clearing here cannot strand the UI.
         affordances: null,
-        combatLog: foldCombatLog(state.combatLog, state.snapshot, frame.event),
+        combatLog: foldCombatLog(state.combatLog, state.snapshot.encounter, frame.event),
       };
     }
 

@@ -835,7 +835,7 @@ Mutable world state is a projection of the log, in
 `packages/memory/src/world-state.ts` — which is what invariant 3 forces and
 what `packages/memory/CLAUDE.md:7` already commits to. The Postgres tables
 are a materialized cache of that fold, the same relationship
-`session_snapshots` has to `game_events`; `SNAPSHOT_EVERY = 50` generalizes
+`campaign_snapshots` has to `game_events`; `SNAPSHOT_EVERY = 50` generalizes
 to keep a long campaign's fold affordable.
 
 - **Calendar/time** advances only through explicit events — travel, rest,
@@ -900,17 +900,77 @@ system: combat is a bracketed span in one log. This is also what makes
 `abilityCheck` (`packages/rules-engine/src/checks/index.ts:66`) is already
 built and tested, so out-of-combat skill checks come nearly free.
 
+#### What step 1 already leaves for steps 2–4
+
+Step 1 (below) is landed, and its final review surfaced four edges that the
+next phases will hit. Each is already visible in the code's own comments;
+they are gathered here so planning steps 2-4 does not mean rediscovering them
+file by file.
+
+- **`fold` cannot project a bracket by itself; `loadCampaign` is the only
+  complete projector** (`reduce.ts:13-15`). The board `encounter_started`
+  opens comes from the encounter catalogue, which `@ai-dm/schemas` may never
+  import (invariant 5), so a client that folds that event onto
+  `encounter: null` gets `state` back unchanged, silently — no throw.
+  `apps/web` renders its "not ready yet" placeholder indefinitely, on a
+  socket that is otherwise working fine, and a `try`/`catch` around
+  `applyFrame` — the obvious guard — catches none of it, because nothing
+  throws. Unreachable today only because `POST /campaigns` always starts its
+  one encounter before any client can join, so a join always lands after
+  `encounter_started` and never receives it as a live frame; the moment
+  campaign creation stops always bundling a fight with it, a reconnect tail
+  can carry `encounter_started` live, straight into this gap. `apps/web`
+  needs its own answer before then — fetch the catalogue alongside `reduce`,
+  or stop expecting `fold` to project a bracket at all and resnapshot across
+  one instead.
+- **`loadCampaign` is O(encounters) blocking file I/O on every cold load, and
+  couples load success to the catalogue's entire history**
+  (`campaign.ts:331-350`). `buildEncounterById` re-reads and re-parses SRD
+  files with no memoization, once per resolved fight in the log on every
+  cold load; and retiring or renaming an encounter id makes every campaign
+  that ever fought it permanently unloadable, since `UnknownEncounterError`
+  propagates out of `loadCampaign` with nothing to catch it. Length makes
+  the first matter; a growing world makes the second. Memoizing the
+  catalogue lookup handles the first outright; the second needs a decision,
+  not a fix.
+- **`pipeline.ts`'s `emit` is a fourth writer of the bracket, and does not
+  know it** (`campaign.ts`'s doc comment on `Campaign.built`). It sets
+  `campaign.state = reduce(...)` for every event it appends and never
+  touches `built`. Safe only because no `emit` call site passes a bracket
+  event today — and the combat bridge's `encounter_resolved` is exactly the
+  event that will. `builtOf`'s guard catches the desync the next time
+  anything reads the board, which is the design working as intended; it
+  just means the failure surfaces one call after the bug, not at it.
+- **`campaign_started` is the one bracket-adjacent event with no corrupt-log
+  guard.** A second `encounter_started`, an `encounter_resolved` with no
+  bracket open, and an id-mismatched `encounter_resolved` all throw in
+  `reduce`; a second `campaign_started` mid-log is lumped in with the true
+  no-ops and silently returns `state` unchanged. Harmless today — nothing
+  produces a second one, and `loadCampaign` only ever reads event 0's
+  payload, never checks for a duplicate later in the log — but it stops
+  being harmless the moment steps 2-3 give `campaign_started` a payload the
+  fold actually reads.
+
+Also worth flagging here: `not_your_turn` sits in `apps/web`'s
+`ErrorBanner.tsx` `SILENT_CODES`, so the no-encounter refusal `pipeline.ts`
+added for a closed bracket (`campaign.state.encounter === null`) produces
+zero player-visible feedback. Correct today — a board-less campaign pushes
+no affordances to click, so there is nothing to click that would trigger it
+— and wrong the moment step 4's out-of-combat actions let a player be out of
+combat with a UI that can still send them.
+
 #### Sequence
 
 0. **ADR: campaign vs. session identity** —
    [`docs/decisions/0004-campaign-vs-session-identity.md`](docs/decisions/0004-campaign-vs-session-identity.md),
    ACCEPTED. Load-bearing; everything below depends on it.
 1. **Schemas and the `WorldState`/`EncounterState` split**, new event types,
-   `reduce` refactor — while the log is small and no users exist.
+   `reduce` refactor — while the log is small and no users exist. **Landed**
+   on branch `step-11-campaign-state-split` (all 8 tasks; not yet merged to
+   `main`).
    [`docs/superpowers/specs/2026-08-23-campaign-state-split-design.md`](docs/superpowers/specs/2026-08-23-campaign-state-split-design.md),
    plan at
-   [`docs/superpowers/plans/2026-08-23-campaign-state-split.md`](docs/superpowers/plans/2026-08-23-campaign-state-split.md)
-   (8 tasks).
+   [`docs/superpowers/plans/2026-08-23-campaign-state-split.md`](docs/superpowers/plans/2026-08-23-campaign-state-split.md).
 2. **Static content loaders and a deliberately tiny authored world:** one
    town, two factions, three NPCs, a five-node arc. Enough to prove the
    pipeline, not to be good.

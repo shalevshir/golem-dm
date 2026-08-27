@@ -1,30 +1,30 @@
-// HTTP surface: creating a session, and a health check. Creating a game is a
+// HTTP surface: creating a campaign, and a health check. Creating a game is a
 // one-shot request, so it is a POST rather than a websocket message — folding
 // it into `join` would make that message mean two different things depending
 // on whether the id already existed.
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import type { EventStore } from "@ai-dm/memory";
-import { createSession, loadSession } from "../core/session.js";
-import type { Session } from "../core/session.js";
-import { encounterCatalogue, UnknownEncounterError } from "../encounters/index.js";
+import { createCampaign, loadCampaign, startEncounter } from "../core/campaign.js";
+import type { Campaign } from "../core/campaign.js";
+import { encounterById, encounterCatalogue, UnknownEncounterError } from "../encounters/index.js";
 
-const CreateSessionBody = z.object({ encounterId: z.string().min(1) });
+const CreateCampaignBody = z.object({ encounterId: z.string().min(1) });
 
-export interface SessionRegistry {
-  create(encounterId: string): Promise<Session>;
-  get(sessionId: string): Promise<Session | null>;
+export interface CampaignRegistry {
+  create(encounterId: string): Promise<Campaign>;
+  get(campaignId: string): Promise<Campaign | null>;
   /**
-   * Claims the one in-flight-command slot for `sessionId`. Returns `false`
+   * Claims the one in-flight-command slot for `campaignId`. Returns `false`
    * without side effects if it is already claimed — the caller must not
    * proceed with `handleCommand` in that case.
    *
-   * CRITICAL-1: sessions are shared across sockets — `live` below is the
+   * CRITICAL-1: campaigns are shared across sockets — `live` below is the
    * mechanism that makes two WS connections (Task 14) alias the same
-   * `Session` object, with `nextSequence` advanced on it in place — so the
+   * `Campaign` object, with `nextSequence` advanced on it in place — so the
    * mutual-exclusion guard belongs on the object that creates that sharing,
    * not on a per-socket flag in the transport (which cannot see a second
-   * socket's in-flight command at all) and not on `Session` itself (a
+   * socket's in-flight command at all) and not on `Campaign` itself (a
    * `core/` type; in-flight-command policy is a transport concern per the
    * spec's "core/ never touches a socket").
    *
@@ -33,14 +33,14 @@ export interface SessionRegistry {
    * per-socket flag was claimed — that is what makes the check-and-set
    * atomic under JS's single-threaded execution.
    */
-  tryBegin(sessionId: string): boolean;
+  tryBegin(campaignId: string): boolean;
   /** Releases the slot `tryBegin` claimed. Always call from a `finally`. A
-   * `join` for a session that turns out not to exist still claims and
+   * `join` for a campaign that turns out not to exist still claims and
    * releases an id — harmless, since the slot is just a key in a set. */
-  end(sessionId: string): void;
+  end(campaignId: string): void;
 }
 
-export interface SessionRegistryInput {
+export interface CampaignRegistryInput {
   store: EventStore;
   uuid: () => string;
   clock: () => string;
@@ -48,84 +48,118 @@ export interface SessionRegistryInput {
 }
 
 /**
- * Live sessions, keyed by id. In-process only, matching the in-memory event
+ * Live campaigns, keyed by id. In-process only, matching the in-memory event
  * store: both go away on restart, and both are replaced together by the
- * persistence spec. There is no eviction: every session created in a run
+ * persistence spec. There is no eviction: every campaign created in a run
  * stays pinned here for the run's lifetime, each entry holding a full
- * `BuiltEncounter` plus a `SessionState` whose `appliedClientMessageIds`
+ * `BuiltEncounter` plus a `CampaignState` whose `appliedClientMessageIds`
  * itself grows without bound (C-30). Unbounded growth within a run, not just
  * across a restart — deliberately left to the persistence spec, not fixed
  * here.
  */
-export function createSessionRegistry(input: SessionRegistryInput): SessionRegistry {
-  const live = new Map<string, Session>();
-  // The per-session in-flight-command lock (CRITICAL-1). A plain `Set`: a
-  // session id is a member exactly while some socket's `handleCommand` call
+export function createCampaignRegistry(input: CampaignRegistryInput): CampaignRegistry {
+  const live = new Map<string, Campaign>();
+  // The per-campaign in-flight-command lock (CRITICAL-1). A plain `Set`: a
+  // campaign id is a member exactly while some socket's `handleCommand` call
   // for it is running, from `tryBegin` to the matching `end`.
   const inFlight = new Set<string>();
-  // In-flight `loadSession` calls, keyed the same way. `live` alone was
+  // In-flight `loadCampaign` calls, keyed the same way. `live` alone was
   // enough while the store was synchronous; a durable store puts a real
-  // await between the miss and the set, and `join` is outside the session
-  // lock by design, so without this two concurrent joins fold two Sessions
+  // await between the miss and the set, and `join` is outside the campaign
+  // lock by design, so without this two concurrent joins fold two Campaigns
   // and the loser keeps appending from its own nextSequence.
-  const loading = new Map<string, Promise<Session | null>>();
+  const loading = new Map<string, Promise<Campaign | null>>();
 
   return {
     async create(encounterId) {
-      const sessionId = input.uuid();
-      const session = await createSession({
-        sessionId,
-        encounterId,
+      // Validated before anything is written, deliberately separate from and
+      // earlier than `startEncounter`'s own `buildEncounterById` call below.
+      // `createCampaign` appends `campaign_started` unconditionally — it has
+      // no way to refuse an id it is never given — so an unknown id must be
+      // caught before that append or it leaves a durable, permanently
+      // orphaned `game_events` row for a campaign id that is never returned
+      // to anyone (the append-only log has no way to take it back out).
+      // `encounterById` is the pure, in-memory half of `buildEncounterById`
+      // (a `CATALOGUE.get`, no file I/O) — cheap enough to call here purely
+      // for the guard and again inside `startEncounter` for the real build,
+      // rather than threading a `BuiltEncounter` across the two calls for
+      // one avoided lookup.
+      encounterById(encounterId);
+
+      const campaignId = input.uuid();
+      const campaign = await createCampaign({
+        campaignId,
         rootSeed: input.seed(),
         store: input.store,
         clock: input.clock,
         uuid: input.uuid,
       });
-      live.set(sessionId, session);
-      return session;
+      // Creating a campaign and entering its first fight are two events and
+      // two calls, but one request: the client-visible flow is unchanged, so
+      // a campaign that exists always has a board. §4.7's step 4 is what
+      // separates them — an exploration mode gives the gap between these two
+      // lines somewhere to live, and this call moves out to whatever starts
+      // an encounter then. `startEncounter` mutates `campaign` in place, so
+      // `live` holds the started one either way; it is awaited before the set
+      // so a half-started campaign is never reachable through `get`.
+      //
+      // The id is already known good by the time this runs — the guard above
+      // ran first — so `buildEncounterById`'s own `UnknownEncounterError`
+      // here is unreachable in practice. It stays because this call is what
+      // actually builds the `BuiltEncounter` (stat blocks, scene card,
+      // combat world) the guard above never needed to.
+      await startEncounter({
+        campaign,
+        encounterId,
+        store: input.store,
+        clock: input.clock,
+        uuid: input.uuid,
+      });
+      live.set(campaignId, campaign);
+      return campaign;
     },
 
-    get(sessionId) {
-      const cached = live.get(sessionId);
+    get(campaignId) {
+      const cached = live.get(campaignId);
       if (cached !== undefined) return Promise.resolve(cached);
 
-      const inFlightLoad = loading.get(sessionId);
+      const inFlightLoad = loading.get(campaignId);
       if (inFlightLoad !== undefined) return inFlightLoad;
 
       // Not in memory: fold it back from the log. This is what makes a
       // reconnect after a process restart possible now that the store is
       // durable.
-      const load = loadSession({ sessionId, store: input.store })
+      const load = loadCampaign({ campaignId, store: input.store })
         .then((loaded) => {
-          if (loaded !== null) live.set(sessionId, loaded);
+          if (loaded !== null) live.set(campaignId, loaded);
           return loaded;
         })
         .finally(() => {
           // Cleared on both paths: a failed load must not be cached as a
           // permanently pending promise.
-          loading.delete(sessionId);
+          loading.delete(campaignId);
         });
-      loading.set(sessionId, load);
+      loading.set(campaignId, load);
       return load;
     },
 
-    tryBegin(sessionId) {
-      if (inFlight.has(sessionId)) return false;
-      inFlight.add(sessionId);
+    tryBegin(campaignId) {
+      if (inFlight.has(campaignId)) return false;
+      inFlight.add(campaignId);
       return true;
     },
 
-    end(sessionId) {
-      inFlight.delete(sessionId);
+    end(campaignId) {
+      inFlight.delete(campaignId);
     },
   };
 }
 
-export function registerHttpRoutes(app: FastifyInstance, registry: SessionRegistry): void {
+export function registerHttpRoutes(app: FastifyInstance, registry: CampaignRegistry): void {
   app.get("/health", () => ({ status: "ok" }));
 
-  app.post("/sessions", async (request, reply) => {
-    const body = CreateSessionBody.safeParse(request.body);
+  app.post("/campaigns", async (request, reply) => {
+    const body = CreateCampaignBody.safeParse(request.body);
     if (!body.success) {
       return reply.code(400).send({ error: "encounterId must be a non-empty string" });
     }
@@ -134,13 +168,18 @@ export function registerHttpRoutes(app: FastifyInstance, registry: SessionRegist
     // — not around the response send too, so a failure while writing the
     // reply (e.g. the connection dropping mid-send) cannot be mistaken for an
     // encounter-lookup failure and re-enter this `catch`.
-    let session: Session;
+    let campaign: Campaign;
     try {
-      session = await registry.create(body.data.encounterId);
+      campaign = await registry.create(body.data.encounterId);
     } catch (error) {
-      // `buildEncounterById` throws `UnknownEncounterError` for an id the
-      // catalogue does not know — that is the only case that is a 404.
-      // Everything else it can throw (ENOENT from a missing SRD file, a
+      // `registry.create` throws `UnknownEncounterError` for an id the
+      // catalogue does not know — that is the only case that is a 404. Since
+      // Fix 2, that error comes from `encounterById`'s guard at the top of
+      // `create`, which runs before anything is written; `startEncounter`'s
+      // own `buildEncounterById` call further down can throw the same error
+      // type in principle, but by the time it runs the id has already
+      // cleared that guard, so it is unreachable in practice. Everything
+      // else `registry.create` can throw (ENOENT from a missing SRD file, a
       // ZodError from an invalid one, or any of `buildEncounter`'s own
       // validation errors) is a genuine server fault and must not be
       // reported to the client as "not found".
@@ -149,7 +188,7 @@ export function registerHttpRoutes(app: FastifyInstance, registry: SessionRegist
       }
       throw error;
     }
-    return reply.code(201).send({ sessionId: session.state.sessionId });
+    return reply.code(201).send({ campaignId: campaign.state.world.campaignId });
   });
 
   app.get<{ Params: { encounterId: string } }>("/encounters/:encounterId", (request, reply) => {

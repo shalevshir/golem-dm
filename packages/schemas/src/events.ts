@@ -5,23 +5,63 @@ import { DiceNotation } from "./primitives.js";
 
 /**
  * Append-only game event log entry. The event stream is the source of truth;
- * world state is a projection. Enables replay, undo, and session restore.
+ * world state is a projection. Enables replay, undo, and campaign restore.
  */
 export const GameEvent = z.object({
   eventId: z.string().uuid(),
-  sessionId: z.string(),
+  campaignId: z.string(),
   sequence: z.number().int().min(0),
   timestamp: z.string().datetime(),
   type: z.enum([
     "player_input", "intent_classified", "action_proposed", "action_validated",
     "action_rejected", "dice_rolled", "state_delta_applied", "narrative_emitted",
-    "scene_changed", "session_snapshot",
+    "scene_changed",
+    "campaign_started", "encounter_started", "encounter_resolved",
   ]),
   /** English machine payload. Never store Hebrew here except narrative_emitted. */
   payload: z.record(z.string(), z.unknown()),
 });
 
 export type GameEvent = z.infer<typeof GameEvent>;
+
+/**
+ * The campaign's spine: `campaign_started` opens the stream, and each
+ * encounter is the bracketed span between an `encounter_started` and its
+ * `encounter_resolved` (ADR-0004). At most one bracket is open at a time,
+ * which is what makes `CampaignState.encounter` a nullable field rather than
+ * a map.
+ *
+ * All three payloads carry only what cannot be rebuilt. The projection each
+ * one opens is reconstructed from these fields rather than persisted — the
+ * same rule genesis already follows today, where the initial board is rebuilt
+ * from `encounterId` rather than stored — so a payload here names a thing and
+ * never snapshots it.
+ */
+export const CampaignStartedPayload = z.object({ rootSeed: z.number().int() });
+export type CampaignStartedPayload = z.infer<typeof CampaignStartedPayload>;
+
+export const EncounterStartedPayload = z.object({ encounterId: z.string() });
+export type EncounterStartedPayload = z.infer<typeof EncounterStartedPayload>;
+
+export const EncounterResolvedPayload = z.object({
+  encounterId: z.string(),
+  /**
+   * An open string rather than a closed enum, for the reason
+   * `ActionRejectedPayload` below spells out: this is persisted forever, so a
+   * closed enum becomes a migration the first time an outcome is added — and
+   * "victory"/"defeat" is exactly the pair §4.7 expects to grow (fled,
+   * negotiated, abandoned).
+   */
+  outcome: z.string(),
+  /**
+   * Who walked out. Ids only: everything else about them — HP, position,
+   * conditions — leaves the projection with the bracket, and what must
+   * outlive the fight travels in declared world-state effects from §4.7's
+   * step 5 onward, not here.
+   */
+  survivorIds: z.array(z.string()),
+});
+export type EncounterResolvedPayload = z.infer<typeof EncounterResolvedPayload>;
 
 /**
  * Payload convention for the `action_rejected` event. The tactical agent
@@ -144,7 +184,7 @@ export type AttackTrace = z.infer<typeof AttackTrace>;
 
 /**
  * Payload for the `dice_rolled` event. `reduce()` still no-ops this event
- * type (it does not change `SessionState`) — this schema exists so the web
+ * type (it does not change `CampaignState`) — this schema exists so the web
  * client's combat log (a client-only display feature, not state) can safely
  * parse what the engine already computed. `movedFeet` is the turn's total
  * movement distance, already accounting for terrain cost.

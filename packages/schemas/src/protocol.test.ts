@@ -5,24 +5,24 @@ import {
   EncounterCatalogue,
   MAX_FREE_TEXT_LENGTH,
   ServerFrame,
-  SessionCreated,
-  SessionState,
+  CampaignCreated,
+  CampaignState,
   TurnAffordances,
 } from "./protocol.js";
 
 describe("ClientMessage", () => {
   it("accepts a join with no resumeFrom", () => {
-    const parsed = ClientMessage.parse({ type: "join", sessionId: "s1" });
+    const parsed = ClientMessage.parse({ type: "join", campaignId: "s1" });
     expect(parsed.type).toBe("join");
   });
 
   it("accepts a join that resumes from a sequence", () => {
-    const parsed = ClientMessage.parse({ type: "join", sessionId: "s1", resumeFrom: 12 });
+    const parsed = ClientMessage.parse({ type: "join", campaignId: "s1", resumeFrom: 12 });
     expect(parsed).toMatchObject({ resumeFrom: 12 });
   });
 
   it("rejects a negative resumeFrom", () => {
-    expect(() => ClientMessage.parse({ type: "join", sessionId: "s1", resumeFrom: -1 })).toThrow();
+    expect(() => ClientMessage.parse({ type: "join", campaignId: "s1", resumeFrom: -1 })).toThrow();
   });
 
   it("accepts a structured action carrying a full ExecuteTurn", () => {
@@ -232,30 +232,55 @@ describe("EncounterCatalogue", () => {
   });
 });
 
-describe("SessionCreated", () => {
-  it("parses a valid POST /sessions response", () => {
-    const parsed = SessionCreated.parse({ sessionId: "s1" });
-    expect(parsed.sessionId).toBe("s1");
+describe("CampaignCreated", () => {
+  it("parses a valid POST /campaigns response", () => {
+    const parsed = CampaignCreated.parse({ campaignId: "s1" });
+    expect(parsed.campaignId).toBe("s1");
   });
 
-  it("rejects a response missing sessionId", () => {
-    expect(() => SessionCreated.parse({})).toThrow();
+  it("rejects a response missing campaignId", () => {
+    expect(() => CampaignCreated.parse({})).toThrow();
   });
 });
 
-describe("SessionState", () => {
+describe("CampaignState", () => {
+  const world = { campaignId: "s1", rootSeed: 7, appliedClientMessageIds: [] };
+  const encounter = {
+    encounterId: "goblin-ambush",
+    grid: { width: 1, height: 1, tiles: [["normal"]] },
+    combatants: [],
+    turnOrder: [],
+    currentActorIndex: 0,
+    round: 1,
+  };
+
   it("requires the fields a projection is folded into", () => {
-    const state = SessionState.parse({
-      sessionId: "s1",
-      rootSeed: 7,
-      encounterId: "goblin-ambush",
-      grid: { width: 1, height: 1, tiles: [["normal"]] },
-      combatants: [],
-      turnOrder: [],
-      currentActorIndex: 0,
-      round: 1,
-      appliedClientMessageIds: [],
+    const state = CampaignState.parse({ world, encounter });
+    expect(state.encounter?.round).toBe(1);
+  });
+
+  // The shape the split exists for: a campaign between fights, which the flat
+  // projection could not express at all.
+  it("accepts a campaign with no encounter open", () => {
+    const state = CampaignState.parse({ world, encounter: null });
+    expect(state.encounter).toBeNull();
+  });
+
+  it("rejects an absent encounter field, which is not the same as a null one", () => {
+    expect(() => CampaignState.parse({ world })).toThrow();
+  });
+
+  it("rejects a campaign with no world", () => {
+    expect(() => CampaignState.parse({ encounter })).toThrow();
+  });
+
+  // Idempotency is the world's, not the board's: it has to survive the
+  // encounter that produced it ending.
+  it("keeps appliedClientMessageIds on the world rather than the encounter", () => {
+    const state = CampaignState.parse({
+      world: { ...world, appliedClientMessageIds: ["c1"] },
+      encounter: null,
     });
-    expect(state.round).toBe(1);
+    expect(state.world.appliedClientMessageIds).toStrictEqual(["c1"]);
   });
 });

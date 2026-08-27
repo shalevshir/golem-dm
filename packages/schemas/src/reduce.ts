@@ -1,12 +1,35 @@
 // The projection. State is a fold of the event log and nothing else
-// (invariant 3), so this function is the only place a `SessionState` changes
+// (invariant 3), so this function is the only place a `CampaignState` changes
 // shape — and it is pure, total and never mutates its input.
 //
-// It lives in `@ai-dm/schemas` rather than in `apps/server` so that client and
-// server run the SAME fold, not two that must agree. `apps/web` may depend on
-// this package and only this package (invariant 5); an equivalent-but-separate
-// client fold was the alternative, and the drift it invites is exactly what
-// this placement removes. `apps/server/src/core/` imports it from here.
+// It lives in `@ai-dm/schemas` so that `apps/web` — which may depend on this
+// package and only this package (invariant 5) — has a fold to run at all.
+// Since the campaign/encounter split, though, this function alone is no
+// longer the whole projection: the server's is `reduce` PLUS a catalogue
+// substitution (`apps/server/src/core/campaign.ts`'s `loadCampaign`, the
+// `encounter_started` branch of its loop, which rebuilds the board `reduce`
+// cannot fill — see the comment on that case below), while the client
+// (`apps/web/src/state/store.ts`'s `applyFrame`) runs `reduce` alone, with no
+// catalogue to substitute from. `fold` therefore can no longer project a
+// campaign log across a bracket by itself; `loadCampaign` is the only
+// complete projector today.
+//
+// The gap this opens is silent, not a throw: a client that folds
+// `encounter_started` onto `encounter: null` gets `state` back unchanged —
+// no error — so its `snapshot.encounter` stays null while the server's own
+// projection has a board. `apps/web/src/App.tsx` then renders its "not ready
+// yet" placeholder branch (`state.snapshot === null || encounter === null ||
+// catalogue === null`) indefinitely, on a live socket that is otherwise
+// working fine.
+//
+// Unreachable today: a client never resumes from sequence 0 — `POST
+// /campaigns` always starts the one encounter before any client joins, so a
+// join always lands after `encounter_started` and receives it folded into
+// the `campaign_state` snapshot, never as a live `event` frame. §4.7's step
+// 4, which separates campaign creation from starting a fight, is what makes
+// this reachable, and it is the point at which `apps/web` needs its own
+// answer (either a catalogue fetch alongside `reduce`, or giving up on
+// `fold` projecting a bracket at all).
 //
 // Nothing here may import a Node built-in, or `apps/web`'s bundle breaks — and
 // nothing here may import `@ai-dm/rules-engine`, which would invert the
@@ -20,43 +43,68 @@
 // better than folding a half-understood event into state.
 import { z } from "zod";
 import { Combatant, ActionEconomy } from "./world.js";
+import { EncounterStartedPayload, EncounterResolvedPayload } from "./events.js";
 import type { GameEvent } from "./events.js";
-import type { SessionState } from "./protocol.js";
+import type { CampaignState } from "./protocol.js";
 
-// The task brief's "Interfaces" preview names this pair `SessionStartedPayload`
-// and `TurnAdvancedPayload`, but `GameEvent.type` has no `session_started` or
-// `turn_advanced` member — turn advancement is one `kind` of `scene_changed`,
-// and nothing in this file (or the rest of the event enum) needs a
-// session-started payload at all. That preview list predates the brief's own
-// worked implementation below and was not kept in sync with it; the worked
-// implementation is what was built and tested here. This schema parses the
-// whole `scene_changed` payload — `kind` is what `reduce` switches on below.
+// `GameEvent.type` has no `session_started` or `turn_advanced` member: turn
+// advancement is one `kind` of `scene_changed`, not an event type of its own.
+// This schema parses the whole `scene_changed` payload — `kind` is what
+// `reduce` switches on below.
 export const PlayerInputPayload = z.object({ clientMessageId: z.string() });
 export const StateDeltaAppliedPayload = z.object({ combatants: z.array(Combatant) });
 export const SceneChangedPayload = z.object({ kind: z.string() });
 
-export function reduce(state: SessionState, event: GameEvent): SessionState {
+export function reduce(state: CampaignState, event: GameEvent): CampaignState {
   switch (event.type) {
+    // Campaign scope: an id applies to the whole campaign, not to whichever
+    // fight happened to be open when it arrived. A resent action must still
+    // be recognized as a duplicate after the encounter it named has ended.
     case "player_input": {
       const { clientMessageId } = PlayerInputPayload.parse(event.payload);
       return {
         ...state,
-        appliedClientMessageIds: [...state.appliedClientMessageIds, clientMessageId],
+        world: {
+          ...state.world,
+          appliedClientMessageIds: [...state.world.appliedClientMessageIds, clientMessageId],
+        },
       };
     }
 
     case "state_delta_applied": {
       const { combatants } = StateDeltaAppliedPayload.parse(event.payload);
-      return { ...state, combatants };
+      // Loud, not silent. A combat event outside a bracket means the log is
+      // corrupt or a producer is wrong, and returning `state` here would
+      // project a plausible-looking board out of an impossible history —
+      // far worse to debug than a throw at the sequence that caused it.
+      // Same class as this function's existing `.parse` failures.
+      if (state.encounter === null) {
+        throw new Error(
+          `Combat event ${event.type} at sequence ${String(event.sequence)} with no encounter open`,
+        );
+      }
+      return { ...state, encounter: { ...state.encounter, combatants } };
     }
 
     case "scene_changed": {
       const { kind } = SceneChangedPayload.parse(event.payload);
       if (kind !== "turn_advanced") return state;
-      const next = state.currentActorIndex + 1;
-      const wrapped = next >= state.turnOrder.length;
+      // Checked after the `kind` gate, not before: `turn_advanced` is the one
+      // kind that is a combat signal (this event keeps a narrative name it
+      // has never earned), and it is exactly the kind this branch writes the
+      // encounter for. Guarding the whole event type instead would make any
+      // future out-of-combat scene change — the kind §4.7's step 4 will
+      // emit — throw for arriving where it belongs.
+      if (state.encounter === null) {
+        throw new Error(
+          `Combat event ${event.type} at sequence ${String(event.sequence)} with no encounter open`,
+        );
+      }
+      const encounter = state.encounter;
+      const next = encounter.currentActorIndex + 1;
+      const wrapped = next >= encounter.turnOrder.length;
       const currentActorIndex = wrapped ? 0 : next;
-      const round = wrapped ? state.round + 1 : state.round;
+      const round = wrapped ? encounter.round + 1 : encounter.round;
 
       // A fresh action economy is the start of a turn (mirrors
       // `tools/sim/src/engine/encounter.ts`'s reset at the same logical
@@ -73,28 +121,92 @@ export function reduce(state: SessionState, event: GameEvent): SessionState {
       // dead/unconscious upcoming actor is harmless — nothing here revives
       // anyone, and `validateExecuteTurn` still refuses a non-`alive` actor
       // a turn regardless of its economy.
-      const upNextId = state.turnOrder[currentActorIndex];
-      const combatants = state.combatants.map((each) =>
+      const upNextId = encounter.turnOrder[currentActorIndex];
+      const combatants = encounter.combatants.map((each) =>
         each.combatantId === upNextId ? { ...each, actionEconomy: ActionEconomy.parse({}) } : each,
       );
 
-      return { ...state, currentActorIndex, round, combatants };
+      return { ...state, encounter: { ...encounter, currentActorIndex, round, combatants } };
+    }
+
+    // Opens the bracket — but only by refusing to open a second one. What
+    // the bracket CONTAINS cannot be folded: an encounter's initial board is
+    // rebuilt from its `encounterId` through the encounter catalogue, which
+    // lives downstream in `apps/server` and can never be imported here
+    // (invariant 5). So `apps/server/src/core/campaign.ts` runs this guard,
+    // then substitutes the rebuilt board — exactly as it already rebuilds
+    // genesis rather than reading a persisted `state` field. The check still
+    // belongs here, because `state.encounter` is this function's field and a
+    // strictly non-overlapping bracket is what makes it a nullable field
+    // rather than a map. The payload is parsed here too, so the file's own
+    // rule above ("every payload this cares about is parsed here rather than
+    // cast") holds for both bracket events, not just the one that closes —
+    // `encounterId` is reported in the already-open error below for the same
+    // reason `encounter_resolved`'s mismatch error names both ids.
+    case "encounter_started": {
+      const { encounterId } = EncounterStartedPayload.parse(event.payload);
+      if (state.encounter !== null) {
+        throw new Error(
+          `encounter_started at sequence ${String(event.sequence)} names encounter ` +
+            `${encounterId}, but encounter ${state.encounter.encounterId} is already open`,
+        );
+      }
+      return state;
+    }
+
+    // Closes it, and keeps the world: `appliedClientMessageIds` outlives the
+    // fight, while the combatants, their HP and their positions leave with
+    // it. Whatever must survive travels in the payload and, from §4.7's step
+    // 5 onward, into declared world-state effects.
+    //
+    // Closing a bracket that was never open is the same corrupt-log class as
+    // a combat event outside one, and throws for the same reason: the
+    // resulting projection would be indistinguishable from a legitimate one.
+    case "encounter_resolved": {
+      const { encounterId } = EncounterResolvedPayload.parse(event.payload);
+      if (state.encounter === null) {
+        throw new Error(
+          `encounter_resolved at sequence ${String(event.sequence)} with no encounter open`,
+        );
+      }
+      // `reduce` is the fold for an arbitrary log, not only for the one
+      // `resolveEncounter` produces (`resolveEncounter` itself cannot name
+      // the wrong encounter — it takes `encounterId` from the open bracket,
+      // never from a caller — which is exactly why this check needs its own
+      // test at this level rather than one through that function). A
+      // `encounter_resolved` naming a different encounter than the one open
+      // is the same corrupt-log class as closing a bracket that was never
+      // open, one check further: it means some other producer, or a hand-
+      // edited log, is closing a fight the projection was not actually in.
+      if (encounterId !== state.encounter.encounterId) {
+        throw new Error(
+          `encounter_resolved at sequence ${String(event.sequence)} names encounter ` +
+            `${encounterId} but ${state.encounter.encounterId} is the one open`,
+        );
+      }
+      return { ...state, encounter: null };
     }
 
     // Recorded for replay, audit and 7b's rejection dataset, but they change
     // no projected field. Listed explicitly rather than caught by `default` so
     // adding a `GameEvent` type fails the exhaustiveness check here.
+    //
+    // `campaign_started` is a no-op for the same reason `encounter_started`
+    // cannot fill its own bracket: the world it declares is rebuilt from its
+    // payload before the fold begins, not folded out of it. That is what
+    // keeps "fold from a snapshot plus events equals fold from the campaign's
+    // starting state" true (C-26).
+    case "campaign_started":
     case "intent_classified":
     case "action_proposed":
     case "action_validated":
     case "action_rejected":
     case "dice_rolled":
     case "narrative_emitted":
-    case "session_snapshot":
       return state;
   }
 }
 
-export function fold(state: SessionState, events: readonly GameEvent[]): SessionState {
+export function fold(state: CampaignState, events: readonly GameEvent[]): CampaignState {
   return events.reduce(reduce, state);
 }

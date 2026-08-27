@@ -12,24 +12,24 @@
 // `actionId`/`combatantId` fallback used when a lookup misses is Latin (the
 // SRD itself is still English, ADR 0001).
 import type { z } from "zod";
-import { EncounterCatalogue, SessionCreated } from "@ai-dm/schemas";
+import { EncounterCatalogue, CampaignCreated } from "@ai-dm/schemas";
 import type { CatalogueAction, CatalogueCombatant } from "@ai-dm/schemas";
 
 // Re-exported so the components can import their prop types from one place
 // without each reaching into the schemas package for a type it only renders.
 export type { CatalogueAction, CatalogueCombatant };
 
-export async function createSession(encounterId: string): Promise<string> {
-  const response = await fetch("/sessions", {
+export async function createCampaign(encounterId: string): Promise<string> {
+  const response = await fetch("/campaigns", {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ encounterId }),
   });
-  if (!response.ok) throw new Error(`POST /sessions failed with ${String(response.status)}`);
+  if (!response.ok) throw new Error(`POST /campaigns failed with ${String(response.status)}`);
   // Parsed, never cast — the server hand-builds this response from typed
   // data, but the client only has untrusted JSON off the wire until this
   // line, exactly the same reasoning `fetchCatalogue` applies below.
-  return SessionCreated.parse(await response.json()).sessionId;
+  return CampaignCreated.parse(await response.json()).campaignId;
 }
 
 export async function fetchCatalogue(

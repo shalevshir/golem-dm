@@ -5,10 +5,14 @@ import postgres from "postgres";
 // One import, not two: `@ai-dm/schemas` exports `GameEvent` as both the zod
 // schema (used here as `GameEvent.parse`) and the inferred type, and a single
 // named import brings both.
-import { GameEvent, SessionState } from "@ai-dm/schemas";
-import { EventStoreUnavailableError, SequenceConflictError, SessionMismatchError } from "./port.js";
+import { GameEvent, CampaignState } from "@ai-dm/schemas";
+import {
+  EventStoreUnavailableError,
+  SequenceConflictError,
+  CampaignMismatchError,
+} from "./port.js";
 import type { EventSnapshot, EventStore } from "./port.js";
-import { gameEvents, sessionSnapshots } from "../schema.js";
+import { gameEvents, campaignSnapshots } from "../schema.js";
 import { findAppendConflict } from "./validate.js";
 
 /** Postgres' unique_violation. `game_events` has exactly one unique
@@ -31,7 +35,7 @@ function toGameEvent(row: typeof gameEvents.$inferSelect): GameEvent {
   // deliberately not passed — it is operational, not part of the event.
   return GameEvent.parse({
     eventId: row.eventId,
-    sessionId: row.sessionId,
+    campaignId: row.campaignId,
     sequence: row.sequence,
     timestamp: row.timestamp,
     type: row.type,
@@ -41,7 +45,7 @@ function toGameEvent(row: typeof gameEvents.$inferSelect): GameEvent {
 
 function toRow(event: GameEvent): typeof gameEvents.$inferInsert {
   return {
-    sessionId: event.sessionId,
+    campaignId: event.campaignId,
     sequence: event.sequence,
     eventId: event.eventId,
     timestamp: event.timestamp,
@@ -53,14 +57,14 @@ function toRow(event: GameEvent): typeof gameEvents.$inferInsert {
 export function createPostgresEventStore(db: PostgresJsDatabase): EventStore {
   async function takenSequences(
     executor: PostgresJsDatabase,
-    sessionId: string,
+    campaignId: string,
     sequences: readonly number[],
   ): Promise<Set<number>> {
     const rows = await executor
       .select({ sequence: gameEvents.sequence })
       .from(gameEvents)
       .where(
-        and(eq(gameEvents.sessionId, sessionId), inArray(gameEvents.sequence, [...sequences])),
+        and(eq(gameEvents.campaignId, campaignId), inArray(gameEvents.sequence, [...sequences])),
       );
     return new Set(rows.map((row) => row.sequence));
   }
@@ -71,18 +75,18 @@ export function createPostgresEventStore(db: PostgresJsDatabase): EventStore {
    * Runs outside the failed transaction, which is aborted.
    */
   async function deriveConflict(
-    sessionId: string,
+    campaignId: string,
     events: readonly GameEvent[],
     cause: unknown,
   ): Promise<Error> {
     try {
       const taken = await takenSequences(
         db,
-        sessionId,
+        campaignId,
         events.map((each) => each.sequence),
       );
       return (
-        findAppendConflict(sessionId, events, taken) ??
+        findAppendConflict(campaignId, events, taken) ??
         new EventStoreUnavailableError("append", cause)
       );
     } catch {
@@ -98,7 +102,7 @@ export function createPostgresEventStore(db: PostgresJsDatabase): EventStore {
   }
 
   return {
-    async append(sessionId, events) {
+    async append(campaignId, events) {
       // Nothing to do, and nothing to open a transaction for.
       if (events.length === 0) return;
       const sequences = events.map((each) => each.sequence);
@@ -108,8 +112,8 @@ export function createPostgresEventStore(db: PostgresJsDatabase): EventStore {
           // Every query in here must use `tx`, never the outer `db`: the
           // latter takes a different pooled connection and would deadlock
           // against this transaction's own uncommitted insert.
-          const taken = await takenSequences(tx, sessionId, sequences);
-          const conflict = findAppendConflict(sessionId, events, taken);
+          const taken = await takenSequences(tx, campaignId, sequences);
+          const conflict = findAppendConflict(campaignId, events, taken);
           // Thrown, not returned — the throw is what rolls the transaction
           // back, which is what makes "a rejection leaves the store exactly
           // as it was" true.
@@ -117,22 +121,22 @@ export function createPostgresEventStore(db: PostgresJsDatabase): EventStore {
           await tx.insert(gameEvents).values(events.map(toRow));
         });
       } catch (error) {
-        if (error instanceof SequenceConflictError || error instanceof SessionMismatchError) {
+        if (error instanceof SequenceConflictError || error instanceof CampaignMismatchError) {
           throw error;
         }
         if (errorCode(error) === UNIQUE_VIOLATION) {
-          throw await deriveConflict(sessionId, events, error);
+          throw await deriveConflict(campaignId, events, error);
         }
         throw new EventStoreUnavailableError("append", error);
       }
     },
 
-    async readSince(sessionId, afterSequence) {
+    async readSince(campaignId, afterSequence) {
       try {
         const rows = await db
           .select()
           .from(gameEvents)
-          .where(and(eq(gameEvents.sessionId, sessionId), gt(gameEvents.sequence, afterSequence)))
+          .where(and(eq(gameEvents.campaignId, campaignId), gt(gameEvents.sequence, afterSequence)))
           .orderBy(asc(gameEvents.sequence));
         return rows.map(toGameEvent);
       } catch (error) {
@@ -143,34 +147,34 @@ export function createPostgresEventStore(db: PostgresJsDatabase): EventStore {
       }
     },
 
-    async latestSnapshot(sessionId): Promise<EventSnapshot | null> {
+    async latestSnapshot(campaignId): Promise<EventSnapshot | null> {
       try {
         const rows = await db
           .select()
-          .from(sessionSnapshots)
-          .where(eq(sessionSnapshots.sessionId, sessionId))
+          .from(campaignSnapshots)
+          .where(eq(campaignSnapshots.campaignId, campaignId))
           .limit(1);
         const row = rows[0];
         if (row === undefined) return null;
-        return { sequence: row.sequence, state: SessionState.parse(row.state) };
+        return { sequence: row.sequence, state: CampaignState.parse(row.state) };
       } catch (error) {
         throw new EventStoreUnavailableError("latestSnapshot", error);
       }
     },
 
-    async putSnapshot(sessionId, sequence, state) {
+    async putSnapshot(campaignId, sequence, state) {
       try {
         await db
-          .insert(sessionSnapshots)
-          .values({ sessionId, sequence, state })
+          .insert(campaignSnapshots)
+          .values({ campaignId, sequence, state })
           .onConflictDoUpdate({
-            target: sessionSnapshots.sessionId,
+            target: campaignSnapshots.campaignId,
             set: { sequence, state, updatedAt: raw`now()` },
             // Makes a stale *or equal* sequence a silent no-op rather than an
             // error, matching the in-memory store's `snapshot.sequence <
             // sequence` guard exactly. A false predicate skips the row; it
             // does not raise.
-            setWhere: lt(sessionSnapshots.sequence, sequence),
+            setWhere: lt(campaignSnapshots.sequence, sequence),
           });
       } catch (error) {
         throw new EventStoreUnavailableError("putSnapshot", error);

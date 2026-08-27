@@ -10,3 +10,11 @@ tools/sim/runs/
 
 # Visual brainstorming companion sessions (mockups, ephemeral)
 .superpowers/brainstorm/
+
+# Claude Code local state. `worktrees/` holds full checkouts of other
+# branches — 769M at the time this was added, and the reason a root
+# `pnpm lint` walks sibling worktrees and reports their errors as ours.
+.claude/
+
+# Superpowers SDD scratch workspace (ledger, briefs, review packages)
+.superpowers/

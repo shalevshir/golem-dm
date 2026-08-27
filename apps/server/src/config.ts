@@ -26,7 +26,7 @@ const RawEnv = z.object({
     .pipe(z.number().int().min(1).max(65_535))
     .optional(),
   LOG_LEVEL: LogLevel.optional(),
-  // Absent means the in-memory event store: sessions do not survive a
+  // Absent means the in-memory event store: campaigns do not survive a
   // restart. It carries a password, so it is never logged.
   DATABASE_URL: optionalSecret,
   ANTHROPIC_API_KEY: optionalSecret,
