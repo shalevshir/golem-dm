@@ -37,6 +37,30 @@ describe("the campaign lifecycle payloads", () => {
     expect(() => CampaignStartedPayload.parse({ rootSeed: 1.5 })).toThrow();
   });
 
+  it("accepts the full genesis quartet alongside rootSeed", () => {
+    const parsed = CampaignStartedPayload.parse({
+      rootSeed: 1,
+      worldId: "riverbend",
+      startingNodeId: "find-the-trail",
+      startingDay: 1,
+      characterId: "hero",
+    });
+    expect(parsed).toMatchObject({ worldId: "riverbend", characterId: "hero" });
+  });
+
+  it("rejects a partial quartet — worldId with no characterId — with the all-or-none message", () => {
+    const result = CampaignStartedPayload.safeParse({
+      rootSeed: 1,
+      worldId: "riverbend",
+      startingNodeId: "find-the-trail",
+      startingDay: 1,
+    });
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.issues[0]?.message).toBe("scene genesis fields are all-or-none");
+    }
+  });
+
   it("accepts a well-formed encounter_started payload", () => {
     expect(EncounterStartedPayload.parse({ encounterId: "goblin-ambush" }).encounterId).toBe(
       "goblin-ambush",

@@ -29,7 +29,7 @@ function event(campaignId: string, sequence: number): GameEvent {
 
 function stateFor(campaignId: string): CampaignState {
   return {
-    world: { campaignId, rootSeed: 1, appliedClientMessageIds: [] },
+    world: { campaignId, rootSeed: 1, appliedClientMessageIds: [], scene: null },
     encounter: {
       encounterId: "e1",
       grid: { width: 1, height: 1, tiles: [["normal"]] },

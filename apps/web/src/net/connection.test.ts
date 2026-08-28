@@ -7,7 +7,7 @@ const snapshotFrame: ServerFrame = {
   type: "campaign_state",
   sequence: 0,
   snapshot: {
-    world: { campaignId: "s1", rootSeed: 1, appliedClientMessageIds: [] },
+    world: { campaignId: "s1", rootSeed: 1, appliedClientMessageIds: [], scene: null },
     encounter: {
       encounterId: "goblin-ambush",
       grid: { width: 1, height: 1, tiles: [["normal"]] },

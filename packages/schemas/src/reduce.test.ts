@@ -14,7 +14,7 @@ const baseEncounter: EncounterState = {
 };
 
 const base: CampaignState = {
-  world: { campaignId: "s1", rootSeed: 7, appliedClientMessageIds: [] },
+  world: { campaignId: "s1", rootSeed: 7, appliedClientMessageIds: [], scene: null },
   encounter: baseEncounter,
 };
 
@@ -333,7 +333,7 @@ describe("reduce", () => {
     // right against an already-empty array. A non-empty one actually
     // discriminates.
     const midEncounter: CampaignState = {
-      world: { campaignId: "s1", rootSeed: 7, appliedClientMessageIds: ["c1", "c2"] },
+      world: { campaignId: "s1", rootSeed: 7, appliedClientMessageIds: ["c1", "c2"], scene: null },
       encounter: { ...baseEncounter, round: 3, currentActorIndex: 1 },
     };
     const before = structuredClone(midEncounter);

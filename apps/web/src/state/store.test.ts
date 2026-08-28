@@ -20,7 +20,7 @@ const genesisEncounter: EncounterState = {
 };
 
 const genesis: CampaignState = {
-  world: { campaignId: "s1", rootSeed: 3, appliedClientMessageIds: [] },
+  world: { campaignId: "s1", rootSeed: 3, appliedClientMessageIds: [], scene: null },
   encounter: genesisEncounter,
 };
 

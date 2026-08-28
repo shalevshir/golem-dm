@@ -131,6 +131,10 @@ function initialWorldState(input: { campaignId: string; rootSeed: number }): Wor
     campaignId: input.campaignId,
     rootSeed: input.rootSeed,
     appliedClientMessageIds: [],
+    // `sceneFromGenesis` is not wired here yet — Task 8 threads the scene
+    // genesis quartet through `createCampaign`/`loadCampaign`. Every campaign
+    // is combat-only from this task's point of view.
+    scene: null,
   };
 }
 

@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { ExecuteTurn } from "./actions.js";
+import { ContentId } from "./content.js";
 import { EntityStatus } from "./world.js";
 import { DiceNotation } from "./primitives.js";
 
@@ -36,8 +37,27 @@ export type GameEvent = z.infer<typeof GameEvent>;
  * same rule genesis already follows today, where the initial board is rebuilt
  * from `encounterId` rather than stored — so a payload here names a thing and
  * never snapshots it.
+ *
+ * `CampaignStartedPayload`: `rootSeed` alone opens a combat-only campaign, as
+ * before. The other four fields are the scene genesis quartet (§4.7 step 4):
+ * present together, they let `sceneFromGenesis` (`protocol.ts`) build the
+ * starting `SceneSnapshot`. The `.refine` below enforces all-or-none so the
+ * fold never has to guess a scene from a partial quartet.
  */
-export const CampaignStartedPayload = z.object({ rootSeed: z.number().int() });
+export const CampaignStartedPayload = z
+  .object({
+    rootSeed: z.number().int(),
+    worldId: ContentId.optional(),
+    startingNodeId: ContentId.optional(),
+    startingDay: z.number().int().min(1).optional(),
+    characterId: z.string().optional(),
+  })
+  .refine(
+    (p) =>
+      [p.worldId, p.startingNodeId, p.startingDay, p.characterId].every((f) => f === undefined) ||
+      [p.worldId, p.startingNodeId, p.startingDay, p.characterId].every((f) => f !== undefined),
+    { message: "scene genesis fields are all-or-none" },
+  );
 export type CampaignStartedPayload = z.infer<typeof CampaignStartedPayload>;
 
 export const EncounterStartedPayload = z.object({ encounterId: z.string() });

@@ -22,7 +22,7 @@ import { combatant } from "./state/combatant-fixture.js";
 
 function snapshotWith(combatants: Combatant[]): CampaignState {
   return {
-    world: { campaignId: "s1", rootSeed: 3, appliedClientMessageIds: [] },
+    world: { campaignId: "s1", rootSeed: 3, appliedClientMessageIds: [], scene: null },
     encounter: {
       encounterId: "goblin-ambush",
       grid: {
