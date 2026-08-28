@@ -293,6 +293,82 @@ function endsComplete(text: string): boolean {
   return trimmed !== "" && NARRATION_TERMINATORS.some((mark) => trimmed.endsWith(mark));
 }
 
+/**
+ * The narration degradation ladder's result: the full text produced (the
+ * primary stream plus, on a lower rung, whatever the fallback contributed)
+ * and which rung produced it. Read back by the caller once `narrationLadder`
+ * below has finished — see that function's doc comment for why this is an
+ * out-parameter rather than a return value.
+ */
+interface LadderOutcome {
+  text: string;
+  source: NarrationSource;
+}
+
+/**
+ * Streams `primary` until `deadline`, then applies the degradation ladder:
+ * empty -> fallback; truncated -> seam + fallback completion. Yields
+ * `narrative_token` frames only — the caller owns the `narrative_emitted`
+ * emit and the metrics call, since only it knows the actor and the other
+ * fields those need.
+ *
+ * Mutates `out` instead of returning a value. A generator's `return` value
+ * is unreachable through `yield*` (the only way a caller can drive this and
+ * still forward every frame it yields), so there is no way to hand back
+ * `text`/`source` on completion except through a parameter the caller
+ * already holds a reference to. Do not "fix" this into a return — that
+ * value would be silently discarded by every `yield* narrationLadder(...)`
+ * call site.
+ */
+async function* narrationLadder(args: {
+  streamId: string;
+  primary: AsyncIterable<string>;
+  fallback: () => AsyncIterable<string>;
+  deadline: number;
+  out: LadderOutcome;
+}): AsyncIterable<ServerFrame> {
+  const { streamId, primary, fallback, deadline, out } = args;
+
+  let text = "";
+  for await (const chunk of untilDeadline(primary, deadline)) {
+    text += chunk;
+    yield { type: "narrative_token", streamId, text: chunk };
+  }
+
+  // The ladder. Neither rung is deadline-bound: `untilDeadline` has already
+  // returned, template rendering cannot hang, and gating a fallback on a
+  // spent deadline would produce a silent turn — which reads to a player as
+  // a dropped connection.
+  let source: NarrationSource = "model";
+
+  if (text.trim() === "") {
+    // Nothing arrived at all. Render the rule outcome through the terse,
+    // always-available Hebrew port `apps/server/CLAUDE.md` names as the
+    // fallback — still streamed as narrative_token frames, just from a
+    // source that cannot itself hang.
+    source = "deterministic";
+  } else if (!endsComplete(text)) {
+    // Tokens arrived and then stopped mid-sentence. Those tokens are
+    // already on the player's screen and cannot be unsent, so the shortfall
+    // is repaired by streaming MORE rather than by rewriting less. The
+    // ellipsis marks the seam so a truncation reads as a truncation.
+    source = "completed";
+    const seam = "… ";
+    text += seam;
+    yield { type: "narrative_token", streamId, text: seam };
+  }
+
+  if (source !== "model") {
+    for await (const chunk of fallback()) {
+      text += chunk;
+      yield { type: "narrative_token", streamId, text: chunk };
+    }
+  }
+
+  out.text = text;
+  out.source = source;
+}
+
 export async function* handleCommand(
   campaign: Campaign,
   command: ClientMessage,
@@ -402,41 +478,14 @@ export async function* handleCommand(
     // this file's `portsWith` does) or advance it on a known schedule, and a
     // wall-clock read here would defeat that.
     const startedAt = ports.clock();
-    let text = "";
-    for await (const chunk of untilDeadline(ports.narrative.stream(input), deadline)) {
-      text += chunk;
-      yield { type: "narrative_token", streamId, text: chunk };
-    }
-
-    // The ladder. Neither rung is deadline-bound: `untilDeadline` has already
-    // returned, template rendering cannot hang, and gating a fallback on a
-    // spent deadline would produce a silent turn — which reads to a player as
-    // a dropped connection.
-    let source: NarrationSource = "model";
-
-    if (text.trim() === "") {
-      // Nothing arrived at all. Render the rule outcome through the terse,
-      // always-available Hebrew port `apps/server/CLAUDE.md` names as the
-      // fallback — still streamed as narrative_token frames, just from a
-      // source that cannot itself hang.
-      source = "deterministic";
-    } else if (!endsComplete(text)) {
-      // Tokens arrived and then stopped mid-sentence. Those tokens are
-      // already on the player's screen and cannot be unsent, so the shortfall
-      // is repaired by streaming MORE rather than by rewriting less. The
-      // ellipsis marks the seam so a truncation reads as a truncation.
-      source = "completed";
-      const seam = "… ";
-      text += seam;
-      yield { type: "narrative_token", streamId, text: seam };
-    }
-
-    if (source !== "model") {
-      for await (const chunk of createDeterministicNarrative().stream(input)) {
-        text += chunk;
-        yield { type: "narrative_token", streamId, text: chunk };
-      }
-    }
+    const out: LadderOutcome = { text: "", source: "model" };
+    yield* narrationLadder({
+      streamId,
+      primary: ports.narrative.stream(input),
+      fallback: () => createDeterministicNarrative().stream(input),
+      deadline,
+      out,
+    });
 
     // One call per narrated turn, whichever rung produced it — the pipeline
     // is the only place that knows `actorId` and `source`; the agent itself
@@ -445,7 +494,7 @@ export async function* handleCommand(
     const latencyMs = Date.parse(ports.clock()) - Date.parse(startedAt);
     ports.metrics?.recordNarrativeTurn({
       actorId,
-      source,
+      source: out.source,
       latencyMs,
       promptVersion: NARRATIVE_PROMPT_VERSION,
     });
@@ -460,12 +509,12 @@ export async function* handleCommand(
     yield* emit("narrative_emitted", {
       actorId,
       streamId,
-      text,
-      source,
+      text: out.text,
+      source: out.source,
       promptVersion: NARRATIVE_PROMPT_VERSION,
     });
 
-    campaign.recentNarrations = [...campaign.recentNarrations, text].slice(-NARRATION_WINDOW);
+    campaign.recentNarrations = [...campaign.recentNarrations, out.text].slice(-NARRATION_WINDOW);
   }
 
   /**
