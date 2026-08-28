@@ -462,6 +462,24 @@ function questNodeCard(
   return { sceneEnglish: node.sceneEnglish, locationNameHebrew: location.nameHebrew, npcNamesHebrew };
 }
 
+/**
+ * A real, compiler-enforced exhaustiveness check — the "no `default`"
+ * switches elsewhere in this codebase (`reduce.ts`, the scene engine's
+ * `evaluatePredicate`/`describePredicate`/`applyEffect`) get this for free
+ * because they are value-returning functions: a missing `case` there leaves
+ * a code path with no `return`, which is TS2366 under `strictNullChecks`.
+ * The `free_text` category switch (below) has no such function to lean on —
+ * `handleCommand` is a generator, and nothing requires every branch to
+ * "return a value" — so a missing case there would otherwise compile clean
+ * and silently fall through. Called on the value TypeScript has narrowed to
+ * `never` immediately after a switch whose cases cover every member of a
+ * discriminated union: if a member is ever left unhandled, that value is no
+ * longer `never` and this call fails to compile.
+ */
+function assertNever(value: never): never {
+  throw new Error(`unreachable: ${JSON.stringify(value)}`);
+}
+
 export async function* handleCommand(
   campaign: Campaign,
   command: ClientMessage,
@@ -1102,7 +1120,8 @@ export async function* handleCommand(
                 },
                 deadline,
               );
-              break;
+              yield* playerAffordances();
+              return;
             }
 
             // `nodeId` is always the node being LEFT (or, for a
@@ -1144,7 +1163,12 @@ export async function* handleCommand(
               { kind: "arrived", sceneEnglish: card.sceneEnglish, locationNameHebrew: card.locationNameHebrew },
               deadline,
             );
-            break;
+            // For symmetry with `structured_action`'s ending — out of combat
+            // (guaranteed by guard 2 above) this yields nothing; the
+            // client's input re-enables on the `narrative_emitted` fold
+            // instead.
+            yield* playerAffordances();
+            return;
           }
 
           // Replaced wholesale in Task 10. Listed explicitly, with no
@@ -1157,10 +1181,21 @@ export async function* handleCommand(
             throw new Error("unreachable until Task 10");
         }
 
-        // For symmetry with `structured_action`'s ending — out of combat
-        // (guaranteed by guard 2 above) this yields nothing; the client's
-        // input re-enables on the `narrative_emitted` fold instead.
-        yield* playerAffordances();
+        // Reached only when `classification.category` matched none of the
+        // cases above — unreachable today because every member of
+        // `IntentClassification`'s discriminant is listed, which is exactly
+        // what lets TypeScript narrow `classification` to `never` here. This
+        // is the real exhaustiveness check the plain "no default" switch
+        // above cannot provide on its own: `handleCommand` is a generator
+        // (`AsyncIterable<ServerFrame>`), so a missing `case` does not trip
+        // TS2366 the way it would in a value-returning function like
+        // `reduce`'s — nothing forces every branch to "return a value".
+        // Deleting a case here makes `classification` still include that
+        // member's literal type at this point, `never` becomes a lie, and
+        // the file fails to compile. That is the property this line exists
+        // to buy, not the throw's message (which is genuinely unreachable
+        // while the schema's five members match the five cases above).
+        assertNever(classification);
         return;
       }
 
