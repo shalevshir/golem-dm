@@ -5,7 +5,7 @@
 import { afterAll, describe, expect, it } from "vitest";
 import { validateExecuteTurn } from "@ai-dm/rules-engine";
 import type { TacticalAgent } from "@ai-dm/agents";
-import { createDeterministicNarrative } from "@ai-dm/agents";
+import { createDeterministicNarrative, createDeterministicSceneNarrative } from "@ai-dm/agents";
 import { connectPostgresEventStore, createInMemoryEventStore } from "@ai-dm/memory";
 import type { EventStore } from "@ai-dm/memory";
 import { fold } from "@ai-dm/schemas";
@@ -81,11 +81,19 @@ function portsWith(store: EventStore): TurnPorts {
     store,
     tactical: defaultTactical(),
     narrative: createDeterministicNarrative(),
+    // No property in this file drives `free_text`, so `intent` is a double
+    // that fails loudly if a property ever reaches it rather than one that
+    // would silently mask a wiring bug.
+    intent: {
+      classify: () => Promise.reject(new Error("intent.classify not exercised by replay.test.ts")),
+    },
+    sceneNarrative: createDeterministicSceneNarrative(),
     clock: CLOCK,
     uuid: uuids(),
     seedFor: (rootSeed, sequence) => rootSeed * 1000 + sequence,
     turnTimeoutMs: 10_000,
     conditionNamesHebrew: new Map([["prone", "שרוע"]]),
+    skillAbilities: new Map(),
   };
 }
 

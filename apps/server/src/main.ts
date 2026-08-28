@@ -10,6 +10,8 @@ import { randomUUID } from "node:crypto";
 import {
   createAgentRuntime,
   createHebrewNarrative,
+  createHebrewSceneNarrative,
+  createIntentAgent,
   createTacticalAgent,
   createVercelPort,
   DEFAULT_MODEL_ROUTING,
@@ -21,6 +23,7 @@ import { buildApp } from "./app.js";
 import { loadConfig } from "./config.js";
 import type { MetricsPort } from "./core/pipeline.js";
 import { loadConditions } from "./encounters/index.js";
+import { loadGear } from "./encounters/gear.js";
 import { createCampaignRegistry } from "./transport/http.js";
 
 const config = loadConfig(process.env);
@@ -46,6 +49,16 @@ const conditionNamesHebrew = new Map(
     loadConditions(),
     ([condition, definition]) => [condition, definition.nameHebrew] as const,
   ),
+);
+
+// `free_text`'s `check` category (Task 10) needs the governing ability for a
+// named skill — `SrdGear.skills`'s own field is `ability`, not `abilityKey`
+// or anything else this task's brief guessed at; verified by reading
+// `SkillDefinition` (`packages/schemas/src/srd.ts`) before writing this map.
+// A port, like `conditionNamesHebrew` above, so the pipeline still does no
+// file I/O of its own.
+const skillAbilities = new Map(
+  Array.from(loadGear().skills, ([skill, definition]) => [skill, definition.ability] as const),
 );
 
 // Per-turn latency, tokens and retries are recorded from day one
@@ -85,6 +98,14 @@ const narrativeRuntime = createAgentRuntime({
   port: createVercelPort({}),
 });
 
+// A third runtime, for the same reason: the intent router is a third model
+// tier (§4.7 calls it "the third model on the meter"), instrumented and
+// routed independently of the tactical and narrative ones.
+const intentRuntime = createAgentRuntime({
+  routing: DEFAULT_MODEL_ROUTING,
+  port: createVercelPort({}),
+});
+
 const metrics: MetricsPort = {
   recordTacticalTurn(turn) {
     logHolder.current?.info(turn, "tactical_turn_metrics");
@@ -103,6 +124,9 @@ const metrics: MetricsPort = {
       { campaignId: record.campaignId, sequence: record.sequence, err: record.error },
       "snapshot_write_failed",
     );
+  },
+  recordIntentCall(record) {
+    logHolder.current?.info(record, "intent_call_metrics");
   },
 };
 
@@ -134,6 +158,16 @@ const app = buildApp({
         logHolder.current?.info({ ...finish, agent: "narrative" }, "narrative_stream_finished");
       },
     }),
+    intent: createIntentAgent({ runtime: intentRuntime }),
+    // Wired unconditionally, mirroring `narrative` above: a missing provider
+    // key degrades through `sceneNarrate`'s own ladder (pipeline.ts) rather
+    // than failing the turn.
+    sceneNarrative: createHebrewSceneNarrative({
+      runtime: narrativeRuntime,
+      onFinish: (finish) => {
+        logHolder.current?.info({ ...finish, agent: "scene_narrative" }, "narrative_stream_finished");
+      },
+    }),
     clock,
     uuid: randomUUID,
     // Derived, not random: the same root seed and the same commands must
@@ -143,6 +177,7 @@ const app = buildApp({
     turnTimeoutMs: 10_000,
     metrics,
     conditionNamesHebrew,
+    skillAbilities,
   },
 });
 logHolder.current = app.log;

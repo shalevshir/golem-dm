@@ -15,16 +15,34 @@
 // followed by the hostile sweep and the per-turn narration timeout (Task 10),
 // appended to the same `structured_action` case after a successful player
 // turn.
-import { affordancesFor, applyTurn, seeded, validateExecuteTurn } from "@ai-dm/rules-engine";
-import type { TurnEffect } from "@ai-dm/rules-engine";
+import {
+  affordancesFor,
+  applyTurn,
+  availableEdges,
+  completeCurrentNode,
+  diffScene,
+  sceneStateFrom,
+  seeded,
+  traverseEdge,
+  validateExecuteTurn,
+} from "@ai-dm/rules-engine";
+import type { AuthoredWorld, SceneTransition, TurnEffect } from "@ai-dm/rules-engine";
 import {
   availableActionsFor,
   buildNarrationBrief,
   createDeterministicNarrative,
+  createDeterministicSceneNarrative,
+  INTENT_PROMPT_VERSION,
   NARRATIVE_PROMPT_VERSION,
+  SCENE_PROMPT_VERSION,
 } from "@ai-dm/agents";
 import type {
+  IntentAgent,
+  IntentResult,
   NarrativePort,
+  SceneBeat,
+  SceneNarrationInput,
+  SceneNarrativePort,
   TacticalAgent,
   TurnProposalFailure,
   TurnProposalResult,
@@ -38,13 +56,16 @@ import {
 import type { EventStore } from "@ai-dm/memory";
 import { reduce } from "@ai-dm/schemas";
 import type {
+  AbilityKey,
   ClientMessage,
   Condition,
   GameEvent,
   NarrationSource,
+  SceneSnapshot,
   ServerFrame,
+  Skill,
 } from "@ai-dm/schemas";
-import { builtOf, encounterOf, NARRATION_WINDOW, worldFor } from "./campaign.js";
+import { builtOf, encounterOf, NARRATION_WINDOW, sceneStaticsOf, worldFor } from "./campaign.js";
 import type { Campaign } from "./campaign.js";
 
 /** `apps/server/CLAUDE.md`: snapshot every 50 events. */
@@ -129,6 +150,27 @@ export interface NarrativeTurnMetrics {
   promptVersion: string;
 }
 
+/**
+ * Per-call intent-router metrics, mirroring `TacticalTurnMetrics`'s shape for
+ * a third model tier. `outcome` is `"ok"` or an `AdapterErrorCode` — the same
+ * "resolution vs. producer" split `TacticalTurnMetrics.outcome` documents,
+ * kept as an open `string` for the reason `ActionRejectedPayload`'s own codes
+ * are: a closed enum here becomes a migration the first time an adapter code
+ * is added, and this type has no dependency-direction reason to import one
+ * from `@ai-dm/agents` anyway.
+ */
+export interface IntentCallMetrics {
+  /** `"ok"`, or an `AdapterErrorCode` on failure — an open `string` since a
+   *  `"ok" | AdapterErrorCode` union collapses to `string` anyway. */
+  outcome: string;
+  /** Present only when `outcome === "ok"` — a failed call classified nothing. */
+  category?: string;
+  latencyMs: number;
+  promptTokens: number;
+  completionTokens: number;
+  totalTokens: number;
+}
+
 /** A `putSnapshot` rejection, contained inside `emit` — see `MetricsPort`. */
 export interface SnapshotFailureRecord {
   campaignId: string;
@@ -170,12 +212,23 @@ export interface MetricsPort {
    * that distinction visible.
    */
   recordNarrativeTurn(record: NarrativeTurnMetrics): void;
+  /**
+   * One call per `free_text` turn that reached the intent router — the third
+   * model tier §4.7 calls out as unreportable by construction until step 11's
+   * fix. Optional for the same reason `recordSnapshotFailure` is: it must not
+   * invalidate a `MetricsPort` implementation written before this task.
+   */
+  recordIntentCall?(record: IntentCallMetrics): void;
 }
 
 export interface TurnPorts {
   store: EventStore;
   tactical: TacticalAgent;
   narrative: NarrativePort;
+  /** The intent router — `free_text`'s classifier. */
+  intent: IntentAgent;
+  /** The out-of-combat narrator — `free_text`'s sibling of `narrative`. */
+  sceneNarrative: SceneNarrativePort;
   clock: () => string;
   uuid: () => string;
   /** Deterministic per turn. Recorded in `dice_rolled`; replay reads it back. */
@@ -186,6 +239,15 @@ export interface TurnPorts {
   /** Hebrew condition labels, from `loadConditions()`. A port, not a file read:
    *  the pipeline does no I/O of its own. */
   conditionNamesHebrew: ReadonlyMap<Condition, string>;
+  /**
+   * Governing ability per skill, from `SrdGear.skills` (`loadGear()`). A
+   * port, not a file read, for the same reason `conditionNamesHebrew` is —
+   * the `check` category (Task 10) needs
+   * `DerivedCharacter.skills[skill]` when a skill is named and
+   * `abilityModifiers[ability]` otherwise, and this is what tells it which
+   * ability a named skill falls under.
+   */
+  skillAbilities: ReadonlyMap<Skill, AbilityKey>;
 }
 
 /** `structured_action` and `free_text` carry one; `join` does not. */
@@ -369,6 +431,37 @@ async function* narrationLadder(args: {
   out.source = source;
 }
 
+/**
+ * A quest node's narration material: its own English scene card, its
+ * location's Hebrew name, and the Hebrew names of every NPC authored at that
+ * location. Shared by `sceneNarrate` (the top-level `SceneNarrationInput`
+ * fields) and the `free_text` exploration case (the `arrived` beat's own
+ * `sceneEnglish`/`locationNameHebrew`) so the two cannot read the node two
+ * different ways.
+ *
+ * Throws on a dangling id rather than returning a default: `loadWorld`
+ * refuses a `locationId` that does not resolve, so reaching either branch
+ * here means a hand-built world or a corrupt `currentNodeId` — the same
+ * corrupt-log posture `builtOf`/`sceneStaticsOf` take (`campaign.ts`).
+ */
+function questNodeCard(
+  authored: AuthoredWorld,
+  nodeId: string,
+): { sceneEnglish: string; locationNameHebrew: string; npcNamesHebrew: string[] } {
+  const node = authored.questNodes.get(nodeId);
+  if (node === undefined) {
+    throw new Error(`No quest node "${nodeId}" in world ${authored.worldId}`);
+  }
+  const location = authored.locations.get(node.locationId);
+  if (location === undefined) {
+    throw new Error(`No location "${node.locationId}" in world ${authored.worldId}`);
+  }
+  const npcNamesHebrew = Array.from(authored.npcs.values())
+    .filter((npc) => npc.locationId === node.locationId)
+    .map((npc) => npc.nameHebrew);
+  return { sceneEnglish: node.sceneEnglish, locationNameHebrew: location.nameHebrew, npcNamesHebrew };
+}
+
 export async function* handleCommand(
   campaign: Campaign,
   command: ClientMessage,
@@ -512,6 +605,82 @@ export async function* handleCommand(
       text: out.text,
       source: out.source,
       promptVersion: NARRATIVE_PROMPT_VERSION,
+    });
+
+    campaign.recentNarrations = [...campaign.recentNarrations, out.text].slice(-NARRATION_WINDOW);
+  }
+
+  /**
+   * `campaign.state.world.scene`, narrowed once. Re-derived at every call
+   * site that needs it rather than bound to a local once, for the same
+   * reason `encounterOf`/`sceneStaticsOf` (`campaign.ts`) are: `emit`
+   * replaces `campaign.state` wholesale as the turn progresses, so a binding
+   * taken earlier would describe a scene that has already moved.
+   */
+  function currentScene(): SceneSnapshot {
+    const { scene } = campaign.state.world;
+    if (scene === null) {
+      throw new Error(`Campaign ${campaign.state.world.campaignId} has no scene open`);
+    }
+    return scene;
+  }
+
+  /**
+   * `narrate`'s sibling for the out-of-combat brief (design spec Decision 7):
+   * same ladder, same one-`narrative_emitted`-per-turn contract, same
+   * `recentNarrations` window — a different `SceneNarrationInput` and a
+   * different prompt version stamped through. `beat` is the caller's job to
+   * build (`free_text` below): this only assembles the material every beat
+   * shares (the current node's card, the player, the NPCs present) and runs
+   * it through the ladder.
+   *
+   * `deadline` is the SAME absolute timestamp `free_text` struck for its
+   * `classify` call, not a fresh one — Decision 6's "one 10s deadline...
+   * covers the classify call... and the narration", mirroring `enemyTurn`'s
+   * shared budget for its tactical call and its own `narrate`.
+   */
+  async function* sceneNarrate(
+    actorId: string,
+    beat: SceneBeat,
+    deadline: number,
+  ): AsyncIterable<ServerFrame> {
+    const statics = sceneStaticsOf(campaign);
+    const card = questNodeCard(statics.authored, currentScene().currentNodeId);
+
+    const input: SceneNarrationInput = {
+      beat,
+      sceneEnglish: card.sceneEnglish,
+      playerNameHebrew: statics.character.nameHebrew,
+      playerGender: statics.character.grammaticalGender,
+      npcNamesHebrew: card.npcNamesHebrew,
+      recentNarrations: campaign.recentNarrations,
+    };
+
+    const streamId = ports.uuid();
+    const startedAt = ports.clock();
+    const out: LadderOutcome = { text: "", source: "model" };
+    yield* narrationLadder({
+      streamId,
+      primary: ports.sceneNarrative.stream(input),
+      fallback: () => createDeterministicSceneNarrative().stream(input),
+      deadline,
+      out,
+    });
+
+    const latencyMs = Date.parse(ports.clock()) - Date.parse(startedAt);
+    ports.metrics?.recordNarrativeTurn({
+      actorId,
+      source: out.source,
+      latencyMs,
+      promptVersion: SCENE_PROMPT_VERSION,
+    });
+
+    yield* emit("narrative_emitted", {
+      actorId,
+      streamId,
+      text: out.text,
+      source: out.source,
+      promptVersion: SCENE_PROMPT_VERSION,
     });
 
     campaign.recentNarrations = [...campaign.recentNarrations, out.text].slice(-NARRATION_WINDOW);
@@ -786,12 +955,212 @@ export async function* handleCommand(
       }
 
       case "free_text": {
-        yield {
-          type: "error",
+        // Guard 1, mirroring `structured_action`'s own dedupe: must run
+        // before anything else, since a resend can arrive after the turn it
+        // named already resolved.
+        if (campaign.state.world.appliedClientMessageIds.includes(command.clientMessageId)) {
+          return;
+        }
+
+        // Guard 2: an open encounter. Free text in combat is a later step's
+        // question (design spec Decision 6) — the on-screen actions are the
+        // only input surface while a bracket is open.
+        if (campaign.state.encounter !== null) {
+          yield {
+            type: "error",
+            clientMessageId: command.clientMessageId,
+            code: "free_text_not_supported",
+            message: "Use the on-screen actions during combat.",
+          };
+          return;
+        }
+
+        // Guard 3: no scene at all — unchanged legacy behaviour for a
+        // combat-only campaign between fights, predating §4.7 step 4.
+        if (campaign.state.world.scene === null) {
+          yield {
+            type: "error",
+            clientMessageId: command.clientMessageId,
+            code: "free_text_not_supported",
+            message: "Free text is not handled yet. Use the on-screen actions.",
+          };
+          return;
+        }
+
+        const statics = sceneStaticsOf(campaign);
+
+        // One shared 10s budget for this turn's classify call AND its
+        // narration — see `enemyTurn`'s identical rationale and
+        // `sceneNarrate`'s doc comment. `controller` wraps only the classify
+        // call (the one thing here that takes an `AbortSignal`); `deadline`
+        // itself, not the controller, is what `sceneNarrate` shares it with.
+        const deadline = Date.now() + ports.turnTimeoutMs;
+        const controller = new AbortController();
+        const timer = setTimeout(
+          () => {
+            controller.abort();
+          },
+          Math.max(0, deadline - Date.now()),
+        );
+
+        let classifyResult: IntentResult;
+        const classifyStartedAt = Date.now();
+        try {
+          yield* emit("player_input", {
+            clientMessageId: command.clientMessageId,
+            actorId: statics.character.characterId,
+            text: command.text,
+          });
+
+          const before = sceneStateFrom(currentScene());
+          const options = availableEdges(statics.authored, before);
+          if (!options.valid) {
+            // The same corrupt-log posture `sceneStaticsOf`/`builtOf` take:
+            // `currentNodeId` failing to resolve here means the log or the
+            // world content is broken, not that the player did anything
+            // wrong.
+            throw new Error(
+              `Campaign ${campaign.state.world.campaignId} scene is corrupt: ` +
+                options.rejections.map((each) => each.message).join("; "),
+            );
+          }
+
+          classifyResult = await ports.intent.classify({
+            text: command.text,
+            sceneEnglish: questNodeCard(statics.authored, before.currentNodeId).sceneEnglish,
+            edges: options.edges.map((each) => ({
+              to: each.edge.to,
+              labelEnglish: each.edge.labelEnglish,
+              open: each.open,
+            })),
+            abortSignal: controller.signal,
+          });
+        } finally {
+          clearTimeout(timer);
+        }
+
+        if (ports.metrics !== undefined) {
+          const totals = classifyResult.usage.reduce(
+            (sum, each) => ({
+              promptTokens: sum.promptTokens + each.promptTokens,
+              completionTokens: sum.completionTokens + each.completionTokens,
+              totalTokens: sum.totalTokens + each.totalTokens,
+            }),
+            { promptTokens: 0, completionTokens: 0, totalTokens: 0 },
+          );
+          ports.metrics.recordIntentCall?.({
+            outcome: classifyResult.ok ? "ok" : classifyResult.error.code,
+            ...(classifyResult.ok ? { category: classifyResult.classification.category } : {}),
+            latencyMs: Date.now() - classifyStartedAt,
+            ...totals,
+          });
+        }
+
+        if (!classifyResult.ok) {
+          // `player_input` already landed above — the message WAS received —
+          // but nothing about the scene moves: no `intent_classified`, no
+          // scene event. Same posture as `structured_action`'s outer catch.
+          yield {
+            type: "error",
+            clientMessageId: command.clientMessageId,
+            code: "internal_error",
+            message: classifyResult.error.message,
+          };
+          yield* playerAffordances();
+          return;
+        }
+
+        const { classification } = classifyResult;
+        yield* emit("intent_classified", {
           clientMessageId: command.clientMessageId,
-          code: "free_text_not_supported",
-          message: "Free text is not handled yet. Use the on-screen actions.",
-        };
+          actorId: statics.character.characterId,
+          classification,
+          provider: classifyResult.provider,
+          modelId: classifyResult.modelId,
+          promptVersion: INTENT_PROMPT_VERSION,
+        });
+
+        switch (classification.category) {
+          case "exploration": {
+            const before = sceneStateFrom(currentScene());
+            const { targetNodeId } = classification;
+            const transition: SceneTransition =
+              targetNodeId === null
+                ? completeCurrentNode(statics.authored, before)
+                : traverseEdge(statics.authored, before, targetNodeId);
+
+            if (!transition.valid) {
+              // Refusal is data all the way to the player's ear (Decision 6):
+              // no error frame, no event beyond the two already emitted, and
+              // `campaign.state.world.scene` is untouched — this branch never
+              // calls `emit` for a scene event.
+              yield* sceneNarrate(
+                statics.character.characterId,
+                {
+                  kind: "refused",
+                  messages: transition.rejections.map((each) => each.message),
+                },
+                deadline,
+              );
+              break;
+            }
+
+            // `nodeId` is always the node being LEFT (or, for a
+            // `completeCurrentNode` with no traversal, the one already
+            // current) — `traverseEdge`/`completeCurrentNode` both complete
+            // it internally before ever computing `transition.state`.
+            // Unconditional, whether or not this particular call actually
+            // changed anything: `reduce`'s fold of a repeat is idempotent
+            // (Decision 4), so a second `quest_node_completed` for an
+            // already-completed node is a harmless no-op, not a double
+            // completion.
+            yield* emit("quest_node_completed", { nodeId: before.currentNodeId });
+
+            // Diffed against the engine's OWN pre/post states, never
+            // re-read off the node's declared effects (Decision 4's last
+            // paragraph) — and emitted only when something actually
+            // changed, so re-completing an already-completed node (whose
+            // `completeCurrentNode` call returns the SAME state, unchanged)
+            // produces no second `world_delta_applied`.
+            const delta = diffScene(before, transition.state);
+            if (delta.relations.length > 0 || delta.day !== undefined) {
+              yield* emit("world_delta_applied", {
+                relations: delta.relations,
+                ...(delta.day === undefined ? {} : { day: delta.day }),
+              });
+            }
+
+            if (targetNodeId !== null) {
+              yield* emit("quest_node_entered", { nodeId: targetNodeId });
+            }
+
+            // Reads `currentScene()` fresh, post-emit: for a traversal this
+            // is the new node; for a `completeCurrentNode` it is the same
+            // one, and either way `sceneNarrate` narrates whatever node the
+            // player is standing in now.
+            const card = questNodeCard(statics.authored, currentScene().currentNodeId);
+            yield* sceneNarrate(
+              statics.character.characterId,
+              { kind: "arrived", sceneEnglish: card.sceneEnglish, locationNameHebrew: card.locationNameHebrew },
+              deadline,
+            );
+            break;
+          }
+
+          // Replaced wholesale in Task 10. Listed explicitly, with no
+          // `default`, so a category added to `IntentClassification` fails
+          // this switch to compile rather than silently falling through.
+          case "check":
+          case "social":
+          case "combat":
+          case "ooc":
+            throw new Error("unreachable until Task 10");
+        }
+
+        // For symmetry with `structured_action`'s ending — out of combat
+        // (guaranteed by guard 2 above) this yields nothing; the client's
+        // input re-enables on the `narrative_emitted` fold instead.
+        yield* playerAffordances();
         return;
       }
 

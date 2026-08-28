@@ -1,14 +1,25 @@
 import { describe, expect, it } from "vitest";
-import { validateExecuteTurn } from "@ai-dm/rules-engine";
-import type { NarrativeFinish, NarrativePort, TacticalAgent } from "@ai-dm/agents";
+import { sceneStateFrom, snapshotOf, traverseEdge, validateExecuteTurn } from "@ai-dm/rules-engine";
+import type { SceneState, SceneTransition } from "@ai-dm/rules-engine";
+import type {
+  AdapterError,
+  IntentAgent,
+  IntentResult,
+  NarrativeFinish,
+  NarrativePort,
+  SceneNarrativePort,
+  TacticalAgent,
+} from "@ai-dm/agents";
 import {
   createAgentRuntime,
   createDeterministicNarrative,
+  createDeterministicSceneNarrative,
   createFakePort,
   createHebrewNarrative,
   createTacticalAgent,
   DEFAULT_MODEL_ROUTING,
   NARRATIVE_PROMPT_VERSION,
+  SCENE_PROMPT_VERSION,
 } from "@ai-dm/agents";
 import { createInMemoryEventStore, EventStoreUnavailableError } from "@ai-dm/memory";
 import type { EventStore } from "@ai-dm/memory";
@@ -17,6 +28,8 @@ import type {
   ClientMessage,
   ExecuteTurn,
   GameEvent,
+  IntentClassification,
+  SceneSnapshot,
   ServerFrame,
   CampaignState,
 } from "@ai-dm/schemas";
@@ -28,7 +41,9 @@ import type {
   TurnPorts,
 } from "./pipeline.js";
 import { createCampaign, encounterOf, loadCampaign, startEncounter } from "./campaign.js";
-import type { Campaign } from "./campaign.js";
+import type { Campaign, SceneStatics } from "./campaign.js";
+import { loadCharacter } from "../encounters/index.js";
+import { loadWorld } from "../world/index.js";
 
 function uuids(): () => string {
   let n = 0;
@@ -75,16 +90,37 @@ function defaultTactical(): TacticalAgent {
   };
 }
 
+/**
+ * `ports.intent.classify` should never be reached by a combat test — every
+ * `free_text` test below supplies its own `intent`. Throwing rather than
+ * resolving is what makes an accidental call to this default loud instead of
+ * silently returning a plausible-looking classification.
+ */
+function unreachableIntent(): IntentAgent {
+  return {
+    classify() {
+      throw new Error("ports.intent.classify was not expected to be called in this test");
+    },
+  };
+}
+
 function portsWith(store: EventStore, tactical: TacticalAgent = defaultTactical()): TurnPorts {
   return {
     store,
     tactical,
     narrative: createDeterministicNarrative(),
+    intent: unreachableIntent(),
+    // Mirrors `narrative` above: the deterministic renderer stands in as the
+    // "primary" port for every test that does not care about the scene
+    // narration ladder specifically, exactly the way `createDeterministicNarrative()`
+    // already does for combat.
+    sceneNarrative: createDeterministicSceneNarrative(),
     clock: () => "2026-08-19T10:00:00.000Z",
     uuid: uuids(),
     seedFor: (rootSeed, sequence) => rootSeed * 1000 + sequence,
     turnTimeoutMs: 10_000,
     conditionNamesHebrew: new Map([["prone", "שרוע"]]),
+    skillAbilities: new Map(),
   };
 }
 
@@ -120,6 +156,122 @@ async function encounterlessCampaign(store: EventStore): Promise<Campaign> {
     clock: () => "2026-08-19T10:00:00.000Z",
     uuid: uuids(),
   });
+}
+
+/**
+ * The real `emberfall` world and the real `hero` character — mirrors
+ * `campaign.test.ts`'s `heroSceneStatics`. Real content rather than a
+ * synthetic fixture, for the same "real stat blocks" reasoning `runOneTurn`'s
+ * doc comment gives for combat: the `free_text` tests below read Hebrew
+ * fields (`nameHebrew`, NPC names) off it, and a Latin placeholder would put
+ * the wrong kind of character into a Hebrew-only assertion for the wrong
+ * reason.
+ */
+function heroSceneStatics(): SceneStatics {
+  return { authored: loadWorld(), character: loadCharacter("hero") };
+}
+
+/**
+ * A scene campaign (no board, `world.scene` set from `emberfall`'s genesis).
+ * `overrides` replaces fields of the starting `SceneSnapshot` directly —
+ * `arrival`, the authored starting node, has no effects and a single-hop
+ * traversal from it can never show a faction/day delta, so several tests
+ * below need to start further into the arc than a real playthrough would put
+ * them without chaining several `free_text` turns just to get there.
+ */
+async function sceneCampaign(
+  store: EventStore,
+  overrides?: Partial<SceneSnapshot>,
+): Promise<Campaign> {
+  const campaign = await createCampaign({
+    campaignId: "s1",
+    rootSeed: 42,
+    store,
+    clock: () => "2026-08-19T10:00:00.000Z",
+    uuid: uuids(),
+    scene: heroSceneStatics(),
+  });
+  if (overrides === undefined) return campaign;
+
+  const { scene } = campaign.state.world;
+  if (scene === null) throw new Error("sceneCampaign: genesis produced no scene");
+  campaign.state = {
+    ...campaign.state,
+    world: { ...campaign.state.world, scene: { ...scene, ...overrides } },
+  };
+  return campaign;
+}
+
+/** A classifier double that resolves to exactly this classification. */
+function classifiedAs(classification: IntentClassification): IntentAgent {
+  return {
+    classify() {
+      return Promise.resolve({
+        ok: true,
+        classification,
+        provider: "test-provider",
+        modelId: "test-model",
+        usage: [{ promptTokens: 10, completionTokens: 5, totalTokens: 15 }],
+      } satisfies IntentResult);
+    },
+  };
+}
+
+/** A classifier double that resolves to exactly this failure. */
+function intentFailingWith(error: AdapterError): IntentAgent {
+  return {
+    classify() {
+      return Promise.resolve({ ok: false, error, usage: [] } satisfies IntentResult);
+    },
+  };
+}
+
+/** A scene narrative port that yields exactly these chunks, mirroring `scriptedNarrative`. */
+function scriptedSceneNarrative(chunks: string[]): SceneNarrativePort {
+  return {
+    stream(): AsyncIterable<string> {
+      return {
+        [Symbol.asyncIterator](): AsyncIterator<string> {
+          const iterator = chunks[Symbol.iterator]();
+          return {
+            next(): Promise<IteratorResult<string>> {
+              return Promise.resolve(iterator.next());
+            },
+          };
+        },
+      };
+    },
+  };
+}
+
+/** Sorts a `SceneSnapshot`'s array fields the same way `snapshotOf` promises to emit them —
+ *  mirrors `packages/rules-engine/src/scene/snapshot.test.ts`'s own `sorted` helper. */
+function sortedSnapshot(snapshot: SceneSnapshot): SceneSnapshot {
+  return {
+    ...snapshot,
+    completedNodeIds: [...snapshot.completedNodeIds].sort(),
+    relations: [...snapshot.relations].sort(
+      (a, b) => a.factionA.localeCompare(b.factionA) || a.factionB.localeCompare(b.factionB),
+    ),
+  };
+}
+
+/** The state from a transition, or a loud failure — a broken fixture should fail loudly. */
+function stateOf(transition: SceneTransition): SceneState {
+  if (!transition.valid) {
+    throw new Error(
+      `test fixture expected a valid transition: ${transition.rejections
+        .map((each) => each.reason)
+        .join(", ")}`,
+    );
+  }
+  return transition.state;
+}
+
+function eventTypesOf(frames: ServerFrame[]): string[] {
+  return frames
+    .filter((each): each is Extract<ServerFrame, { type: "event" }> => each.type === "event")
+    .map((each) => each.event.type);
 }
 
 // `clientMessageId` defaults to "c1" for every existing call site; the
@@ -511,6 +663,286 @@ describe("handleCommand — free text", () => {
       ),
     );
     expect(await store.readSince("s1", GENESIS_SEQUENCE)).toEqual([]);
+  });
+
+  // (b) Guard 2. `freshCampaign` also has no scene, so this additionally
+  // pins that guard 2 (open encounter) is checked BEFORE guard 3 (no
+  // scene) — the two existing tests above only prove `code`, not which
+  // guard produced it or the exact during-combat wording Decision 6 names.
+  it("gives the during-combat message when an encounter is open", async () => {
+    const store = createInMemoryEventStore();
+    const campaign = await freshCampaign(store);
+    const frames = await drain(
+      handleCommand(
+        campaign,
+        { type: "free_text", clientMessageId: "c1", text: "I look around" },
+        portsWith(store),
+      ),
+    );
+    expect(frames).toEqual([
+      {
+        type: "error",
+        clientMessageId: "c1",
+        code: "free_text_not_supported",
+        message: "Use the on-screen actions during combat.",
+      },
+    ]);
+  });
+
+  // (c) Guard 3, on a campaign with neither a board nor a scene — the legacy
+  // shape that predates §4.7 step 4. The message text is unchanged from
+  // before this task.
+  it("keeps the legacy message for a combat-only campaign with no board open", async () => {
+    const store = createInMemoryEventStore();
+    const campaign = await encounterlessCampaign(store);
+    const frames = await drain(
+      handleCommand(
+        campaign,
+        { type: "free_text", clientMessageId: "c1", text: "I look around" },
+        portsWith(store),
+      ),
+    );
+    expect(frames).toEqual([
+      {
+        type: "error",
+        clientMessageId: "c1",
+        code: "free_text_not_supported",
+        message: "Free text is not handled yet. Use the on-screen actions.",
+      },
+    ]);
+  });
+
+  // (a) Guard 1. The second call's `intent` double throws if it is ever
+  // reached, so a regression that let a duplicate fall through to the
+  // classifier fails loudly rather than merely producing extra frames.
+  it("drops a duplicate clientMessageId with zero frames, without reaching the classifier", async () => {
+    const store = createInMemoryEventStore();
+    const campaign = await sceneCampaign(store);
+    const firstPorts: TurnPorts = {
+      ...portsWith(store),
+      intent: classifiedAs({ category: "exploration", targetNodeId: null }),
+    };
+    await drain(
+      handleCommand(
+        campaign,
+        { type: "free_text", clientMessageId: "c1", text: "look around" },
+        firstPorts,
+      ),
+    );
+
+    const secondPorts: TurnPorts = { ...portsWith(store), intent: unreachableIntent() };
+    const frames = await drain(
+      handleCommand(
+        campaign,
+        { type: "free_text", clientMessageId: "c1", text: "look around again" },
+        secondPorts,
+      ),
+    );
+    expect(frames).toEqual([]);
+  });
+
+  // (d) A classifier adapter failure: the message WAS received
+  // (`player_input` is already in the log by the time `classify` runs), but
+  // nothing about the scene moves.
+  it("appends player_input then an internal_error frame when the classifier fails, and touches nothing else", async () => {
+    const store = createInMemoryEventStore();
+    const campaign = await sceneCampaign(store);
+    const sceneBefore = campaign.state.world.scene;
+
+    const ports: TurnPorts = {
+      ...portsWith(store),
+      intent: intentFailingWith({ code: "provider_error", message: "the model timed out" }),
+    };
+    const frames = await drain(
+      handleCommand(
+        campaign,
+        { type: "free_text", clientMessageId: "c1", text: "look around" },
+        ports,
+      ),
+    );
+
+    expect(eventTypesOf(frames)).toEqual(["player_input"]);
+    expect(frames.some((each) => each.type === "error" && each.code === "internal_error")).toBe(
+      true,
+    );
+    expect(campaign.state.world.scene).toEqual(sceneBefore);
+  });
+
+  // (e) An open edge whose "from" node has a real effect: `guild-offer`
+  // shifts ashen-guild/river-wardens from `cold` (the authored baseline) to
+  // `hostile` on completion. `sceneNarrative` yields nothing, deliberately —
+  // exercising the fallback rung of the same ladder combat narration uses.
+  it("traverses an open edge: completes the from-node, applies its delta, enters the target, narrates", async () => {
+    const store = createInMemoryEventStore();
+    const before: SceneSnapshot = {
+      worldId: "emberfall",
+      currentNodeId: "guild-offer",
+      completedNodeIds: ["arrival"],
+      relations: [],
+      day: 1,
+    };
+    const campaign = await sceneCampaign(store, before);
+    const ports: TurnPorts = {
+      ...portsWith(store),
+      intent: classifiedAs({ category: "exploration", targetNodeId: "the-weir" }),
+      sceneNarrative: scriptedSceneNarrative([]),
+    };
+
+    const frames = await drain(
+      handleCommand(
+        campaign,
+        { type: "free_text", clientMessageId: "c1", text: "let's see the weir" },
+        ports,
+      ),
+    );
+
+    expect(eventTypesOf(frames)).toEqual([
+      "player_input",
+      "intent_classified",
+      "quest_node_completed",
+      "world_delta_applied",
+      "quest_node_entered",
+      "narrative_emitted",
+    ]);
+
+    const deltaEvent = frames.find(
+      (each): each is Extract<ServerFrame, { type: "event" }> =>
+        each.type === "event" && each.event.type === "world_delta_applied",
+    );
+    expect(deltaEvent?.event.payload).toMatchObject({
+      relations: [{ factionA: "ashen-guild", factionB: "river-wardens", band: "hostile" }],
+    });
+
+    const { tokens, emitted } = narrativeOf(frames);
+    expect(emitted.text).toBe(tokens.join(""));
+    expect(emitted.source).toBe("deterministic");
+    expect(emitted.promptVersion).toBe(SCENE_PROMPT_VERSION);
+
+    // The engine's own computation, independently reached — not re-derived
+    // from the payload above — is the oracle `campaign.state.world.scene`
+    // is checked against. `snapshotOf` emits sorted arrays; `reduce` appends
+    // in event order, so both sides are sorted before comparing (Task 4's
+    // round-trip test does the same).
+    const expected = snapshotOf(
+      stateOf(traverseEdge(loadWorld(), sceneStateFrom(before), "the-weir")),
+      "emberfall",
+    );
+    const { scene } = campaign.state.world;
+    expect(scene).not.toBeNull();
+    if (scene === null) throw new Error("unreachable — asserted above");
+    expect(sortedSnapshot(scene)).toEqual(sortedSnapshot(expected));
+  });
+
+  // (f) A closed edge: `reckoning` requires the faction relation to be no
+  // worse than `hostile`, and this fixture starts it at `war`. Refusal is
+  // narration only — no quest/delta event, and `world.scene` is untouched.
+  it("refuses a closed edge with narration only, leaving the scene untouched", async () => {
+    const store = createInMemoryEventStore();
+    const before: SceneSnapshot = {
+      worldId: "emberfall",
+      currentNodeId: "the-weir",
+      completedNodeIds: ["arrival", "guild-offer"],
+      relations: [{ factionA: "ashen-guild", factionB: "river-wardens", band: "war" }],
+      day: 1,
+    };
+    const campaign = await sceneCampaign(store, before);
+    const ports: TurnPorts = {
+      ...portsWith(store),
+      intent: classifiedAs({ category: "exploration", targetNodeId: "reckoning" }),
+    };
+
+    const frames = await drain(
+      handleCommand(
+        campaign,
+        { type: "free_text", clientMessageId: "c1", text: "put them in one room" },
+        ports,
+      ),
+    );
+
+    expect(eventTypesOf(frames)).toEqual(["player_input", "intent_classified", "narrative_emitted"]);
+    expect(campaign.state.world.scene).toEqual(before);
+  });
+
+  // (g)/(h): a terminal node completed in place. `reckoning` has no edges,
+  // so `targetNodeId: null` runs `completeCurrentNode`, not `traverseEdge`.
+  it("completes a terminal node with no traversal: quest_node_completed, world_delta_applied, no quest_node_entered", async () => {
+    const store = createInMemoryEventStore();
+    const before: SceneSnapshot = {
+      worldId: "emberfall",
+      currentNodeId: "reckoning",
+      completedNodeIds: ["arrival", "guild-offer", "the-weir"],
+      relations: [{ factionA: "ashen-guild", factionB: "river-wardens", band: "hostile" }],
+      day: 1,
+    };
+    const campaign = await sceneCampaign(store, before);
+    const ports: TurnPorts = {
+      ...portsWith(store),
+      intent: classifiedAs({ category: "exploration", targetNodeId: null }),
+    };
+
+    const frames = await drain(
+      handleCommand(
+        campaign,
+        { type: "free_text", clientMessageId: "c1", text: "let's settle this" },
+        ports,
+      ),
+    );
+
+    expect(eventTypesOf(frames)).toEqual([
+      "player_input",
+      "intent_classified",
+      "quest_node_completed",
+      "world_delta_applied",
+      "narrative_emitted",
+    ]);
+  });
+
+  it("does not re-apply a world delta when re-completing an already-completed node", async () => {
+    const store = createInMemoryEventStore();
+    const before: SceneSnapshot = {
+      worldId: "emberfall",
+      currentNodeId: "reckoning",
+      completedNodeIds: ["arrival", "guild-offer", "the-weir"],
+      relations: [{ factionA: "ashen-guild", factionB: "river-wardens", band: "hostile" }],
+      day: 1,
+    };
+    const campaign = await sceneCampaign(store, before);
+    const ports: TurnPorts = {
+      ...portsWith(store),
+      intent: classifiedAs({ category: "exploration", targetNodeId: null }),
+    };
+
+    await drain(
+      handleCommand(
+        campaign,
+        { type: "free_text", clientMessageId: "c1", text: "let's settle this" },
+        ports,
+      ),
+    );
+
+    const frames = await drain(
+      handleCommand(
+        campaign,
+        { type: "free_text", clientMessageId: "c2", text: "let's settle this again" },
+        ports,
+      ),
+    );
+
+    // The exact list, not merely "missing world_delta_applied": a
+    // `free_text` implementation that refused everything (or one that
+    // dropped this second call entirely) would also produce no
+    // `world_delta_applied` and vacuously pass a weaker assertion.
+    // `quest_node_completed` still fires — `reduce`'s fold of a repeat is
+    // idempotent (Decision 4) — only `world_delta_applied` is suppressed,
+    // since `completeCurrentNode` on an already-completed node returns the
+    // SAME `SceneState`, unchanged, and `diffScene` of a state against
+    // itself is empty.
+    expect(eventTypesOf(frames)).toEqual([
+      "player_input",
+      "intent_classified",
+      "quest_node_completed",
+      "narrative_emitted",
+    ]);
   });
 });
 
