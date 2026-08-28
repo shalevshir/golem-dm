@@ -1,6 +1,8 @@
 import { z } from "zod";
 import { ExecuteTurn } from "./actions.js";
-import { ContentId } from "./content.js";
+import { AbilityKey, Skill } from "./character.js";
+import { ContentId, FactionRelationEntry } from "./content.js";
+import { CheckDifficulty, IntentClassification } from "./intent.js";
 import { EntityStatus } from "./world.js";
 import { DiceNotation } from "./primitives.js";
 
@@ -18,8 +20,13 @@ export const GameEvent = z.object({
     "action_rejected", "dice_rolled", "state_delta_applied", "narrative_emitted",
     "scene_changed",
     "campaign_started", "encounter_started", "encounter_resolved",
+    "quest_node_entered", "quest_node_completed", "world_delta_applied", "check_rolled",
   ]),
-  /** English machine payload. Never store Hebrew here except narrative_emitted. */
+  /**
+   * English machine payload. Hebrew is allowed in exactly two fields:
+   * `narrative_emitted.text` and `player_input.text` (the player's own
+   * words).
+   */
   payload: z.record(z.string(), z.unknown()),
 });
 
@@ -243,3 +250,72 @@ export const ActionValidatedPayload = z.object({
   source: z.string(),
 });
 export type ActionValidatedPayload = z.infer<typeof ActionValidatedPayload>;
+
+/**
+ * Payload for `quest_node_entered`. `reduce` replaces `scene.currentNodeId`
+ * with `nodeId` verbatim — no validation that the traversal was legal, which
+ * is `traverseEdge`'s job in `@ai-dm/rules-engine` (invariant 1). The event
+ * log only ever records what the engine already decided.
+ */
+export const QuestNodeEnteredPayload = z.object({ nodeId: ContentId });
+export type QuestNodeEnteredPayload = z.infer<typeof QuestNodeEnteredPayload>;
+
+/**
+ * Payload for `quest_node_completed`. `reduce` appends `nodeId` to
+ * `scene.completedNodeIds`, folding a repeat of the same id to one entry —
+ * mechanical, same as the rest of this event's fold.
+ */
+export const QuestNodeCompletedPayload = z.object({ nodeId: ContentId });
+export type QuestNodeCompletedPayload = z.infer<typeof QuestNodeCompletedPayload>;
+
+/**
+ * Payload for `world_delta_applied`. Both fields carry the engine's already-
+ * computed, already-clamped RESULT, never a delta to compute (Decision 4 of
+ * the design spec) — `reduce` only merges what is here onto `scene`.
+ */
+export const WorldDeltaAppliedPayload = z.object({
+  /** Absolute resulting bands, post-clamp — the fold merges, never computes. */
+  relations: z.array(FactionRelationEntry).default([]),
+  /** The new absolute day, when the calendar moved. */
+  day: z.number().int().min(1).optional(),
+});
+export type WorldDeltaAppliedPayload = z.infer<typeof WorldDeltaAppliedPayload>;
+
+/**
+ * Payload for `check_rolled`: the full trace of one out-of-combat ability
+ * check, already resolved by `@ai-dm/rules-engine`'s `abilityCheck`. `reduce`
+ * no-ops this event — it changes no projected field, and exists for replay,
+ * audit, and the step 9 benchmark, the same convention `DiceRolledPayload`
+ * already follows for combat rolls.
+ */
+export const CheckRolledPayload = z.object({
+  actorId: z.string(),
+  ability: AbilityKey,
+  skill: Skill.optional(),
+  difficulty: CheckDifficulty,
+  dc: z.number().int(),
+  naturalRoll: z.number().int().min(1).max(20),
+  rolls: z.array(z.number().int()),
+  modifier: z.number().int(),
+  total: z.number().int(),
+  success: z.boolean(),
+  seed: z.number().int(),
+});
+export type CheckRolledPayload = z.infer<typeof CheckRolledPayload>;
+
+/**
+ * Payload convention for the `intent_classified` event, in the same spirit
+ * as `ActionRejectedPayload`: the server stamps the envelope, this documents
+ * the body. Like `dice_rolled`/`check_rolled`, `reduce` folds this as a
+ * no-op — it changes no projected field, and exists for replay, audit, and
+ * metrics.
+ */
+export const IntentClassifiedPayload = z.object({
+  clientMessageId: z.string(),
+  actorId: z.string(),
+  classification: IntentClassification,
+  provider: z.string(),
+  modelId: z.string(),
+  promptVersion: z.string(),
+});
+export type IntentClassifiedPayload = z.infer<typeof IntentClassifiedPayload>;
