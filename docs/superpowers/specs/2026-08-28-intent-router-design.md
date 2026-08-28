@@ -76,9 +76,13 @@ facts outright (§Decision 3) are what keep the scene fields out of that trap:
 (`checks/index.ts:66`) takes `{abilityScore, proficient, proficiencyBonus,
 expertise, dc, mode}` and an injected `Rng`. `AbilityKey` and the 18-entry
 `Skill` enum are in `character.ts`; `hero.json` under `data/characters/` is a
-full `CharacterSheet` with abilities and `skillProficiencies`, loaded and
-cached by `loadCharacter`. What does **not** exist: a skill→ability table and
-a difficulty→DC table. Both are SRD data and belong in `checks/`.
+full `CharacterSheet`, loaded and cached by `loadCharacter` as a
+`DerivedCharacter` whose `skills` record **already carries the final modifier
+per skill** and whose `abilityModifiers` covers raw ability checks — both
+computed by `deriveCharacter` from the SRD skill list (`SrdGear.skills`,
+each `SkillDefinition` naming its governing ability). The one thing that does
+**not** exist is a difficulty→DC table; it is SRD data and belongs in
+`checks/`.
 
 **Scene narration has Hebrew material for a deterministic fallback.**
 `LocationDefinition` and `NpcDefinition` carry `nameHebrew`; `QuestNode` does
@@ -174,12 +178,17 @@ All four present ⇒ a scene campaign; all four absent ⇒ a combat-only campaig
 (every existing log). A payload with some-but-not-all is refused by a
 `.refine` — half a scene campaign is a corrupt genesis, not a state.
 
-`reduce`'s `campaign_started` handling builds the initial `SceneSnapshot`
-from the payload alone: `{worldId, currentNodeId: startingNodeId,
-completedNodeIds: [], relations: [], day: startingDay}`. No authored world is
-consulted, so there is **no catalogue-substitution step and no client-side
-fold gap** — the deliberate contrast with `encounter_started`, whose gap
-`reduce.ts` spends thirty lines documenting.
+`campaign_started` stays a no-op in `reduce`, per the fold's existing rule
+that "the world [genesis] declares is rebuilt from its payload before the
+fold begins". What changes is that the rebuild now has a scene half: a shared
+helper in `@ai-dm/schemas`, `sceneFromGenesis(payload): SceneSnapshot | null`
+— `{worldId, currentNodeId: startingNodeId, completedNodeIds: [], relations:
+[], day: startingDay}` when the quartet is present, null otherwise — is the
+one definition, and `campaign.ts`'s `initialWorldState` calls it. No authored
+world is consulted anywhere in the rebuild, so there is **no
+catalogue-substitution step and no client-side fold gap** — the deliberate
+contrast with `encounter_started`, whose gap `reduce.ts` spends thirty lines
+documenting.
 
 On "names a thing, never snapshots it": `startingNodeId` and `startingDay`
 are sanctioned by ADR-0004 decision 5 in as many words ("declares the
@@ -271,13 +280,15 @@ z.discriminatedUnion("category", [
 ```
 
 `CheckDifficulty` is a six-member enum (`very_easy … nearly_impossible`).
-The DC table (5/10/15/20/25/30) and a skill→ability table are `const` data in
+The DC table (5/10/15/20/25/30) is `const` data in
 `packages/rules-engine/src/checks/`, golden-tested, with the SRD 5.2.1
-"Typical Difficulty Classes" and skill list verified against the NotebookLM
-SRD notebook at implementation time — per the repo rule, not from memory. The
-model chooses a *word*; the engine owns every number. When the router names a
-skill, the check's ability is the table's, not the model's, so the two cannot
-disagree.
+"Typical Difficulty Classes" verified against the NotebookLM SRD notebook at
+implementation time — per the repo rule, not from memory. The skill→ability
+mapping is **not** new data: it already ships as `SrdGear.skills` (each
+`SkillDefinition` names its governing ability, and `deriveCharacter` already
+folds it into `DerivedCharacter.skills`). The model chooses a *word*; the
+engine owns every number. When the router names a skill, the check's ability
+is the SRD mapping's, not the model's, so the two cannot disagree.
 
 Prompt posture: the scene card and edge labels are English system material;
 the player's text enters once, delimited, as user-turn content — never
@@ -319,10 +330,11 @@ Then, under one 10s deadline struck at entry (the same single-cap rule
      node's card). Refused: narrate the refusal from its `SceneRejection`
      messages — refusal is data all the way to the player's ear; **no error
      frame and no state change**.
-   - **check** — modifiers from the PC sheet (`abilityModifier`, proficiency
-     via the skill table, expertise none yet), DC from the table, `seed =
-     seedFor(rootSeed, nextSequence)`, `abilityCheck` → `emit check_rolled`
-     → narrate the outcome.
+   - **check** — the modifier straight off the derived sheet
+     (`DerivedCharacter.skills[skill]` when a skill is named, else
+     `abilityModifiers[ability]` — the engine already computed both), DC from
+     the table, `seed = seedFor(rootSeed, nextSequence)`, `abilityCheck` →
+     `emit check_rolled` → narrate the outcome.
    - **social / ooc / combat** — narrate a grounded reply (scene card +
      category as the brief; `combat`'s brief says fighting is not available
      here yet). No events beyond 1–2, no state change.
