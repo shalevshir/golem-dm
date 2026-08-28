@@ -17,7 +17,10 @@ quest graph's predicates and applies its declared effects (`PROJECT_PLAN.md`
 ## Modules
 
 - `dice/` — rolls, advantage/disadvantage, crits, notation parsing
-- `checks/` — ability checks, saves, DCs, proficiency
+- `checks/` — ability checks, saves, proficiency, and `DC_BY_DIFFICULTY`, the
+  SRD 5.2.1 "Typical Difficulty Classes" table keyed by `@ai-dm/schemas`'
+  `CheckDifficulty` — the sole translation from the intent router's
+  difficulty label to a DC number
 - `combat/` — attack resolution, damage/temp-HP order, conditions, action-economy state machine, `ExecuteTurn` validation (returns machine-readable rejection reasons for the agent retry loop)
 - `spatial/` — grid, A* (5 ft/tile, difficult terrain ×2, diagonals per ADR-0003), LoS/cover (Bresenham house rule, swappable — keep the algorithm behind an interface)
 - `scene/` — the scene engine: quest-graph traversal, `WorldPredicate`

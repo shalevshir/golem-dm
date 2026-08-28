@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
+import { CheckDifficulty } from "@ai-dm/schemas";
 import {
   abilityCheck,
   abilityModifier,
+  DC_BY_DIFFICULTY,
   imposedSaveDc,
   passiveScore,
   proficiencyBonusForLevel,
@@ -170,5 +172,24 @@ describe("imposedSaveDc", () => {
 
   it("defaults the proficiency bonus to zero when absent", () => {
     expect(imposedSaveDc({ abilityScore: 10 })).toBe(8);
+  });
+});
+
+describe("DC_BY_DIFFICULTY", () => {
+  // SRD 5.2.1 "Typical Difficulty Classes" table, verified via the NotebookLM
+  // SRD notebook (RULES_REFERENCE.md does not carry this table).
+  it("matches the SRD's Typical Difficulty Classes table exactly", () => {
+    expect(DC_BY_DIFFICULTY).toStrictEqual({
+      very_easy: 5,
+      easy: 10,
+      medium: 15,
+      hard: 20,
+      very_hard: 25,
+      nearly_impossible: 30,
+    });
+  });
+
+  it("has exactly one DC per CheckDifficulty option, so a widened enum cannot silently miss a DC", () => {
+    expect(Object.keys(DC_BY_DIFFICULTY).length).toBe(CheckDifficulty.options.length);
   });
 });
