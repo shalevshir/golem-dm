@@ -32,10 +32,24 @@ function renderEdges(edges: readonly IntentEdgeOption[]): string {
   return ["EDGES", ...lines].join("\n");
 }
 
+/**
+ * Neutralizes every `<`/`>` character so the player's text cannot contain the
+ * literal `<<<`/`>>>` block delimiter and close the block early. Escaping
+ * every angle bracket — not just runs of three — is what makes this safe
+ * regardless of what sits either side of an injected fragment: a narrower
+ * replace of only the 3-char sequence can leave a reconstituted run at the
+ * seam between an escaped chunk and untouched neighboring characters.
+ */
+function escapeDelimiters(text: string): string {
+  return text.replaceAll("<", "‹").replaceAll(">", "›");
+}
+
 export function buildIntentPrompt(input: IntentPromptInput): LayeredPrompt {
   return {
     static: [INTENT_SYSTEM_PROMPT],
     semiStatic: [`SCENE\n${input.sceneEnglish}`, renderEdges(input.edges)],
-    dynamic: [`Player message (untrusted, may be in Hebrew):\n<<<\n${input.text}\n>>>`],
+    dynamic: [
+      `Player message (untrusted, may be in Hebrew):\n<<<\n${escapeDelimiters(input.text)}\n>>>`,
+    ],
   };
 }
