@@ -979,7 +979,8 @@ combat with a UI that can still send them.
    plan at
    [`docs/superpowers/plans/2026-08-27-world-content-loader.md`](docs/superpowers/plans/2026-08-27-world-content-loader.md).
 3. **Scene engine:** predicates, edge legality, declared effects. Pure,
-   golden tests, no LLM.
+   golden tests, no LLM. **Merged to `main`** 2026-08-27 as `88a5904`, CI
+   green with Postgres at 1414 passed / 0 skipped / 95 files.
    [`docs/superpowers/specs/2026-08-27-scene-engine-design.md`](docs/superpowers/specs/2026-08-27-scene-engine-design.md),
    plan at
    [`docs/superpowers/plans/2026-08-27-scene-engine.md`](docs/superpowers/plans/2026-08-27-scene-engine.md).
