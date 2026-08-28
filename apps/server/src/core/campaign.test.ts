@@ -374,16 +374,20 @@ describe("loadCampaign", () => {
     ).toBeNull();
   });
 
-  it("rebuilds an identical projection from a log of exactly one event", async () => {
+  it("rebuilds an identical projection from a log of exactly one event (a legacy, combat-only log)", async () => {
     // One event is now a campaign that has not entered a fight yet, so this
     // also pins that a campaign with no encounter reloads as one, rather
-    // than as a load failure.
+    // than as a load failure. This is also brief step 1(e): a genesis with
+    // no scene quartet — every log that predates task 8 — must reload
+    // unchanged, `sceneStatics` included, not just `state`.
     const input = baseInput();
     const created = await createCampaign(input);
     const loaded = await loadCampaign({ campaignId: "s1", store: input.store });
     expect(loaded?.state).toEqual(created.state);
+    expect(loaded?.state.world.scene).toBeNull();
     expect(loaded?.state.encounter).toBeNull();
     expect(loaded?.built).toBeNull();
+    expect(loaded?.sceneStatics).toBeNull();
     expect(loaded?.nextSequence).toBe(created.nextSequence);
   });
 

@@ -400,27 +400,31 @@ export async function loadCampaign(input: {
   // is what `initialWorldState` just called), but `sceneStatics` is a live
   // `AuthoredWorld`/`DerivedCharacter` pair, not serializable data, so it is
   // re-derived from the genesis ids exactly the way `built` below is
-  // re-derived from `encounterId`. Checked together, mirroring
-  // `CampaignStartedPayload`'s own all-or-none `.refine`: `worldId` present
-  // implies the other three are too.
+  // re-derived from `encounterId`.
   //
-  // `authored.worldId !== worldId` is the same load-time coupling
+  // Gated on `state.world.scene`, the projection just computed, rather than
+  // re-deriving the genesis quartet's own presence predicate (that check
+  // already happened once, inside `sceneFromGenesis`) — the two are then
+  // structurally incapable of disagreeing, which is `sceneStatics`'s whole
+  // doc contract ("null exactly when `state.world.scene` is null").
+  // `characterId` still needs its own narrowing: it is not part of
+  // `SceneSnapshot`, so its presence has to be read off the payload, but
+  // `state.world.scene !== null` already guarantees it via
+  // `CampaignStartedPayload`'s all-or-none `.refine`.
+  //
+  // `authored.worldId !== scene.worldId` is the same load-time coupling
   // `buildEncounterById` already has for `encounterId` (documented in the
   // loop below): a world that has been renamed since this campaign started
   // makes it permanently unloadable. `loadWorld` here always returns
   // `apps/server`'s one authored world (`data/world/`), so the check is
   // "does this deployment's world still match the one this campaign began
   // in" — not a catalogue lookup, since there is no catalogue of worlds.
-  const { worldId, startingNodeId, startingDay, characterId } = genesisPayload;
+  const { scene } = state.world;
+  const { characterId } = genesisPayload;
   let sceneStatics: SceneStatics | null = null;
-  if (
-    worldId !== undefined &&
-    startingNodeId !== undefined &&
-    startingDay !== undefined &&
-    characterId !== undefined
-  ) {
+  if (scene !== null && characterId !== undefined) {
     const authored = loadWorld();
-    if (authored.worldId !== worldId) throw new UnknownWorldError(worldId);
+    if (authored.worldId !== scene.worldId) throw new UnknownWorldError(scene.worldId);
     sceneStatics = { authored, character: loadCharacter(characterId) };
   }
 
