@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { createInMemoryEventStore, EventStoreUnavailableError } from "@ai-dm/memory";
 import type { EventStore } from "@ai-dm/memory";
-import { fold, reduce } from "@ai-dm/schemas";
+import { fold, reduce, sceneFromGenesis } from "@ai-dm/schemas";
 import type { GameEvent } from "@ai-dm/schemas";
 import {
   builtOf,
@@ -9,11 +9,13 @@ import {
   encounterOf,
   loadCampaign,
   resolveEncounter,
+  sceneStaticsOf,
   startEncounter,
   worldFor,
 } from "./campaign.js";
-import type { Campaign, CreateCampaignInput } from "./campaign.js";
-import { buildEncounterById, UnknownEncounterError } from "../encounters/index.js";
+import type { Campaign, CreateCampaignInput, SceneStatics } from "./campaign.js";
+import { buildEncounterById, loadCharacter, UnknownEncounterError } from "../encounters/index.js";
+import { loadWorld, UnknownWorldError } from "../world/index.js";
 
 const clock = (): string => "2026-08-19T10:00:00.000Z";
 
@@ -58,6 +60,15 @@ async function startedCampaign(input: CreateCampaignInput): Promise<Campaign> {
   });
 }
 
+/**
+ * The scene statics for the one authored world (`data/world/`, worldId
+ * `emberfall`) and the one PC (`hero`). Real data, not a fixture, the same
+ * way `ENCOUNTER_ID` above names the real `goblin-ambush` catalogue entry.
+ */
+function heroSceneStatics(): SceneStatics {
+  return { authored: loadWorld(), character: loadCharacter("hero") };
+}
+
 describe("createCampaign", () => {
   it("opens the stream with no encounter", async () => {
     // The state the whole split exists for: a campaign that has a world and
@@ -74,14 +85,20 @@ describe("createCampaign", () => {
 
   it("writes a campaign_started event as sequence 0, carrying only the root seed", async () => {
     const input = baseInput();
-    await createCampaign(input);
+    const campaign = await createCampaign(input);
     const events = await input.store.readSince("s1", -1);
     expect(events).toHaveLength(1);
     expect(events[0]).toMatchObject({ sequence: 0, type: "campaign_started" });
     // Named, never snapshotted: no `state` and no `encounterId` — the first
     // is what keeps live campaign state from being aliased into the store,
-    // and the second now belongs to `encounter_started` instead.
+    // and the second now belongs to `encounter_started` instead. Pinned as
+    // an exact-payload assertion (not a smoke test) so a combat-only
+    // campaign's genesis stays byte-identical now that `scene` exists as an
+    // alternative input: nothing about this call site opted in, so nothing
+    // about its payload or its projection may change.
     expect(events[0]?.payload).toEqual({ rootSeed: 42 });
+    expect(campaign.state.world.scene).toBeNull();
+    expect(campaign.sceneStatics).toBeNull();
   });
 
   // `worldFor` and `builtOf` both call `encounterOf` first and propagate
@@ -96,6 +113,41 @@ describe("createCampaign", () => {
     expect(() => worldFor(campaign)).toThrow(/no encounter open/);
     expect(() => builtOf(campaign)).toThrow(/no encounter open/);
   });
+});
+
+describe("createCampaign with a scene", () => {
+  it(
+    "writes a genesis payload carrying the quartet derived from the statics, and " +
+      "returns a campaign whose scene and sceneStatics are set",
+    async () => {
+      const input = baseInput();
+      const scene = heroSceneStatics();
+      const campaign = await createCampaign({ ...input, scene });
+
+      const genesisPayload = {
+        rootSeed: 42,
+        worldId: scene.authored.worldId,
+        startingNodeId: scene.authored.startingNodeId,
+        startingDay: scene.authored.startingDay,
+        characterId: scene.character.characterId,
+      };
+      const events = await input.store.readSince("s1", -1);
+      expect(events[0]?.payload).toEqual(genesisPayload);
+
+      // `state.world.scene` is exactly `sceneFromGenesis` of the payload just
+      // written — the one definition of the rebuild, not a second hand-rolled
+      // projection.
+      expect(campaign.state.world.scene).toEqual(sceneFromGenesis(genesisPayload));
+      expect(campaign.state.world.scene?.currentNodeId).toBe(scene.authored.startingNodeId);
+      expect(campaign.state.world.scene?.day).toBe(scene.authored.startingDay);
+      expect(campaign.state.world.scene?.completedNodeIds).toEqual([]);
+      expect(campaign.state.world.scene?.relations).toEqual([]);
+      expect(campaign.sceneStatics).toBe(scene);
+      // No board — a scene campaign starts no fight.
+      expect(campaign.state.encounter).toBeNull();
+      expect(campaign.built).toBeNull();
+    },
+  );
 });
 
 describe("startEncounter", () => {
@@ -347,6 +399,46 @@ describe("loadCampaign", () => {
     expect(loaded?.nextSequence).toBe(created.nextSequence);
   });
 
+  it("rebuilds a scene campaign's state.world.scene and sceneStatics from its genesis", async () => {
+    const input = baseInput();
+    const scene = heroSceneStatics();
+    const created = await createCampaign({ ...input, scene });
+
+    const loaded = await loadCampaign({ campaignId: "s1", store: input.store });
+    expect(loaded?.state).toEqual(created.state);
+    expect(loaded?.state.world.scene).toEqual(created.state.world.scene);
+    expect(loaded).not.toBeNull();
+    if (loaded === null) throw new Error("expected loadCampaign to return a campaign");
+    expect(sceneStaticsOf(loaded).authored.worldId).toBe(scene.authored.worldId);
+    expect(sceneStaticsOf(loaded).character.characterId).toBe(scene.character.characterId);
+  });
+
+  it("throws when the genesis worldId no longer matches the authored world", async () => {
+    // The same load-time coupling `buildEncounterById` already has for
+    // `encounterId` (documented above this describe block's loop): a
+    // genesis naming a world this deployment's `loadWorld()` does not
+    // produce is unloadable, not silently rebuilt against the wrong one.
+    const store = createInMemoryEventStore();
+    const scene = heroSceneStatics();
+    await store.append("s1", [
+      {
+        eventId: "00000000-0000-4000-8000-000000000001",
+        campaignId: "s1",
+        sequence: 0,
+        timestamp: clock(),
+        type: "campaign_started",
+        payload: {
+          rootSeed: 1,
+          worldId: "not-the-real-world",
+          startingNodeId: scene.authored.startingNodeId,
+          startingDay: scene.authored.startingDay,
+          characterId: scene.character.characterId,
+        },
+      },
+    ]);
+    await expect(loadCampaign({ campaignId: "s1", store })).rejects.toThrow(UnknownWorldError);
+  });
+
   it("reloads a campaign whose encounter has been resolved as encounter-less", async () => {
     const input = baseInput();
     const campaign = await startedCampaign(input);
@@ -550,6 +642,31 @@ describe("builtOf", () => {
     // goblin-ambush.
     campaign.built = { ...real, encounterId: "some-other-encounter" };
     expect(() => builtOf(campaign)).toThrow(/built encounter some-other-encounter/);
+  });
+});
+
+describe("sceneStaticsOf", () => {
+  it("throws on a combat-only campaign", async () => {
+    const campaign = await startedCampaign(baseInput());
+    expect(() => sceneStaticsOf(campaign)).toThrow(/no scene open/);
+  });
+
+  it("returns the statics for a scene campaign", async () => {
+    const scene = heroSceneStatics();
+    const campaign = await createCampaign({ ...baseInput(), scene });
+    expect(sceneStaticsOf(campaign)).toBe(scene);
+  });
+
+  // Mirrors `builtOf`'s own disagreement guard test above: the projection
+  // says one world is open, `sceneStatics` names another.
+  it("throws when scene statics name a different world than the one open", async () => {
+    const scene = heroSceneStatics();
+    const campaign = await createCampaign({ ...baseInput(), scene });
+    campaign.sceneStatics = {
+      ...scene,
+      authored: { ...scene.authored, worldId: "some-other-world" },
+    };
+    expect(() => sceneStaticsOf(campaign)).toThrow(/scene statics world some-other-world/);
   });
 });
 

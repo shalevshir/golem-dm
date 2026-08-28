@@ -72,6 +72,51 @@ describe("POST /campaigns", () => {
     expect(response.statusCode).toBe(400);
   });
 
+  it("creates a scene campaign from a worldId, reachable with scene state and no board", async () => {
+    const { app, registry } = appWith();
+    const response = await app.inject({
+      method: "POST",
+      url: "/campaigns",
+      payload: { worldId: "emberfall" },
+    });
+    expect(response.statusCode).toBe(201);
+
+    const { campaignId } = JSON.parse(response.body) as { campaignId: string };
+    const campaign = await registry.get(campaignId);
+    expect(campaign?.state.world.scene?.currentNodeId).toBe("arrival");
+    expect(campaign?.state.encounter).toBeNull();
+  });
+
+  it("rejects a worldId this deployment does not author with 404", async () => {
+    const { app } = appWith();
+    const response = await app.inject({
+      method: "POST",
+      url: "/campaigns",
+      payload: { worldId: "atlantis" },
+    });
+    expect(response.statusCode).toBe(404);
+  });
+
+  it("creates a combat campaign from an encounterId unchanged, with a board", async () => {
+    // Pins the encounterId path's behaviour is untouched now that `worldId`
+    // exists as an alternative body shape: same 201, and the campaign the
+    // registry hands back still has an open board — `startEncounter` still
+    // runs for this path and only this one.
+    const { app, registry } = appWith();
+    const response = await app.inject({
+      method: "POST",
+      url: "/campaigns",
+      payload: { encounterId: "goblin-ambush" },
+    });
+    expect(response.statusCode).toBe(201);
+
+    const { campaignId } = JSON.parse(response.body) as { campaignId: string };
+    const campaign = await registry.get(campaignId);
+    expect(campaign?.state.world.scene).toBeNull();
+    expect(campaign?.state.encounter).not.toBeNull();
+    expect(campaign?.built?.encounterId).toBe("goblin-ambush");
+  });
+
   it("makes the created campaign retrievable from the registry", async () => {
     const { app, registry } = appWith();
     const response = await app.inject({
@@ -122,14 +167,14 @@ describe("CampaignRegistry", () => {
   // every time".
   it("caches the created campaign, so a later get returns the identical object", async () => {
     const { registry } = appWith();
-    const created = await registry.create("goblin-ambush");
+    const created = await registry.create({ encounterId: "goblin-ambush" });
     const fetched = await registry.get(created.state.world.campaignId);
     expect(fetched).toBe(created);
   });
 
   it("does not re-read the event log on a cache hit", async () => {
     const { registry, store } = appWith();
-    const created = await registry.create("goblin-ambush");
+    const created = await registry.create({ encounterId: "goblin-ambush" });
     const readSince = vi.spyOn(store, "readSince");
     await registry.get(created.state.world.campaignId);
     expect(readSince).not.toHaveBeenCalled();
@@ -160,7 +205,7 @@ describe("CampaignRegistry", () => {
 describe("CampaignRegistry.get", () => {
   it("folds a campaign once when two joins race", async () => {
     const { registry, store } = appWith();
-    const created = await registry.create("goblin-ambush");
+    const created = await registry.create({ encounterId: "goblin-ambush" });
     const campaignId = created.state.world.campaignId;
 
     // A second registry over the same store is what a restarted process
