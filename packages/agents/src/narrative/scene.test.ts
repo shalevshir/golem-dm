@@ -59,6 +59,45 @@ describe("buildScenePrompt", () => {
     expect(prompt.dynamic?.some((segment) => segment.includes("הכיכר"))).toBe(true);
     expect(prompt.dynamic?.some((segment) => segment.includes("אלדד הגיע לשוק."))).toBe(true);
   });
+
+  // The heaviest requirement in this task: the English rejection messages
+  // are the model's ONLY ground truth for explaining a refusal in-world —
+  // the deterministic fallback deliberately never sees them (asymmetry by
+  // design, see `scene-deterministic.ts`). If a future edit dropped
+  // `beat.messages` from `renderBeat`, nothing else would catch it.
+  it("puts every refusal message in the dynamic tier, as the model's ground truth for why", () => {
+    const refused = {
+      ...INPUT,
+      beat: {
+        kind: "refused" as const,
+        messages: ["The door to the vault is locked from within.", "No key is present in the party's gear."],
+      },
+    };
+    const prompt = buildScenePrompt(refused);
+    expect(prompt.dynamic?.some((segment) => segment.includes("The door to the vault is locked from within."))).toBe(
+      true,
+    );
+    expect(
+      prompt.dynamic?.some((segment) => segment.includes("No key is present in the party's gear.")),
+    ).toBe(true);
+  });
+
+  it("puts the check's ability, skill, and outcome in the dynamic tier", () => {
+    const check = {
+      ...INPUT,
+      beat: { kind: "check" as const, ability: "dex" as const, skill: "stealth" as const, success: false },
+    };
+    const prompt = buildScenePrompt(check);
+    expect(prompt.dynamic?.some((segment) => segment.includes("dex"))).toBe(true);
+    expect(prompt.dynamic?.some((segment) => segment.includes("stealth"))).toBe(true);
+    expect(prompt.dynamic?.some((segment) => segment.includes("failure"))).toBe(true);
+  });
+
+  it("puts the reply category in the dynamic tier", () => {
+    const reply = { ...INPUT, beat: { kind: "reply" as const, category: "combat" as const } };
+    const prompt = buildScenePrompt(reply);
+    expect(prompt.dynamic?.some((segment) => segment.includes("combat"))).toBe(true);
+  });
 });
 
 describe("createHebrewSceneNarrative", () => {

@@ -2,23 +2,32 @@
 // actually changes when the prompt changes — mirrors
 // `intent/prompt-text.test.ts` and `tactical/prompt-text.test.ts`.
 //
-// Only pins the strings this module owns. `HEBREW_GLOSSARY`, which
-// `scene.ts` also puts in the cached static tier, already has its own pin in
-// `narrative/prompt-text.test.ts` — pinning it a second time here would let
-// one glossary edit trip two independent version bumps for the same change.
+// Hashes the WHOLE cached `static` tier `buildScenePrompt` sends to the
+// model — `SCENE_SYSTEM_PROMPT` AND `HEBREW_GLOSSARY` — even though
+// `HEBREW_GLOSSARY` already has its own pin in `narrative/prompt-text.test.ts`.
+// `narrative/prompt-text.test.ts` folds `RULES_DIGEST` into its own hash for
+// the identical reason despite `RULES_DIGEST` also having its own pin: two
+// version bumps for one glossary edit is correct, because both prompts
+// actually changed. Pinning only this file's own string would let a glossary
+// edit change what the model sees while `SCENE_PROMPT_VERSION` — and every
+// `narrative_emitted.promptVersion` keyed on it — stayed stale.
 import { createHash } from "node:crypto";
 import { describe, expect, it } from "vitest";
+import { HEBREW_GLOSSARY } from "./prompt-text.js";
 import { SCENE_PROMPT_VERSION, SCENE_SYSTEM_PROMPT } from "./scene-prompt-text.js";
+
+/** Every string `buildScenePrompt` puts in the cached `static` tier. */
+const PROMPT_SURFACE = `${SCENE_SYSTEM_PROMPT}\n${HEBREW_GLOSSARY}`;
 
 /** Bump `SCENE_PROMPT_VERSION` and re-pin this together, never separately. */
 const PINNED = {
   version: "scene-v1",
-  sha256: "4efddcc5710e46e1efa74d8f3ac1f0d9a146f627166fad1e5fa5f3d700edc7ec",
+  sha256: "1f6738261ab64eb8b83d54f5d4da5c40654714a449e11b947ae1e2779922e2d9",
 };
 
 describe("scene prompt version guard", () => {
   it("fails when the prompt is edited without bumping the version", () => {
-    const actual = createHash("sha256").update(SCENE_SYSTEM_PROMPT, "utf8").digest("hex");
+    const actual = createHash("sha256").update(PROMPT_SURFACE, "utf8").digest("hex");
     expect(actual).toBe(PINNED.sha256);
   });
 
