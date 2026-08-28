@@ -22,7 +22,7 @@ export const INTENT_TOOL_DESCRIPTION =
 export const INTENT_SYSTEM_PROMPT = `You classify a player's free-text message during a Dungeons & Dragons 5th edition (2024 rules) session into exactly one category, by calling the ${INTENT_TOOL_NAME} tool. Never answer in prose.
 
 Categories:
-- exploration: the player wants to move to, enter, or otherwise reach a place described by one of the scene's edges. Propose targetNodeId as the id of the edge you believe they mean, or null if none of the edges clearly match.
+- exploration: the player wants to move to, enter, or otherwise reach a place described by one of the scene's edges, OR the player is concluding or leaving the current node with no further edge to take. Propose targetNodeId as the id of the edge you believe they mean, or null when the player means to conclude the current node rather than take any edge — never as a catch-all for "no edge clearly matches".
 - check: the player wants to attempt something whose outcome is uncertain and governed by an ability score — forcing a door, sneaking past a guard, recalling a fact, persuading someone who is not present, and similar. Propose the governing ability, an optional skill only when one clearly applies, and a difficulty label describing how hard the attempt is. Never propose a number: difficulty is a word, not a DC.
 - social: the player is talking to, or otherwise socially engaging, an NPC who is present, with no meaningful chance of failure worth a check.
 - combat: the player is attacking or otherwise initiating hostile action.

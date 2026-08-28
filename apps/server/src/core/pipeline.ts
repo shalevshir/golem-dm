@@ -57,6 +57,7 @@ import type { EventStore } from "@ai-dm/memory";
 import { reduce } from "@ai-dm/schemas";
 import type {
   AbilityKey,
+  CampaignState,
   ClientMessage,
   Condition,
   GameEvent,
@@ -556,6 +557,91 @@ export async function* handleCommand(
           sequence: event.sequence,
           error,
         });
+      }
+    }
+  }
+
+  /**
+   * `emit`'s sibling for a group of events that must land in ONE append —
+   * the fix for a hazard Task 9's review found: the `free_text` exploration
+   * case is the first caller anywhere in this file that can produce MORE
+   * THAN ONE state-changing scene event from a single engine transition
+   * (`quest_node_completed`, optionally `world_delta_applied`, optionally
+   * `quest_node_entered`). Three separate `emit` calls means three separate
+   * `store.append`s; an `EventStoreUnavailableError` between the first and
+   * the second would leave `quest_node_completed` durable with its
+   * `world_delta_applied`/`quest_node_entered` never written — and because
+   * `completed()` (the scene engine) short-circuits on
+   * `completedNodeIds.has(...)`, no LATER turn can ever re-apply that
+   * node's effects either. `EventStore.append` already takes an array, so
+   * this batches the whole group into the one call that makes it atomic
+   * from the store's point of view, same as combat's own multi-attack
+   * `dice_rolled` is one event covering several rolls rather than several
+   * events.
+   *
+   * Not a generalization of `emit`, and `emit` itself is untouched: this
+   * exists so the ONE caller that needs group atomicity gets it, without
+   * changing the append granularity (and therefore the snapshot-cadence
+   * timing) of every existing single-event call site, combat's included.
+   *
+   * Mirrors `emit`'s two invariants, extended across the group: (1) every
+   * payload is folded via `reduce` BEFORE anything is persisted, so a
+   * malformed payload anywhere in the group throws before the append that
+   * would otherwise write it durably with no frame ever yielded for it; (2)
+   * each event's frame is yielded against the `CampaignState` that reflects
+   * exactly that event and nothing after it — necessary because a snapshot
+   * taken mid-group must describe the projection AT that event's sequence,
+   * not the group's final state, or a reconnect resuming from that
+   * snapshot would silently skip the later events in the same group.
+   */
+  async function* emitAll(
+    items: readonly { type: GameEvent["type"]; payload: Record<string, unknown> }[],
+  ): AsyncIterable<ServerFrame> {
+    if (items.length === 0) return;
+
+    const startSequence = campaign.nextSequence;
+    const timestamp = ports.clock();
+    const events: GameEvent[] = items.map((item, index) => ({
+      eventId: ports.uuid(),
+      campaignId: campaign.state.world.campaignId,
+      sequence: startSequence + index,
+      timestamp,
+      type: item.type,
+      payload: item.payload,
+    }));
+
+    const folded: { event: GameEvent; state: CampaignState }[] = [];
+    let next = campaign.state;
+    for (const event of events) {
+      next = reduce(next, event);
+      folded.push({ event, state: next });
+    }
+
+    await ports.store.append(campaign.state.world.campaignId, events);
+    campaign.nextSequence += events.length;
+
+    for (const { event, state } of folded) {
+      campaign.state = state;
+      yield { type: "event", event };
+
+      // Same cadence and the same own-`try` isolation `emit` documents,
+      // per event in the group rather than per call — a group spanning a
+      // `SNAPSHOT_EVERY` boundary must still snapshot at the crossing
+      // event, not only at the group's last one.
+      if (event.sequence > 0 && event.sequence % SNAPSHOT_EVERY === 0) {
+        try {
+          await ports.store.putSnapshot(
+            campaign.state.world.campaignId,
+            event.sequence,
+            campaign.state,
+          );
+        } catch (error) {
+          ports.metrics?.recordSnapshotFailure?.({
+            campaignId: campaign.state.world.campaignId,
+            sequence: event.sequence,
+            error,
+          });
+        }
       }
     }
   }
@@ -1102,10 +1188,38 @@ export async function* handleCommand(
           case "exploration": {
             const before = sceneStateFrom(currentScene());
             const { targetNodeId } = classification;
+
+            // `null` means "conclude the current node" (Decision 1) — the
+            // `completeCurrentNode` hook a TERMINAL node needs, never
+            // "nothing else matched". A node with edges out still gates on
+            // one of THOSE, so a `null` there is refused exactly like a bad
+            // edge id: the shipped `guild-offer` has one open edge and a
+            // real effect, and an utterance the model reads as "no edge
+            // clearly matches" (e.g. "I look at the sky") must not silently
+            // complete it and shift a faction band the player never asked
+            // to move. Checked structurally (`edges.length`, not `open`
+            // edges) — a node whose only edges are currently closed is
+            // still non-terminal; it has somewhere to go, just not yet.
+            const currentNode = statics.authored.questNodes.get(before.currentNodeId);
+            const isNonTerminal = currentNode !== undefined && currentNode.edges.length > 0;
+
             const transition: SceneTransition =
-              targetNodeId === null
-                ? completeCurrentNode(statics.authored, before)
-                : traverseEdge(statics.authored, before, targetNodeId);
+              targetNodeId === null && isNonTerminal
+                ? {
+                    valid: false,
+                    rejections: [
+                      {
+                        reason: "precondition_unmet",
+                        message:
+                          `"${before.currentNodeId}" is not a terminal node; ` +
+                          "conclude it by choosing one of its edges instead",
+                        subjectId: before.currentNodeId,
+                      },
+                    ],
+                  }
+                : targetNodeId === null
+                  ? completeCurrentNode(statics.authored, before)
+                  : traverseEdge(statics.authored, before, targetNodeId);
 
             if (!transition.valid) {
               // Refusal is data all the way to the player's ear (Decision 6):
@@ -1133,25 +1247,40 @@ export async function* handleCommand(
             // (Decision 4), so a second `quest_node_completed` for an
             // already-completed node is a harmless no-op, not a double
             // completion.
-            yield* emit("quest_node_completed", { nodeId: before.currentNodeId });
-
+            //
             // Diffed against the engine's OWN pre/post states, never
             // re-read off the node's declared effects (Decision 4's last
-            // paragraph) — and emitted only when something actually
+            // paragraph) — and included only when something actually
             // changed, so re-completing an already-completed node (whose
             // `completeCurrentNode` call returns the SAME state, unchanged)
             // produces no second `world_delta_applied`.
+            //
+            // All of this batch's events go through ONE `emitAll` call,
+            // not up to three `emit` calls: this is one engine transition,
+            // and Task 9's review found that spreading it across several
+            // appends leaves a window where a store failure between them
+            // durably completes a node whose delta or destination never
+            // landed, with no later turn able to repair it (`completed()`
+            // short-circuits on a node already in `completedNodeIds`).
+            // `emitAll` makes the group one append; Decision 4's three
+            // separate EVENTS are unchanged, only the append granularity is.
             const delta = diffScene(before, transition.state);
+            const sceneEvents: { type: GameEvent["type"]; payload: Record<string, unknown> }[] = [
+              { type: "quest_node_completed", payload: { nodeId: before.currentNodeId } },
+            ];
             if (delta.relations.length > 0 || delta.day !== undefined) {
-              yield* emit("world_delta_applied", {
-                relations: delta.relations,
-                ...(delta.day === undefined ? {} : { day: delta.day }),
+              sceneEvents.push({
+                type: "world_delta_applied",
+                payload: {
+                  relations: delta.relations,
+                  ...(delta.day === undefined ? {} : { day: delta.day }),
+                },
               });
             }
-
             if (targetNodeId !== null) {
-              yield* emit("quest_node_entered", { nodeId: targetNodeId });
+              sceneEvents.push({ type: "quest_node_entered", payload: { nodeId: targetNodeId } });
             }
+            yield* emitAll(sceneEvents);
 
             // Reads `currentScene()` fresh, post-emit: for a traversal this
             // is the new node; for a `completeCurrentNode` it is the same

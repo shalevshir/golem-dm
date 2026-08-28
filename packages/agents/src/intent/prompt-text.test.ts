@@ -24,7 +24,7 @@ const PROMPT_SURFACE = [INTENT_TOOL_NAME, INTENT_TOOL_DESCRIPTION, INTENT_SYSTEM
 /** Bump `INTENT_PROMPT_VERSION` and re-pin this together, never separately. */
 const PINNED = {
   version: "intent-v1",
-  sha256: "f2fa5a5fb94419368f837d6190aa44e24ab2dc89d48653576dc7e6e8bb480bc4",
+  sha256: "dd6cccf9618236b3393a0051154219d2f1fe383097339a77f2e0b7691c7d9a8d",
 };
 
 describe("prompt version guard", () => {

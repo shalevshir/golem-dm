@@ -18,6 +18,7 @@ import {
   createHebrewNarrative,
   createTacticalAgent,
   DEFAULT_MODEL_ROUTING,
+  INTENT_PROMPT_VERSION,
   NARRATIVE_PROMPT_VERSION,
   SCENE_PROMPT_VERSION,
 } from "@ai-dm/agents";
@@ -805,10 +806,31 @@ describe("handleCommand — free text", () => {
       "narrative_emitted",
     ]);
 
-    const deltaEvent = frames.find(
-      (each): each is Extract<ServerFrame, { type: "event" }> =>
-        each.type === "event" && each.event.type === "world_delta_applied",
-    );
+    // The two payloads the brief specifies field-by-field: `player_input`
+    // (the newly-sanctioned Hebrew `text` field, and the actor it came
+    // from) and `intent_classified` (the classification, provider/model
+    // the fixture stamped, and `INTENT_PROMPT_VERSION` — never
+    // `NARRATIVE_PROMPT_VERSION`, since the two are easy to swap and
+    // `reduce` validates neither payload, so nothing else here would catch
+    // it).
+    const eventOfType = (type: string): Extract<ServerFrame, { type: "event" }> | undefined =>
+      frames.find(
+        (each): each is Extract<ServerFrame, { type: "event" }> =>
+          each.type === "event" && each.event.type === type,
+      );
+
+    expect(eventOfType("player_input")?.event.payload).toMatchObject({
+      actorId: heroSceneStatics().character.characterId,
+      text: "let's see the weir",
+    });
+    expect(eventOfType("intent_classified")?.event.payload).toMatchObject({
+      classification: { category: "exploration", targetNodeId: "the-weir" },
+      provider: "test-provider",
+      modelId: "test-model",
+      promptVersion: INTENT_PROMPT_VERSION,
+    });
+
+    const deltaEvent = eventOfType("world_delta_applied");
     expect(deltaEvent?.event.payload).toMatchObject({
       relations: [{ factionA: "ashen-guild", factionB: "river-wardens", band: "hostile" }],
     });
@@ -833,6 +855,49 @@ describe("handleCommand — free text", () => {
     expect(sortedSnapshot(scene)).toEqual(sortedSnapshot(expected));
   });
 
+  // Coordinator ruling on Task 9's review, finding 3: this turn's scene
+  // group (`quest_node_completed` + `world_delta_applied` +
+  // `quest_node_entered`) must land in ONE `store.append` call, not three —
+  // `EventStore.append`'s own contract ("Atomic over the batch... either
+  // all of them land or none", `packages/memory/src/event-store/port.ts`)
+  // is what closes the half-applied-traversal hazard, and this is what
+  // proves the pipeline actually spends that atomicity on the group rather
+  // than three single-event appends that could fail between each other.
+  it("appends the scene-event group as one atomic append, not one per event", async () => {
+    const store = createInMemoryEventStore();
+    const before: SceneSnapshot = {
+      worldId: "emberfall",
+      currentNodeId: "guild-offer",
+      completedNodeIds: ["arrival"],
+      relations: [],
+      day: 1,
+    };
+    const campaign = await sceneCampaign(store, before);
+    const appendBatchSizes: number[] = [];
+    const counting: EventStore = {
+      ...store,
+      append: (campaignId, events) => {
+        appendBatchSizes.push(events.length);
+        return store.append(campaignId, events);
+      },
+    };
+    const ports: TurnPorts = {
+      ...portsWith(counting),
+      intent: classifiedAs({ category: "exploration", targetNodeId: "the-weir" }),
+    };
+
+    await drain(
+      handleCommand(
+        campaign,
+        { type: "free_text", clientMessageId: "c1", text: "let's see the weir" },
+        ports,
+      ),
+    );
+
+    // player_input, intent_classified, the 3-event scene group, narrative_emitted.
+    expect(appendBatchSizes).toEqual([1, 1, 3, 1]);
+  });
+
   // (f) A closed edge: `reckoning` requires the faction relation to be no
   // worse than `hostile`, and this fixture starts it at `war`. Refusal is
   // narration only — no quest/delta event, and `world.scene` is untouched.
@@ -855,6 +920,43 @@ describe("handleCommand — free text", () => {
       handleCommand(
         campaign,
         { type: "free_text", clientMessageId: "c1", text: "put them in one room" },
+        ports,
+      ),
+    );
+
+    expect(eventTypesOf(frames)).toEqual(["player_input", "intent_classified", "narrative_emitted"]);
+    expect(campaign.state.world.scene).toEqual(before);
+  });
+
+  // Coordinator ruling on Task 9's review, finding 2: `targetNodeId: null`
+  // means "conclude the current node" (Decision 1) — the hook a TERMINAL
+  // node needs — never "no edge matched". `guild-offer` has one edge (to
+  // `the-weir`) and a real effect; a model reading its own prompt's old
+  // "or null if none of the edges clearly match" wording could propose
+  // `null` here for an utterance that requested no movement at all. This
+  // must refuse exactly like a bad edge id: no quest/delta event, and
+  // `world.scene` untouched — completing this node would shift a faction
+  // band the player never asked to move, and `completed()`'s own
+  // idempotency means no later turn could ever re-apply it.
+  it("refuses targetNodeId: null on a non-terminal node instead of completing it", async () => {
+    const store = createInMemoryEventStore();
+    const before: SceneSnapshot = {
+      worldId: "emberfall",
+      currentNodeId: "guild-offer",
+      completedNodeIds: ["arrival"],
+      relations: [],
+      day: 1,
+    };
+    const campaign = await sceneCampaign(store, before);
+    const ports: TurnPorts = {
+      ...portsWith(store),
+      intent: classifiedAs({ category: "exploration", targetNodeId: null }),
+    };
+
+    const frames = await drain(
+      handleCommand(
+        campaign,
+        { type: "free_text", clientMessageId: "c1", text: "I look at the sky" },
         ports,
       ),
     );
