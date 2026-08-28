@@ -16,6 +16,7 @@ import { pairKey } from "./authored-world.js";
 import type { AuthoredWorld } from "./authored-world.js";
 
 export * from "./authored-world.js";
+export * from "./snapshot.js";
 
 /**
  * What the engine tracks across a campaign. Every function returns a new one;
