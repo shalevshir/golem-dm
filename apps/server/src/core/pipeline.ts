@@ -16,10 +16,12 @@
 // appended to the same `structured_action` case after a successful player
 // turn.
 import {
+  abilityCheck,
   affordancesFor,
   applyTurn,
   availableEdges,
   completeCurrentNode,
+  DC_BY_DIFFICULTY,
   diffScene,
   sceneStateFrom,
   seeded,
@@ -54,12 +56,13 @@ import {
   CampaignMismatchError,
 } from "@ai-dm/memory";
 import type { EventStore } from "@ai-dm/memory";
-import { reduce } from "@ai-dm/schemas";
+import { CheckRolledPayload, IntentClassifiedPayload, reduce } from "@ai-dm/schemas";
 import type {
   AbilityKey,
   CampaignState,
   ClientMessage,
   Condition,
+  DerivedCharacter,
   GameEvent,
   NarrationSource,
   SceneSnapshot,
@@ -461,6 +464,53 @@ function questNodeCard(
     .filter((npc) => npc.locationId === node.locationId)
     .map((npc) => npc.nameHebrew);
   return { sceneEnglish: node.sceneEnglish, locationNameHebrew: location.nameHebrew, npcNamesHebrew };
+}
+
+/**
+ * The ability a `check` category's roll and log entry are attributed to.
+ * When the router names a skill, the engine's own skill→ability mapping
+ * (`ports.skillAbilities`, from `SrdGear.skills`) governs — never the
+ * model's own `ability` field — so the two cannot disagree (design spec
+ * Decision 5: "the model chooses a word; the engine owns every number").
+ * `skillAbilities` covers every `Skill` member (built from the same SRD
+ * gear data `deriveCharacter` derives skills from in `main.ts`), so a lookup
+ * miss here means a skill was added to the schema without adding it to that
+ * data — the same corrupt-content posture `questNodeCard` takes on a
+ * dangling node or location id.
+ */
+function checkAbilityFor(
+  skillAbilities: ReadonlyMap<Skill, AbilityKey>,
+  classification: { ability: AbilityKey; skill?: Skill | undefined },
+): AbilityKey {
+  if (classification.skill === undefined) return classification.ability;
+  const ability = skillAbilities.get(classification.skill);
+  if (ability === undefined) {
+    throw new Error(`No governing ability for skill "${classification.skill}"`);
+  }
+  return ability;
+}
+
+/**
+ * A check's modifier, straight off the derived sheet (design spec Decision
+ * 6): `DerivedCharacter.skills[skill]` when a skill is named, else
+ * `abilityModifiers[ability]` — both already fold ability score AND
+ * proficiency in, so nothing here adds either a second time.
+ *
+ * `DerivedCharacter`'s zod schema types `skills`/`abilityModifiers` as
+ * partial records (`z.record` over a closed enum widens to
+ * `Partial<Record<...>>`), even though `deriveCharacter` always fills every
+ * entry for every character it derives. The `??` fallback and the final
+ * guard exist to satisfy that type, not because either lookup is expected to
+ * miss at runtime — a miss means a corrupt `DerivedCharacter`, not a
+ * legitimate "no modifier" case.
+ */
+function checkModifierFor(character: DerivedCharacter, ability: AbilityKey, skill?: Skill): number {
+  const bySkill = skill === undefined ? undefined : character.skills[skill];
+  const resolved = bySkill ?? character.abilityModifiers[ability];
+  if (resolved === undefined) {
+    throw new Error(`${character.characterId} has no modifier for ability "${ability}"`);
+  }
+  return resolved;
 }
 
 /**
@@ -1175,13 +1225,23 @@ export async function* handleCommand(
         }
 
         const { classification } = classifyResult;
+        // `.parse`d rather than passed straight through: `IntentClassifiedPayload`
+        // (invariant 4) was previously referenced only by its own test —
+        // decoration, not the single schema/parse/type definition the
+        // invariant requires. Parsing here is what makes it load-bearing.
+        // The spread makes the parsed, precisely-typed result a fresh object
+        // literal again, which is what lets it satisfy `emit`'s
+        // `Record<string, unknown>` parameter (a named object type is not
+        // otherwise assignable to an index-signature type).
         yield* emit("intent_classified", {
-          clientMessageId: command.clientMessageId,
-          actorId: statics.character.characterId,
-          classification,
-          provider: classifyResult.provider,
-          modelId: classifyResult.modelId,
-          promptVersion: INTENT_PROMPT_VERSION,
+          ...IntentClassifiedPayload.parse({
+            clientMessageId: command.clientMessageId,
+            actorId: statics.character.characterId,
+            classification,
+            provider: classifyResult.provider,
+            modelId: classifyResult.modelId,
+            promptVersion: INTENT_PROMPT_VERSION,
+          }),
         });
 
         switch (classification.category) {
@@ -1300,14 +1360,77 @@ export async function* handleCommand(
             return;
           }
 
-          // Replaced wholesale in Task 10. Listed explicitly, with no
-          // `default`, so a category added to `IntentClassification` fails
-          // this switch to compile rather than silently falling through.
-          case "check":
+          case "check": {
+            const ability = checkAbilityFor(ports.skillAbilities, classification);
+            const modifier = checkModifierFor(statics.character, ability, classification.skill);
+            const dc = DC_BY_DIFFICULTY[classification.difficulty];
+            const seed = ports.seedFor(campaign.state.world.rootSeed, campaign.nextSequence);
+
+            // `abilityScore: 10` is not a placeholder: `modifier` above
+            // already folds the character's ability score AND proficiency
+            // (design spec Decision 6), so passing it as `situationalBonus`
+            // is the check's ENTIRE contribution. `abilityScore: 10` makes
+            // `abilityCheck`'s own ability-modifier term
+            // (`abilityModifier(10) === 0`) contribute exactly nothing, so
+            // `situationalBonus` alone is what decides the roll rather than
+            // being added on top of a second, redundant ability term.
+            const result = abilityCheck(
+              { abilityScore: 10, situationalBonus: modifier, dc },
+              seeded(seed),
+            );
+
+            // See `intent_classified`'s own comment above: `.parse`d so
+            // `CheckRolledPayload` is load-bearing too, not decoration.
+            yield* emit("check_rolled", {
+              ...CheckRolledPayload.parse({
+                actorId: statics.character.characterId,
+                ability,
+                ...(classification.skill === undefined ? {} : { skill: classification.skill }),
+                difficulty: classification.difficulty,
+                dc,
+                naturalRoll: result.naturalRoll,
+                rolls: result.rolls,
+                modifier: result.modifier,
+                total: result.total,
+                success: result.success,
+                seed,
+              }),
+            });
+
+            // No state change (design spec Non-goals: a check informs
+            // narration and the log, it does not gate traversal) — this
+            // branch never calls `emit`/`emitAll` for a scene event.
+            yield* sceneNarrate(
+              statics.character.characterId,
+              {
+                kind: "check",
+                ability,
+                ...(classification.skill === undefined ? {} : { skill: classification.skill }),
+                success: result.success,
+              },
+              deadline,
+            );
+            yield* playerAffordances();
+            return;
+          }
+
+          // Narrate-only categories (design spec Decision 6): a grounded
+          // reply off the scene card and the category alone, no event beyond
+          // the `player_input`/`intent_classified` pair already emitted
+          // above, and no state change. `combat` does not enter combat here
+          // (Non-goals: the combat bridge is a later step) — it only tells
+          // the player fighting is not available this way yet.
           case "social":
-          case "combat":
           case "ooc":
-            throw new Error("unreachable until Task 10");
+          case "combat": {
+            yield* sceneNarrate(
+              statics.character.characterId,
+              { kind: "reply", category: classification.category },
+              deadline,
+            );
+            yield* playerAffordances();
+            return;
+          }
         }
 
         // Reached only when `classification.category` matched none of the

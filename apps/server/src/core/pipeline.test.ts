@@ -1,5 +1,13 @@
 import { describe, expect, it } from "vitest";
-import { sceneStateFrom, snapshotOf, traverseEdge, validateExecuteTurn } from "@ai-dm/rules-engine";
+import {
+  abilityCheck,
+  DC_BY_DIFFICULTY,
+  seeded,
+  sceneStateFrom,
+  snapshotOf,
+  traverseEdge,
+  validateExecuteTurn,
+} from "@ai-dm/rules-engine";
 import type { SceneState, SceneTransition } from "@ai-dm/rules-engine";
 import type {
   AdapterError,
@@ -7,6 +15,7 @@ import type {
   IntentResult,
   NarrativeFinish,
   NarrativePort,
+  SceneNarrationInput,
   SceneNarrativePort,
   TacticalAgent,
 } from "@ai-dm/agents";
@@ -24,14 +33,16 @@ import {
 } from "@ai-dm/agents";
 import { createInMemoryEventStore, EventStoreUnavailableError } from "@ai-dm/memory";
 import type { EventStore } from "@ai-dm/memory";
-import { DiceRolledPayload, NarrativeEmittedPayload } from "@ai-dm/schemas";
+import { CheckRolledPayload, DiceRolledPayload, NarrativeEmittedPayload } from "@ai-dm/schemas";
 import type {
+  AbilityKey,
   ClientMessage,
   ExecuteTurn,
   GameEvent,
   IntentClassification,
   SceneSnapshot,
   ServerFrame,
+  Skill,
   CampaignState,
 } from "@ai-dm/schemas";
 import { SNAPSHOT_EVERY, handleCommand } from "./pipeline.js";
@@ -44,7 +55,18 @@ import type {
 import { createCampaign, encounterOf, loadCampaign, startEncounter } from "./campaign.js";
 import type { Campaign, SceneStatics } from "./campaign.js";
 import { loadCharacter } from "../encounters/index.js";
+import { loadGear } from "../encounters/gear.js";
 import { loadWorld } from "../world/index.js";
+
+/** `main.ts`'s own `skillAbilities` construction, mirrored here so a check
+ *  test can name a real skill and get its real governing ability rather than
+ *  an empty map (`portsWith`'s default, adequate for every test that never
+ *  proposes a `check` with a skill). */
+function skillAbilities(): ReadonlyMap<Skill, AbilityKey> {
+  return new Map(
+    Array.from(loadGear().skills, ([skill, definition]) => [skill, definition.ability] as const),
+  );
+}
 
 function uuids(): () => string {
   let n = 0;
@@ -241,6 +263,21 @@ function scriptedSceneNarrative(chunks: string[]): SceneNarrativePort {
           };
         },
       };
+    },
+  };
+}
+
+/**
+ * A scene narrative port that records every `input` it is given (so a test
+ * can inspect the `SceneBeat` the pipeline actually built) and otherwise
+ * behaves like `scriptedSceneNarrative([])` — an empty stream, the fallback
+ * rung the deterministic renderer picks up from.
+ */
+function recordingSceneNarrative(sink: SceneNarrationInput[]): SceneNarrativePort {
+  return {
+    stream(input: SceneNarrationInput): AsyncIterable<string> {
+      sink.push(input);
+      return scriptedSceneNarrative([]).stream(input);
     },
   };
 }
@@ -1045,6 +1082,206 @@ describe("handleCommand — free text", () => {
       "quest_node_completed",
       "narrative_emitted",
     ]);
+  });
+});
+
+/** Locates one `event` frame of the given `type`, or throws — every test
+ *  below needs exactly one and a missing one is a broken fixture, not a
+ *  legitimate "not found" case. */
+function eventFrameOf(
+  frames: readonly ServerFrame[],
+  type: string,
+): Extract<ServerFrame, { type: "event" }> {
+  const found = frames.find(
+    (each): each is Extract<ServerFrame, { type: "event" }> =>
+      each.type === "event" && each.event.type === type,
+  );
+  if (found === undefined) throw new Error(`no "${type}" event frame`);
+  return found;
+}
+
+describe("handleCommand — free text: check category", () => {
+  // (a) Determinism is the assertion: the payload's `naturalRoll`/`total`/
+  // `success` are checked against `abilityCheck` called in the test with the
+  // SAME seeded rng, not against a hardcoded die value — the die value is an
+  // implementation detail of `seeded`/`abilityCheck`, the reproducibility is
+  // the contract.
+  it("rolls a named skill check off the seeded rng, at the DC the difficulty names, with the skill's own modifier", async () => {
+    const store = createInMemoryEventStore();
+    const campaign = await sceneCampaign(store);
+    const ports: TurnPorts = {
+      ...portsWith(store),
+      intent: classifiedAs({
+        category: "check",
+        ability: "str",
+        skill: "athletics",
+        difficulty: "medium",
+      }),
+      skillAbilities: skillAbilities(),
+    };
+
+    const frames = await drain(
+      handleCommand(
+        campaign,
+        { type: "free_text", clientMessageId: "c1", text: "I try to climb the ridge" },
+        ports,
+      ),
+    );
+
+    expect(eventTypesOf(frames)).toEqual([
+      "player_input",
+      "intent_classified",
+      "check_rolled",
+      "narrative_emitted",
+    ]);
+
+    const payload = CheckRolledPayload.parse(eventFrameOf(frames, "check_rolled").event.payload);
+    const hero = loadCharacter("hero");
+    // `DerivedCharacter.skills` is a `Partial<Record<Skill, number>>` at the
+    // type level (see `pipeline.ts`'s `checkModifierFor`); the fixture is
+    // known to fill every skill, so a miss here is a broken fixture, not a
+    // legitimate "no modifier" case.
+    const athleticsModifier = hero.skills.athletics;
+    if (athleticsModifier === undefined) throw new Error("fixture: hero has no athletics skill");
+
+    expect(payload.dc).toBe(DC_BY_DIFFICULTY.medium);
+    expect(payload.modifier).toBe(athleticsModifier);
+
+    // `sequence-of-check_rolled`: a scene-only campaign's genesis is ONE
+    // event (sequence 0, `campaign_started` — no board to open), so this
+    // turn's own player_input/intent_classified/check_rolled land at
+    // 1/2/3 — the same `campaign.nextSequence` `pipeline.ts` reads right
+    // before computing this event's seed.
+    const expectedSeed = 42 * 1000 + 3;
+    expect(payload.seed).toBe(expectedSeed);
+
+    const expected = abilityCheck(
+      { abilityScore: 10, situationalBonus: athleticsModifier, dc: DC_BY_DIFFICULTY.medium },
+      seeded(expectedSeed),
+    );
+    expect(payload.naturalRoll).toBe(expected.naturalRoll);
+    expect(payload.total).toBe(expected.total);
+    expect(payload.success).toBe(expected.success);
+  });
+
+  // (b) No skill named: the modifier comes from `abilityModifiers[ability]`
+  // rather than any skill entry.
+  it("uses abilityModifiers[ability] for a skill-less check", async () => {
+    const store = createInMemoryEventStore();
+    const campaign = await sceneCampaign(store);
+    const ports: TurnPorts = {
+      ...portsWith(store),
+      intent: classifiedAs({ category: "check", ability: "wis", difficulty: "easy" }),
+    };
+
+    const frames = await drain(
+      handleCommand(
+        campaign,
+        { type: "free_text", clientMessageId: "c1", text: "I listen at the door" },
+        ports,
+      ),
+    );
+
+    const payload = CheckRolledPayload.parse(eventFrameOf(frames, "check_rolled").event.payload);
+    expect(payload.skill).toBeUndefined();
+    expect(payload.ability).toBe("wis");
+    expect(payload.modifier).toBe(loadCharacter("hero").abilityModifiers.wis);
+  });
+
+  // (c) The model chooses a word; the engine owns every number (design spec
+  // Decision 5): once a skill is named, the payload's `ability` is the SRD
+  // mapping's (`skillAbilities`, "athletics" -> "str"), even though this
+  // fixture's mocked classifier proposes the mismatched "int".
+  it("uses the SRD skill-to-ability mapping, not the model's mismatched ability, when a skill is named", async () => {
+    const store = createInMemoryEventStore();
+    const campaign = await sceneCampaign(store);
+    const ports: TurnPorts = {
+      ...portsWith(store),
+      intent: classifiedAs({
+        category: "check",
+        ability: "int",
+        skill: "athletics",
+        difficulty: "medium",
+      }),
+      skillAbilities: skillAbilities(),
+    };
+
+    const frames = await drain(
+      handleCommand(
+        campaign,
+        { type: "free_text", clientMessageId: "c1", text: "I try to climb the ridge" },
+        ports,
+      ),
+    );
+
+    const payload = CheckRolledPayload.parse(eventFrameOf(frames, "check_rolled").event.payload);
+    expect(payload.ability).toBe("str");
+    expect(payload.modifier).toBe(loadCharacter("hero").skills.athletics);
+  });
+
+  // (d) No state change from a check (design spec Non-goals: a check informs
+  // narration and the log, it does not gate traversal).
+  it("leaves the scene untouched", async () => {
+    const store = createInMemoryEventStore();
+    const campaign = await sceneCampaign(store);
+    const sceneBefore = campaign.state.world.scene;
+    const ports: TurnPorts = {
+      ...portsWith(store),
+      intent: classifiedAs({ category: "check", ability: "str", difficulty: "medium" }),
+    };
+
+    await drain(
+      handleCommand(
+        campaign,
+        { type: "free_text", clientMessageId: "c1", text: "I try to force the door" },
+        ports,
+      ),
+    );
+
+    expect(campaign.state.world.scene).toEqual(sceneBefore);
+  });
+});
+
+describe("handleCommand — free text: narrate-only categories", () => {
+  it.each(["social", "ooc"] as const)(
+    "routes %s to player_input + intent_classified + narration, and nothing else",
+    async (category) => {
+      const store = createInMemoryEventStore();
+      const campaign = await sceneCampaign(store);
+      const ports: TurnPorts = { ...portsWith(store), intent: classifiedAs({ category }) };
+
+      const frames = await drain(
+        handleCommand(
+          campaign,
+          { type: "free_text", clientMessageId: "c1", text: "hello there" },
+          ports,
+        ),
+      );
+
+      expect(eventTypesOf(frames)).toEqual(["player_input", "intent_classified", "narrative_emitted"]);
+    },
+  );
+
+  it("routes combat to a grounded reply beat rather than starting a fight, narration only", async () => {
+    const store = createInMemoryEventStore();
+    const campaign = await sceneCampaign(store);
+    const seen: SceneNarrationInput[] = [];
+    const ports: TurnPorts = {
+      ...portsWith(store),
+      intent: classifiedAs({ category: "combat" }),
+      sceneNarrative: recordingSceneNarrative(seen),
+    };
+
+    const frames = await drain(
+      handleCommand(
+        campaign,
+        { type: "free_text", clientMessageId: "c1", text: "I draw my sword" },
+        ports,
+      ),
+    );
+
+    expect(eventTypesOf(frames)).toEqual(["player_input", "intent_classified", "narrative_emitted"]);
+    expect(seen.map((each) => each.beat)).toEqual([{ kind: "reply", category: "combat" }]);
   });
 });
 
