@@ -1545,18 +1545,19 @@ describe("handleCommand — structured action", () => {
     expect(types).toContain("action_rejected");
   });
 
-  // The bracket refusal (spec §Wiring). Not reachable through any production
-  // path today, though: `POST /campaigns` always starts an encounter before
-  // handing a campaign back (`http.ts`'s `create`), and `resolveEncounter` —
-  // the only thing that could close a bracket and leave one open-ended — has
-  // no production caller anywhere in the tree (grep-verified). The
-  // encounter-less state this test exercises is produced only by the
-  // test-only `encounterlessCampaign` helper below, standing in for the
-  // state a real "between fights" campaign will reach once §4.7's step 4
-  // separates campaign creation from starting a fight and something actually
-  // calls `resolveEncounter` in production. Until then, this pins the guard
-  // itself: a `structured_action` against a closed/never-opened bracket must
-  // refuse cleanly rather than throwing `encounterOf`'s corrupt-log error.
+  // The bracket refusal (spec §Wiring). Reachable in production today: a
+  // `POST /campaigns {worldId}` scene campaign (Task 8) comes back with
+  // `encounter === null`, and nothing in this case gates on campaign kind
+  // before the check below, so a hand-crafted `structured_action` reaches
+  // it. The shipped web client can't send one out of combat (Task 11 keeps
+  // `Grid`/`ActionBar` out of the exploration view), so the guard's real job
+  // today is refusing that message, not being dead code. `resolveEncounter`
+  // — the other way a bracket could close and leave one open-ended — still
+  // has no production caller anywhere in the tree (grep-verified).
+  // `encounterlessCampaign` below is just the deterministic shortcut to the
+  // same state; this pins the guard itself: a `structured_action` against a
+  // closed/never-opened bracket must refuse cleanly rather than throwing
+  // `encounterOf`'s corrupt-log error.
   it("refuses a structured action when no encounter is open, with an error frame", async () => {
     const store = createInMemoryEventStore();
     const campaign = await encounterlessCampaign(store);
