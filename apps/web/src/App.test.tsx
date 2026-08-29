@@ -11,6 +11,7 @@ import { StrictMode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, render, screen, waitFor } from "@testing-library/react";
 import type { RenderResult } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { ExecuteTurn, fold } from "@ai-dm/schemas";
 import type { Combatant, GameEvent, CampaignState } from "@ai-dm/schemas";
 import { App, CAMPAIGN_STORAGE_KEY } from "./App.js";
@@ -800,5 +801,119 @@ describe("App", () => {
     });
 
     expect(factory).toHaveBeenCalledTimes(1);
+  });
+});
+
+// §4.7 step 4's web slice. A joined scene campaign has `encounter === null`
+// and `world.scene !== null` -- the gating assertion below is the point of
+// this whole suite: combat controls (Grid/ActionBar) exist ONLY inside an
+// open encounter, which is what keeps the known `not_your_turn`-in-
+// `SILENT_CODES` trap unreachable -- nothing out of combat can send a
+// `structured_action`, so the silent refusal never has a sender.
+describe("App (scene mode, out-of-combat free text)", () => {
+  const scene = {
+    worldId: "emberfall",
+    currentNodeId: "market-square",
+    completedNodeIds: [],
+    relations: [],
+    day: 1,
+  };
+
+  function sceneSnapshot(): CampaignState {
+    return {
+      world: { campaignId: "s1", rootSeed: 3, appliedClientMessageIds: [], scene },
+      encounter: null,
+    };
+  }
+
+  it("renders NarrativePane + FreeTextBar for a joined scene campaign and renders no Grid or ActionBar, keeping the not_your_turn-in-SILENT_CODES trap unreachable since nothing out of combat can send a structured_action", async () => {
+    const { container } = await start();
+    act(() => {
+      socket.emitMessage({ type: "campaign_state", sequence: 0, snapshot: sceneSnapshot() });
+    });
+
+    expect(await screen.findByPlaceholderText(he.freeText.placeholder)).toBeInTheDocument();
+    expect(container.querySelector(".grid")).not.toBeInTheDocument();
+    expect(container.querySelector(".action-bar")).not.toBeInTheDocument();
+    // The gating property stated concretely: no structured_action can ever
+    // be sent from here, because the component that builds one (ActionBar,
+    // via App's `commit`) is simply not mounted.
+    expect(
+      socket.sent.some((each) => (JSON.parse(each) as { type: string }).type === "structured_action"),
+    ).toBe(false);
+  });
+
+  it("keeps today's placeholder when encounter is null and scene is also null (a legacy/pre-genesis campaign)", async () => {
+    await start();
+    act(() => {
+      socket.emitMessage({
+        type: "campaign_state",
+        sequence: 0,
+        snapshot: {
+          world: { campaignId: "s1", rootSeed: 3, appliedClientMessageIds: [], scene: null },
+          encounter: null,
+        },
+      });
+    });
+
+    expect(screen.queryByPlaceholderText(he.freeText.placeholder)).not.toBeInTheDocument();
+    expect(screen.getByText(he.app.connecting)).toBeInTheDocument();
+  });
+
+  it("disables the FreeTextBar on send and re-enables it once narrative_emitted folds", async () => {
+    await start();
+    act(() => {
+      socket.emitMessage({ type: "campaign_state", sequence: 0, snapshot: sceneSnapshot() });
+    });
+
+    const input = await screen.findByPlaceholderText(he.freeText.placeholder);
+    await userEvent.type(input, "לך לשוק{Enter}");
+
+    expect(screen.getByPlaceholderText(he.freeText.placeholder)).toBeDisabled();
+    const sent = socket.sent.map((each) => JSON.parse(each) as Record<string, unknown>);
+    expect(sent.find((each) => each.type === "free_text")).toEqual({
+      type: "free_text",
+      clientMessageId: "11111111-1111-4111-8111-111111111111",
+      text: "לך לשוק",
+    });
+
+    act(() => {
+      socket.emitMessage({
+        type: "event",
+        event: event(1, "narrative_emitted", {
+          actorId: "hero",
+          streamId: "n1",
+          text: NARRATION,
+          source: "deterministic",
+          promptVersion: "v1",
+        }),
+      });
+    });
+
+    expect(screen.getByPlaceholderText(he.freeText.placeholder)).not.toBeDisabled();
+  });
+
+  it("re-enables the FreeTextBar and shows the banner on an error frame -- free_text_not_supported is not in SILENT_CODES, so a typing player actually sees it", async () => {
+    await start();
+    act(() => {
+      socket.emitMessage({ type: "campaign_state", sequence: 0, snapshot: sceneSnapshot() });
+    });
+
+    const input = await screen.findByPlaceholderText(he.freeText.placeholder);
+    await userEvent.type(input, "לך לשוק{Enter}");
+    expect(screen.getByPlaceholderText(he.freeText.placeholder)).toBeDisabled();
+
+    act(() => {
+      socket.emitMessage({
+        type: "error",
+        clientMessageId: "11111111-1111-4111-8111-111111111111",
+        code: "free_text_not_supported",
+        message: "not yet supported",
+      });
+    });
+
+    expect(screen.getByPlaceholderText(he.freeText.placeholder)).not.toBeDisabled();
+    expect(await screen.findByRole("alert")).toBeInTheDocument();
+    expect(screen.getByText(he.errors.free_text_not_supported)).toBeInTheDocument();
   });
 });

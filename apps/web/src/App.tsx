@@ -25,6 +25,7 @@ import { buildTurn } from "./turn/build-turn.js";
 import { ActionBar } from "./components/ActionBar.js";
 import { CombatLog } from "./components/CombatLog.js";
 import { ErrorBanner } from "./components/ErrorBanner.js";
+import { FreeTextBar } from "./components/FreeTextBar.js";
 import { Grid } from "./components/Grid.js";
 import { NarrativePane } from "./components/NarrativePane.js";
 import { he } from "./i18n.js";
@@ -93,6 +94,15 @@ export function App(props: AppProps): JSX.Element {
     () => sessionStorage.getItem(CAMPAIGN_STORAGE_KEY) !== null,
   );
 
+  // The one outstanding `free_text` send, out of combat (§4.7 step 4). Set
+  // when the player submits, and cleared inside the `connect()` effect's
+  // `onFrame` below — a `narrative_emitted` event unconditionally (at most
+  // one send is ever in flight, since the bar disables itself while this is
+  // non-null), or a matching `error`/`rejected` frame (`clientMessageId`
+  // equal to this). `FreeTextBar` stays disabled the whole time, which is
+  // what stops a second send racing the first.
+  const [pendingFreeTextId, setPendingFreeTextId] = useState<string | null>(null);
+
   // `resumeFrom` is read at join time, not captured at connect time — a
   // reconnect must resume from where the client actually got to. Written
   // only from `onFrame` below (the point the sequence actually changes),
@@ -126,20 +136,38 @@ export function App(props: AppProps): JSX.Element {
     runIdRef.current += 1;
     const runId = runIdRef.current;
 
+    // §4.7 step 4: `?world=emberfall` starts a scene campaign instead of a
+    // combat one. Read once per run rather than stored in state — nothing
+    // downstream needs it to be reactive, and re-reading a `URLSearchParams`
+    // on every render would be pointless work for a value that cannot change
+    // without a navigation, which already remounts this effect via `started`.
+    const worldId = new URLSearchParams(window.location.search).get("world");
+
     void (async () => {
       // Reuse a stored id rather than minting a new one: `createCampaign` is
       // only ever called when this mount is genuinely starting a fresh
       // fight, never on a reconnect.
       const stored = sessionStorage.getItem(CAMPAIGN_STORAGE_KEY);
-      const campaignId = stored ?? (await createCampaign(ENCOUNTER_ID));
+      const campaignId =
+        stored ??
+        (
+          await createCampaign(worldId !== null ? { worldId } : { encounterId: ENCOUNTER_ID })
+        ).campaignId;
       if (stored === null) sessionStorage.setItem(CAMPAIGN_STORAGE_KEY, campaignId);
       if (runIdRef.current !== runId) return;
 
-      const fetched = await fetchCatalogue(ENCOUNTER_ID);
-      // The guard that matters: no state update, and no connection, reaches
-      // a run that has since been cancelled or superseded.
-      if (runIdRef.current !== runId) return;
-      setCatalogue(fetched);
+      // A scene campaign has no encounter catalogue to fetch — its board is
+      // the `NarrativePane` + `FreeTextBar`, not `Grid`/`ActionBar`, so
+      // `catalogue` simply stays null for the campaign's whole lifetime. The
+      // render guard below only requires one when an encounter is actually
+      // open.
+      if (worldId === null) {
+        const fetched = await fetchCatalogue(ENCOUNTER_ID);
+        // The guard that matters: no state update, and no connection, reaches
+        // a run that has since been cancelled or superseded.
+        if (runIdRef.current !== runId) return;
+        setCatalogue(fetched);
+      }
 
       connectionRef.current = connect({
         campaignId,
@@ -151,6 +179,21 @@ export function App(props: AppProps): JSX.Element {
             sequenceRef.current = next.sequence;
             return next;
           });
+          // `pendingFreeTextId` tracks the one outstanding free-text send:
+          // cleared unconditionally on `narrative_emitted` (there is at most
+          // one in flight, since the bar is disabled while pending, so no
+          // `clientMessageId` travels on that event to match against), and
+          // on an `error`/`rejected` frame whose `clientMessageId` actually
+          // matches it — an unrelated frame must not re-enable a bar that is
+          // still waiting on its own turn.
+          if (frame.type === "event" && frame.event.type === "narrative_emitted") {
+            setPendingFreeTextId(null);
+          } else if (frame.type === "error" || frame.type === "rejected") {
+            const clientMessageId = frame.clientMessageId;
+            setPendingFreeTextId((current) =>
+              current !== null && current === clientMessageId ? null : current,
+            );
+          }
         },
         onStatus: setStatus,
         resumeFrom: () => (sequenceRef.current === 0 ? undefined : sequenceRef.current),
@@ -274,6 +317,15 @@ export function App(props: AppProps): JSX.Element {
     [send, selectedTile, state.affordances],
   );
 
+  const sendFreeText = useCallback(
+    (text: string) => {
+      const clientMessageId = crypto.randomUUID();
+      setPendingFreeTextId(clientMessageId);
+      send({ type: "free_text", clientMessageId, text });
+    },
+    [send],
+  );
+
   if (!started) {
     return (
       <main>
@@ -290,17 +342,14 @@ export function App(props: AppProps): JSX.Element {
     );
   }
 
-  // One narrowing for the whole board render below: a campaign with no
-  // encounter open has nothing to draw, which is the same "not ready yet" the
-  // pre-snapshot render already covers rather than a state of its own. The
-  // board components downstream take an `EncounterState` and never see the
-  // world, so this is where the two are separated.
-  const encounter = state.snapshot?.encounter ?? null;
-  if (state.snapshot === null || encounter === null || catalogue === null) {
-    // `ErrorBanner` renders here too: an `error` frame that is not
-    // `unknown_campaign` (`internal_error`, `malformed_message`) can arrive
-    // on join, before any `campaign_state` — without this, the player would
-    // be stuck reading the "connecting…" status forever with no explanation.
+  // Shared by every "nothing to draw yet" case below: pre-snapshot, a scene
+  // campaign with no scene genesis (a legacy/pre-§4.7-step-4 campaign), and
+  // a combat campaign whose catalogue hasn't arrived. `ErrorBanner` renders
+  // here too: an `error` frame that is not `unknown_campaign`
+  // (`internal_error`, `malformed_message`) can arrive on join, before any
+  // `campaign_state` — without this, the player would be stuck reading the
+  // "connecting…" status forever with no explanation.
+  function renderNotReady(): JSX.Element {
     return (
       <main>
         <h1>{he.app.title}</h1>
@@ -316,6 +365,47 @@ export function App(props: AppProps): JSX.Element {
       </main>
     );
   }
+
+  if (state.snapshot === null) return renderNotReady();
+
+  // A campaign with no encounter open renders the exploration/social view
+  // instead of the board — §4.7 step 4. `encounter === null && scene !==
+  // null` is the gating condition that matters most in this file: combat
+  // controls (`Grid`/`ActionBar`) exist ONLY in the branch below this one,
+  // which is what keeps the known `not_your_turn`-in-`SILENT_CODES` trap
+  // unreachable — nothing out of combat can ever send a `structured_action`,
+  // so the silent refusal has no sender.
+  const encounter = state.snapshot.encounter;
+  if (encounter === null) {
+    const scene = state.snapshot.world.scene;
+    // No scene either: a legacy campaign, or one whose genesis never ran.
+    // Same "not ready" placeholder combat used to show unconditionally.
+    if (scene === null) return renderNotReady();
+
+    return (
+      <main>
+        <h1>{he.app.title}</h1>
+
+        <ErrorBanner
+          error={state.lastError}
+          rejection={state.lastRejection}
+          onDismiss={dismissError}
+          onReconnect={reconnect}
+        />
+
+        <NarrativePane text={state.narrative} />
+
+        <FreeTextBar
+          disabled={pendingFreeTextId !== null || status !== "open"}
+          onSend={sendFreeText}
+        />
+      </main>
+    );
+  }
+
+  // A catalogue is needed only once an encounter is actually open — a scene
+  // campaign (handled above) never fetches one at all.
+  if (catalogue === null) return renderNotReady();
 
   const conclusion = conclusionOf(encounter);
   const yourTurn = state.affordances !== null && conclusion === "ongoing";

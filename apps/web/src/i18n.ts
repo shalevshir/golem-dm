@@ -19,6 +19,10 @@ export const he = {
     startFight: "התחל קרב",
     reconnect: "התחבר מחדש",
   },
+  freeText: {
+    placeholder: "מה תרצה לעשות?",
+    send: "שלח",
+  },
   actions: {
     dodge: "התחמקות",
     dash: "ריצה",
