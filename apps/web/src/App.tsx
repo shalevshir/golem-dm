@@ -205,7 +205,23 @@ export function App(props: AppProps): JSX.Element {
             );
           }
         },
-        onStatus: setStatus,
+        onStatus: (nextStatus) => {
+          setStatus(nextStatus);
+          // Path (ii) of the pendingFreeTextId latch: a `free_text` send can
+          // be dropped purely client-side (`net/connection.ts`'s `send`,
+          // `readyState !== 1`) when the socket drops mid-turn — no error
+          // frame is ever produced for that, so the `onFrame` clears above
+          // never fire, and the automatic reconnect loop
+          // (`onStatus("reconnecting")` + a timed `open()` retry) never
+          // calls this component's own `reconnect()` either. `status`
+          // leaving `"open"` is the one signal that IS observable here for
+          // that drop, so it is what actually closes this path. Re-enabling
+          // early is deliberate, not a compromise: a turn's frames cannot
+          // arrive on a dead socket regardless, a resend is deduped
+          // server-side on `clientMessageId`, and a permanently disabled
+          // input is strictly worse than one that unlocks a beat early.
+          if (nextStatus !== "open") setPendingFreeTextId(null);
+        },
         resumeFrom: () => (sequenceRef.current === 0 ? undefined : sequenceRef.current),
       });
     })();

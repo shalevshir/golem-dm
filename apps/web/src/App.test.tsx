@@ -944,12 +944,27 @@ describe("App (scene mode, out-of-combat free text)", () => {
     expect(screen.getByPlaceholderText(he.freeText.placeholder)).not.toBeDisabled();
   });
 
-  it("clears a latched pendingFreeTextId on reconnect, so a send dropped by a disconnected socket cannot disable the bar forever", async () => {
-    // net/connection.ts's send() silently no-ops while the socket is not
-    // OPEN. A send made in that window sets pendingFreeTextId for a message
-    // that never reached the wire, so no narrative_emitted or matching
-    // error/rejected will EVER arrive to clear it -- only the reconnect
-    // control (or a full page refresh) can recover.
+  it("clears a stuck pendingFreeTextId on a silent socket drop, so the bar re-enables once reconnected instead of staying disabled forever", async () => {
+    // The path the previous version of this test missed: `net/connection.ts`'s
+    // `send()` silently no-ops while the socket is not OPEN -- a `free_text`
+    // dropped that way produces NO error frame (nothing reaches the server at
+    // all), so the `onFrame`-based clears above never fire. The automatic
+    // reconnect loop that follows a real drop (`onStatus("reconnecting")` +
+    // `net/connection.ts`'s own timed retry) never calls this component's
+    // `reconnect()` callback either -- that is wired only to `ErrorBanner`'s
+    // button, which needs an `internal_error` frame to even render. `status`
+    // leaving `"open"` is the one signal actually reachable from a silent
+    // client-side drop, which is why the fix lives on `onStatus`, not on any
+    // frame handler.
+    //
+    // While disconnected the bar is (correctly) disabled by its OWN
+    // `status !== "open"` clause regardless of `pendingFreeTextId` -- so the
+    // fix is only observable once the socket comes back: without it,
+    // `pendingFreeTextId` would still be the old id after reconnecting, and
+    // the bar would stay disabled even once `status` is `"open"` again. This
+    // drives the full drop -> retry -> reconnect cycle (the same fake-timer
+    // dance this file's very first test uses for `net/connection.ts`'s own
+    // 1s retry) and asserts the bar comes back.
     await start();
     act(() => {
       socket.emitMessage({ type: "campaign_state", sequence: 0, snapshot: sceneSnapshot() });
@@ -959,27 +974,22 @@ describe("App (scene mode, out-of-combat free text)", () => {
     await userEvent.type(input, "לך לשוק{Enter}");
     expect(screen.getByPlaceholderText(he.freeText.placeholder)).toBeDisabled();
 
+    vi.useFakeTimers();
     act(() => {
-      socket.emitMessage({ type: "error", code: "internal_error", message: "boom" });
+      socket.emitClose();
     });
-    const reconnectButton = await screen.findByRole("button", { name: he.app.reconnect });
     act(() => {
-      reconnectButton.click();
+      vi.advanceTimersByTime(1000);
+    });
+    vi.useRealTimers();
+
+    act(() => {
+      socket.emitOpen(); // the reconnected socket's own open event
     });
 
-    // Reconnecting re-runs the whole connect effect, which (in this non-
-    // `?world=` fixture) re-awaits `fetchCatalogue` before it registers the
-    // NEW socket listeners -- so an `emitOpen()` fired too early lands on
-    // the stale listener from the connection that's being torn down, and a
-    // later, genuine `onStatus("connecting")` from the real reconnect
-    // overwrites the status it set. Polling `emitOpen()` on every retry
-    // (rather than stopping at the first one that lands) rides out that
-    // race the same way a real socket's own async connect would.
-    await waitFor(() => {
-      socket.emitOpen();
-      socket.emitMessage({ type: "campaign_state", sequence: 0, snapshot: sceneSnapshot() });
-      expect(screen.getByPlaceholderText(he.freeText.placeholder)).not.toBeDisabled();
-    });
+    expect(screen.getByPlaceholderText(he.freeText.placeholder)).not.toBeDisabled();
+    // No banner either -- this was a silent drop, not a surfaced fault.
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
 });
 
