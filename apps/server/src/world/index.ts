@@ -61,6 +61,28 @@ export class WorldContentError extends Error {
   }
 }
 
+/**
+ * Thrown when a requested world id does not match the one `loadWorld`
+ * produced. Named and `instanceof`-able for the reason `UnknownEncounterError`
+ * is: a caller distinguishing this from a `ZodError` or an I/O failure should
+ * not have to match on message text, and `apps/server`'s HTTP layer maps it
+ * to a 404 the same way.
+ *
+ * `apps/server` authors exactly one world (`data/world/`), so this fires on a
+ * mismatch between a caller-supplied id and that world's own `worldId` — a
+ * campaign genesis or an HTTP request naming a world this deployment does not
+ * have — not on a catalogue miss the way `UnknownEncounterError` is.
+ */
+export class UnknownWorldError extends Error {
+  readonly worldId: string;
+
+  constructor(worldId: string) {
+    super(`Unknown world ${worldId}`);
+    this.name = "UnknownWorldError";
+    this.worldId = worldId;
+  }
+}
+
 /** Which collection an id has to resolve in. */
 type ContentKind = "faction" | "location" | "quest node";
 

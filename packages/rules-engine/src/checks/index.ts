@@ -1,6 +1,22 @@
 // Ability checks, saving throws, DC resolution.
 import { d20 } from "../dice/index.js";
 import type { Rng } from "../dice/index.js";
+import type { CheckDifficulty } from "@ai-dm/schemas";
+
+/**
+ * SRD 5.2.1 "Typical Difficulty Classes" table, verified against the SRD
+ * NotebookLM notebook (see RULES_REFERENCE.md §1 for the row). The intent
+ * router proposes a `CheckDifficulty` label only — this is the engine's sole
+ * authority translating that label to a DC number.
+ */
+export const DC_BY_DIFFICULTY: Record<CheckDifficulty, number> = {
+  very_easy: 5,
+  easy: 10,
+  medium: 15,
+  hard: 20,
+  very_hard: 25,
+  nearly_impossible: 30,
+};
 
 export type RollMode = "normal" | "advantage" | "disadvantage";
 

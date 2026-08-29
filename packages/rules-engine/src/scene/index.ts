@@ -16,6 +16,7 @@ import { pairKey } from "./authored-world.js";
 import type { AuthoredWorld } from "./authored-world.js";
 
 export * from "./authored-world.js";
+export * from "./snapshot.js";
 
 /**
  * What the engine tracks across a campaign. Every function returns a new one;
@@ -119,7 +120,7 @@ export type SceneRejectionReason = "no_such_node" | "no_such_edge" | "preconditi
 
 export interface SceneRejection {
   reason: SceneRejectionReason;
-  /** English detail, for step 4's retry prompt and for an operator's log. */
+  /** English detail: a refused turn's narration, or a corrupt-log throw. */
   message: string;
   /** The node this rejection concerns, when there is one. */
   subjectId?: string;

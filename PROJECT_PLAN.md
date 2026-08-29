@@ -985,6 +985,9 @@ combat with a UI that can still send them.
    plan at
    [`docs/superpowers/plans/2026-08-27-scene-engine.md`](docs/superpowers/plans/2026-08-27-scene-engine.md).
 4. **Intent router, `free_text`, out-of-combat ability checks.**
+   [`docs/superpowers/specs/2026-08-28-intent-router-design.md`](docs/superpowers/specs/2026-08-28-intent-router-design.md),
+   plan at
+   [`docs/superpowers/plans/2026-08-28-intent-router.md`](docs/superpowers/plans/2026-08-28-intent-router.md).
 5. **The combat bridge:** `encounter_started` / `encounter_resolved`,
    deterministic seed derivation.
 6. **Character profiles and NPC affinity projection.**

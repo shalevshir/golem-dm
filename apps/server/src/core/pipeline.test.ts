@@ -1,23 +1,48 @@
 import { describe, expect, it } from "vitest";
-import { validateExecuteTurn } from "@ai-dm/rules-engine";
-import type { NarrativeFinish, NarrativePort, TacticalAgent } from "@ai-dm/agents";
+import {
+  abilityCheck,
+  DC_BY_DIFFICULTY,
+  seeded,
+  sceneStateFrom,
+  snapshotOf,
+  traverseEdge,
+  validateExecuteTurn,
+} from "@ai-dm/rules-engine";
+import type { SceneState, SceneTransition } from "@ai-dm/rules-engine";
+import type {
+  AdapterError,
+  IntentAgent,
+  IntentResult,
+  NarrativeFinish,
+  NarrativePort,
+  SceneNarrationInput,
+  SceneNarrativePort,
+  TacticalAgent,
+} from "@ai-dm/agents";
 import {
   createAgentRuntime,
   createDeterministicNarrative,
+  createDeterministicSceneNarrative,
   createFakePort,
   createHebrewNarrative,
   createTacticalAgent,
   DEFAULT_MODEL_ROUTING,
+  INTENT_PROMPT_VERSION,
   NARRATIVE_PROMPT_VERSION,
+  SCENE_PROMPT_VERSION,
 } from "@ai-dm/agents";
 import { createInMemoryEventStore, EventStoreUnavailableError } from "@ai-dm/memory";
 import type { EventStore } from "@ai-dm/memory";
-import { DiceRolledPayload, NarrativeEmittedPayload } from "@ai-dm/schemas";
+import { CheckRolledPayload, DiceRolledPayload, NarrativeEmittedPayload } from "@ai-dm/schemas";
 import type {
+  AbilityKey,
   ClientMessage,
   ExecuteTurn,
   GameEvent,
+  IntentClassification,
+  SceneSnapshot,
   ServerFrame,
+  Skill,
   CampaignState,
 } from "@ai-dm/schemas";
 import { SNAPSHOT_EVERY, handleCommand } from "./pipeline.js";
@@ -28,7 +53,20 @@ import type {
   TurnPorts,
 } from "./pipeline.js";
 import { createCampaign, encounterOf, loadCampaign, startEncounter } from "./campaign.js";
-import type { Campaign } from "./campaign.js";
+import type { Campaign, SceneStatics } from "./campaign.js";
+import { loadCharacter } from "../encounters/index.js";
+import { loadGear } from "../encounters/gear.js";
+import { loadWorld } from "../world/index.js";
+
+/** `main.ts`'s own `skillAbilities` construction, mirrored here so a check
+ *  test can name a real skill and get its real governing ability rather than
+ *  an empty map (`portsWith`'s default, adequate for every test that never
+ *  proposes a `check` with a skill). */
+function skillAbilities(): ReadonlyMap<Skill, AbilityKey> {
+  return new Map(
+    Array.from(loadGear().skills, ([skill, definition]) => [skill, definition.ability] as const),
+  );
+}
 
 function uuids(): () => string {
   let n = 0;
@@ -75,16 +113,37 @@ function defaultTactical(): TacticalAgent {
   };
 }
 
+/**
+ * `ports.intent.classify` should never be reached by a combat test — every
+ * `free_text` test below supplies its own `intent`. Throwing rather than
+ * resolving is what makes an accidental call to this default loud instead of
+ * silently returning a plausible-looking classification.
+ */
+function unreachableIntent(): IntentAgent {
+  return {
+    classify() {
+      throw new Error("ports.intent.classify was not expected to be called in this test");
+    },
+  };
+}
+
 function portsWith(store: EventStore, tactical: TacticalAgent = defaultTactical()): TurnPorts {
   return {
     store,
     tactical,
     narrative: createDeterministicNarrative(),
+    intent: unreachableIntent(),
+    // Mirrors `narrative` above: the deterministic renderer stands in as the
+    // "primary" port for every test that does not care about the scene
+    // narration ladder specifically, exactly the way `createDeterministicNarrative()`
+    // already does for combat.
+    sceneNarrative: createDeterministicSceneNarrative(),
     clock: () => "2026-08-19T10:00:00.000Z",
     uuid: uuids(),
     seedFor: (rootSeed, sequence) => rootSeed * 1000 + sequence,
     turnTimeoutMs: 10_000,
     conditionNamesHebrew: new Map([["prone", "שרוע"]]),
+    skillAbilities: new Map(),
   };
 }
 
@@ -120,6 +179,137 @@ async function encounterlessCampaign(store: EventStore): Promise<Campaign> {
     clock: () => "2026-08-19T10:00:00.000Z",
     uuid: uuids(),
   });
+}
+
+/**
+ * The real `emberfall` world and the real `hero` character — mirrors
+ * `campaign.test.ts`'s `heroSceneStatics`. Real content rather than a
+ * synthetic fixture, for the same "real stat blocks" reasoning `runOneTurn`'s
+ * doc comment gives for combat: the `free_text` tests below read Hebrew
+ * fields (`nameHebrew`, NPC names) off it, and a Latin placeholder would put
+ * the wrong kind of character into a Hebrew-only assertion for the wrong
+ * reason.
+ */
+function heroSceneStatics(): SceneStatics {
+  return { authored: loadWorld(), character: loadCharacter("hero") };
+}
+
+/**
+ * A scene campaign (no board, `world.scene` set from `emberfall`'s genesis).
+ * `overrides` replaces fields of the starting `SceneSnapshot` directly —
+ * `arrival`, the authored starting node, has no effects and a single-hop
+ * traversal from it can never show a faction/day delta, so several tests
+ * below need to start further into the arc than a real playthrough would put
+ * them without chaining several `free_text` turns just to get there.
+ */
+async function sceneCampaign(
+  store: EventStore,
+  overrides?: Partial<SceneSnapshot>,
+): Promise<Campaign> {
+  const campaign = await createCampaign({
+    campaignId: "s1",
+    rootSeed: 42,
+    store,
+    clock: () => "2026-08-19T10:00:00.000Z",
+    uuid: uuids(),
+    scene: heroSceneStatics(),
+  });
+  if (overrides === undefined) return campaign;
+
+  const { scene } = campaign.state.world;
+  if (scene === null) throw new Error("sceneCampaign: genesis produced no scene");
+  campaign.state = {
+    ...campaign.state,
+    world: { ...campaign.state.world, scene: { ...scene, ...overrides } },
+  };
+  return campaign;
+}
+
+/** A classifier double that resolves to exactly this classification. */
+function classifiedAs(classification: IntentClassification): IntentAgent {
+  return {
+    classify() {
+      return Promise.resolve({
+        ok: true,
+        classification,
+        provider: "test-provider",
+        modelId: "test-model",
+        usage: [{ promptTokens: 10, completionTokens: 5, totalTokens: 15 }],
+      } satisfies IntentResult);
+    },
+  };
+}
+
+/** A classifier double that resolves to exactly this failure. */
+function intentFailingWith(error: AdapterError): IntentAgent {
+  return {
+    classify() {
+      return Promise.resolve({ ok: false, error, usage: [] } satisfies IntentResult);
+    },
+  };
+}
+
+/** A scene narrative port that yields exactly these chunks, mirroring `scriptedNarrative`. */
+function scriptedSceneNarrative(chunks: string[]): SceneNarrativePort {
+  return {
+    stream(): AsyncIterable<string> {
+      return {
+        [Symbol.asyncIterator](): AsyncIterator<string> {
+          const iterator = chunks[Symbol.iterator]();
+          return {
+            next(): Promise<IteratorResult<string>> {
+              return Promise.resolve(iterator.next());
+            },
+          };
+        },
+      };
+    },
+  };
+}
+
+/**
+ * A scene narrative port that records every `input` it is given (so a test
+ * can inspect the `SceneBeat` the pipeline actually built) and otherwise
+ * behaves like `scriptedSceneNarrative([])` — an empty stream, the fallback
+ * rung the deterministic renderer picks up from.
+ */
+function recordingSceneNarrative(sink: SceneNarrationInput[]): SceneNarrativePort {
+  return {
+    stream(input: SceneNarrationInput): AsyncIterable<string> {
+      sink.push(input);
+      return scriptedSceneNarrative([]).stream(input);
+    },
+  };
+}
+
+/** Sorts a `SceneSnapshot`'s array fields the same way `snapshotOf` promises to emit them —
+ *  mirrors `packages/rules-engine/src/scene/snapshot.test.ts`'s own `sorted` helper. */
+function sortedSnapshot(snapshot: SceneSnapshot): SceneSnapshot {
+  return {
+    ...snapshot,
+    completedNodeIds: [...snapshot.completedNodeIds].sort(),
+    relations: [...snapshot.relations].sort(
+      (a, b) => a.factionA.localeCompare(b.factionA) || a.factionB.localeCompare(b.factionB),
+    ),
+  };
+}
+
+/** The state from a transition, or a loud failure — a broken fixture should fail loudly. */
+function stateOf(transition: SceneTransition): SceneState {
+  if (!transition.valid) {
+    throw new Error(
+      `test fixture expected a valid transition: ${transition.rejections
+        .map((each) => each.reason)
+        .join(", ")}`,
+    );
+  }
+  return transition.state;
+}
+
+function eventTypesOf(frames: ServerFrame[]): string[] {
+  return frames
+    .filter((each): each is Extract<ServerFrame, { type: "event" }> => each.type === "event")
+    .map((each) => each.event.type);
 }
 
 // `clientMessageId` defaults to "c1" for every existing call site; the
@@ -512,6 +702,687 @@ describe("handleCommand — free text", () => {
     );
     expect(await store.readSince("s1", GENESIS_SEQUENCE)).toEqual([]);
   });
+
+  // (b) Guard 2. `freshCampaign` also has no scene, so this additionally
+  // pins that guard 2 (open encounter) is checked BEFORE guard 3 (no
+  // scene) — the two existing tests above only prove `code`, not which
+  // guard produced it or the exact during-combat wording Decision 6 names.
+  it("gives the during-combat message when an encounter is open", async () => {
+    const store = createInMemoryEventStore();
+    const campaign = await freshCampaign(store);
+    const frames = await drain(
+      handleCommand(
+        campaign,
+        { type: "free_text", clientMessageId: "c1", text: "I look around" },
+        portsWith(store),
+      ),
+    );
+    expect(frames).toEqual([
+      {
+        type: "error",
+        clientMessageId: "c1",
+        code: "free_text_not_supported",
+        message: "Use the on-screen actions during combat.",
+      },
+    ]);
+  });
+
+  // (c) Guard 3, on a campaign with neither a board nor a scene — the legacy
+  // shape that predates §4.7 step 4. The message text is unchanged from
+  // before this task.
+  it("keeps the legacy message for a combat-only campaign with no board open", async () => {
+    const store = createInMemoryEventStore();
+    const campaign = await encounterlessCampaign(store);
+    const frames = await drain(
+      handleCommand(
+        campaign,
+        { type: "free_text", clientMessageId: "c1", text: "I look around" },
+        portsWith(store),
+      ),
+    );
+    expect(frames).toEqual([
+      {
+        type: "error",
+        clientMessageId: "c1",
+        code: "free_text_not_supported",
+        message: "Free text is not handled yet. Use the on-screen actions.",
+      },
+    ]);
+  });
+
+  // (a) Guard 1. The second call's `intent` double throws if it is ever
+  // reached, so a regression that let a duplicate fall through to the
+  // classifier fails loudly rather than merely producing extra frames.
+  it("drops a duplicate clientMessageId with zero frames, without reaching the classifier", async () => {
+    const store = createInMemoryEventStore();
+    const campaign = await sceneCampaign(store);
+    const firstPorts: TurnPorts = {
+      ...portsWith(store),
+      intent: classifiedAs({ category: "exploration", targetNodeId: null }),
+    };
+    await drain(
+      handleCommand(
+        campaign,
+        { type: "free_text", clientMessageId: "c1", text: "look around" },
+        firstPorts,
+      ),
+    );
+
+    const secondPorts: TurnPorts = { ...portsWith(store), intent: unreachableIntent() };
+    const frames = await drain(
+      handleCommand(
+        campaign,
+        { type: "free_text", clientMessageId: "c1", text: "look around again" },
+        secondPorts,
+      ),
+    );
+    expect(frames).toEqual([]);
+  });
+
+  // (d) A classifier adapter failure: the message WAS received
+  // (`player_input` is already in the log by the time `classify` runs), but
+  // nothing about the scene moves.
+  it("appends player_input then an internal_error frame when the classifier fails, and touches nothing else", async () => {
+    const store = createInMemoryEventStore();
+    const campaign = await sceneCampaign(store);
+    const sceneBefore = campaign.state.world.scene;
+
+    const ports: TurnPorts = {
+      ...portsWith(store),
+      intent: intentFailingWith({ code: "provider_error", message: "the model timed out" }),
+    };
+    const frames = await drain(
+      handleCommand(
+        campaign,
+        { type: "free_text", clientMessageId: "c1", text: "look around" },
+        ports,
+      ),
+    );
+
+    expect(eventTypesOf(frames)).toEqual(["player_input"]);
+    expect(frames.some((each) => each.type === "error" && each.code === "internal_error")).toBe(
+      true,
+    );
+    expect(campaign.state.world.scene).toEqual(sceneBefore);
+  });
+
+  // (e) An open edge whose "from" node has a real effect: `guild-offer`
+  // shifts ashen-guild/river-wardens from `cold` (the authored baseline) to
+  // `hostile` on completion. `sceneNarrative` yields nothing, deliberately —
+  // exercising the fallback rung of the same ladder combat narration uses.
+  it("traverses an open edge: completes the from-node, applies its delta, enters the target, narrates", async () => {
+    const store = createInMemoryEventStore();
+    const before: SceneSnapshot = {
+      worldId: "emberfall",
+      currentNodeId: "guild-offer",
+      completedNodeIds: ["arrival"],
+      relations: [],
+      day: 1,
+    };
+    const campaign = await sceneCampaign(store, before);
+    const ports: TurnPorts = {
+      ...portsWith(store),
+      intent: classifiedAs({ category: "exploration", targetNodeId: "the-weir" }),
+      sceneNarrative: scriptedSceneNarrative([]),
+    };
+
+    const frames = await drain(
+      handleCommand(
+        campaign,
+        { type: "free_text", clientMessageId: "c1", text: "let's see the weir" },
+        ports,
+      ),
+    );
+
+    expect(eventTypesOf(frames)).toEqual([
+      "player_input",
+      "intent_classified",
+      "quest_node_completed",
+      "world_delta_applied",
+      "quest_node_entered",
+      "narrative_emitted",
+    ]);
+
+    // The two payloads the brief specifies field-by-field: `player_input`
+    // (the newly-sanctioned Hebrew `text` field, and the actor it came
+    // from) and `intent_classified` (the classification, provider/model
+    // the fixture stamped, and `INTENT_PROMPT_VERSION` — never
+    // `NARRATIVE_PROMPT_VERSION`, since the two are easy to swap and
+    // `reduce` validates neither payload, so nothing else here would catch
+    // it).
+    const eventOfType = (type: string): Extract<ServerFrame, { type: "event" }> | undefined =>
+      frames.find(
+        (each): each is Extract<ServerFrame, { type: "event" }> =>
+          each.type === "event" && each.event.type === type,
+      );
+
+    expect(eventOfType("player_input")?.event.payload).toMatchObject({
+      actorId: heroSceneStatics().character.characterId,
+      text: "let's see the weir",
+    });
+    expect(eventOfType("intent_classified")?.event.payload).toMatchObject({
+      classification: { category: "exploration", targetNodeId: "the-weir" },
+      provider: "test-provider",
+      modelId: "test-model",
+      promptVersion: INTENT_PROMPT_VERSION,
+    });
+
+    const deltaEvent = eventOfType("world_delta_applied");
+    expect(deltaEvent?.event.payload).toMatchObject({
+      relations: [{ factionA: "ashen-guild", factionB: "river-wardens", band: "hostile" }],
+    });
+
+    const { tokens, emitted } = narrativeOf(frames);
+    expect(emitted.text).toBe(tokens.join(""));
+    expect(emitted.source).toBe("deterministic");
+    expect(emitted.promptVersion).toBe(SCENE_PROMPT_VERSION);
+
+    // The engine's own computation, independently reached — not re-derived
+    // from the payload above — is the oracle `campaign.state.world.scene`
+    // is checked against. `snapshotOf` emits sorted arrays; `reduce` appends
+    // in event order, so both sides are sorted before comparing (Task 4's
+    // round-trip test does the same).
+    const expected = snapshotOf(
+      stateOf(traverseEdge(loadWorld(), sceneStateFrom(before), "the-weir")),
+      "emberfall",
+    );
+    const { scene } = campaign.state.world;
+    expect(scene).not.toBeNull();
+    if (scene === null) throw new Error("unreachable — asserted above");
+    expect(sortedSnapshot(scene)).toEqual(sortedSnapshot(expected));
+  });
+
+  // Coordinator ruling on Task 9's review, finding 3: this turn's scene
+  // group (`quest_node_completed` + `world_delta_applied` +
+  // `quest_node_entered`) must land in ONE `store.append` call, not three —
+  // `EventStore.append`'s own contract ("Atomic over the batch... either
+  // all of them land or none", `packages/memory/src/event-store/port.ts`)
+  // is what closes the half-applied-traversal hazard, and this is what
+  // proves the pipeline actually spends that atomicity on the group rather
+  // than three single-event appends that could fail between each other.
+  it("appends the scene-event group as one atomic append, not one per event", async () => {
+    const store = createInMemoryEventStore();
+    const before: SceneSnapshot = {
+      worldId: "emberfall",
+      currentNodeId: "guild-offer",
+      completedNodeIds: ["arrival"],
+      relations: [],
+      day: 1,
+    };
+    const campaign = await sceneCampaign(store, before);
+    const appendBatchSizes: number[] = [];
+    const counting: EventStore = {
+      ...store,
+      append: (campaignId, events) => {
+        appendBatchSizes.push(events.length);
+        return store.append(campaignId, events);
+      },
+    };
+    const ports: TurnPorts = {
+      ...portsWith(counting),
+      intent: classifiedAs({ category: "exploration", targetNodeId: "the-weir" }),
+    };
+
+    await drain(
+      handleCommand(
+        campaign,
+        { type: "free_text", clientMessageId: "c1", text: "let's see the weir" },
+        ports,
+      ),
+    );
+
+    // player_input, intent_classified, the 3-event scene group, narrative_emitted.
+    expect(appendBatchSizes).toEqual([1, 1, 3, 1]);
+  });
+
+  // (f) A closed edge: `reckoning` requires the faction relation to be no
+  // worse than `hostile`, and this fixture starts it at `war`. Refusal is
+  // narration only — no quest/delta event, and `world.scene` is untouched.
+  it("refuses a closed edge with narration only, leaving the scene untouched", async () => {
+    const store = createInMemoryEventStore();
+    const before: SceneSnapshot = {
+      worldId: "emberfall",
+      currentNodeId: "the-weir",
+      completedNodeIds: ["arrival", "guild-offer"],
+      relations: [{ factionA: "ashen-guild", factionB: "river-wardens", band: "war" }],
+      day: 1,
+    };
+    const campaign = await sceneCampaign(store, before);
+    const ports: TurnPorts = {
+      ...portsWith(store),
+      intent: classifiedAs({ category: "exploration", targetNodeId: "reckoning" }),
+    };
+
+    const frames = await drain(
+      handleCommand(
+        campaign,
+        { type: "free_text", clientMessageId: "c1", text: "put them in one room" },
+        ports,
+      ),
+    );
+
+    expect(eventTypesOf(frames)).toEqual(["player_input", "intent_classified", "narrative_emitted"]);
+    expect(campaign.state.world.scene).toEqual(before);
+  });
+
+  // Coordinator ruling on Task 9's review, finding 2: `targetNodeId: null`
+  // means "conclude the current node" (Decision 1) — the hook a TERMINAL
+  // node needs — never "no edge matched". `guild-offer` has one edge (to
+  // `the-weir`) and a real effect; a model reading its own prompt's old
+  // "or null if none of the edges clearly match" wording could propose
+  // `null` here for an utterance that requested no movement at all. This
+  // must refuse exactly like a bad edge id: no quest/delta event, and
+  // `world.scene` untouched — completing this node would shift a faction
+  // band the player never asked to move, and `completed()`'s own
+  // idempotency means no later turn could ever re-apply it.
+  it("refuses targetNodeId: null on a non-terminal node instead of completing it", async () => {
+    const store = createInMemoryEventStore();
+    const before: SceneSnapshot = {
+      worldId: "emberfall",
+      currentNodeId: "guild-offer",
+      completedNodeIds: ["arrival"],
+      relations: [],
+      day: 1,
+    };
+    const campaign = await sceneCampaign(store, before);
+    const ports: TurnPorts = {
+      ...portsWith(store),
+      intent: classifiedAs({ category: "exploration", targetNodeId: null }),
+    };
+
+    const frames = await drain(
+      handleCommand(
+        campaign,
+        { type: "free_text", clientMessageId: "c1", text: "I look at the sky" },
+        ports,
+      ),
+    );
+
+    expect(eventTypesOf(frames)).toEqual(["player_input", "intent_classified", "narrative_emitted"]);
+    expect(campaign.state.world.scene).toEqual(before);
+  });
+
+  // (g)/(h): a terminal node completed in place. `reckoning` has no edges,
+  // so `targetNodeId: null` runs `completeCurrentNode`, not `traverseEdge`.
+  it("completes a terminal node with no traversal: quest_node_completed, world_delta_applied, no quest_node_entered", async () => {
+    const store = createInMemoryEventStore();
+    const before: SceneSnapshot = {
+      worldId: "emberfall",
+      currentNodeId: "reckoning",
+      completedNodeIds: ["arrival", "guild-offer", "the-weir"],
+      relations: [{ factionA: "ashen-guild", factionB: "river-wardens", band: "hostile" }],
+      day: 1,
+    };
+    const campaign = await sceneCampaign(store, before);
+    const ports: TurnPorts = {
+      ...portsWith(store),
+      intent: classifiedAs({ category: "exploration", targetNodeId: null }),
+    };
+
+    const frames = await drain(
+      handleCommand(
+        campaign,
+        { type: "free_text", clientMessageId: "c1", text: "let's settle this" },
+        ports,
+      ),
+    );
+
+    expect(eventTypesOf(frames)).toEqual([
+      "player_input",
+      "intent_classified",
+      "quest_node_completed",
+      "world_delta_applied",
+      "narrative_emitted",
+    ]);
+  });
+
+  // Whole-branch review finding 2: `completeCurrentNode` with no traversal
+  // is not an arrival — the player never moved. Narrating it as `arrived`
+  // would tell the player they just reached a place they were already
+  // standing in. Asserted on the actual `SceneBeat` the pipeline builds,
+  // not just the event list, which is identical for both beat kinds.
+  it("narrates a terminal node completed in place as concluded, not arrived", async () => {
+    const store = createInMemoryEventStore();
+    const before: SceneSnapshot = {
+      worldId: "emberfall",
+      currentNodeId: "reckoning",
+      completedNodeIds: ["arrival", "guild-offer", "the-weir"],
+      relations: [{ factionA: "ashen-guild", factionB: "river-wardens", band: "hostile" }],
+      day: 1,
+    };
+    const campaign = await sceneCampaign(store, before);
+    const seen: SceneNarrationInput[] = [];
+    const ports: TurnPorts = {
+      ...portsWith(store),
+      intent: classifiedAs({ category: "exploration", targetNodeId: null }),
+      sceneNarrative: recordingSceneNarrative(seen),
+    };
+
+    await drain(
+      handleCommand(
+        campaign,
+        { type: "free_text", clientMessageId: "c1", text: "let's settle this" },
+        ports,
+      ),
+    );
+
+    expect(seen.map((each) => each.beat)).toEqual([{ kind: "concluded", locationNameHebrew: "אמברפול" }]);
+  });
+
+  it("does not re-apply a world delta when re-completing an already-completed node", async () => {
+    const store = createInMemoryEventStore();
+    const before: SceneSnapshot = {
+      worldId: "emberfall",
+      currentNodeId: "reckoning",
+      completedNodeIds: ["arrival", "guild-offer", "the-weir"],
+      relations: [{ factionA: "ashen-guild", factionB: "river-wardens", band: "hostile" }],
+      day: 1,
+    };
+    const campaign = await sceneCampaign(store, before);
+    const ports: TurnPorts = {
+      ...portsWith(store),
+      intent: classifiedAs({ category: "exploration", targetNodeId: null }),
+    };
+
+    await drain(
+      handleCommand(
+        campaign,
+        { type: "free_text", clientMessageId: "c1", text: "let's settle this" },
+        ports,
+      ),
+    );
+
+    const frames = await drain(
+      handleCommand(
+        campaign,
+        { type: "free_text", clientMessageId: "c2", text: "let's settle this again" },
+        ports,
+      ),
+    );
+
+    // The exact list, not merely "missing world_delta_applied": a
+    // `free_text` implementation that refused everything (or one that
+    // dropped this second call entirely) would also produce no
+    // `world_delta_applied` and vacuously pass a weaker assertion.
+    // `quest_node_completed` still fires — `reduce`'s fold of a repeat is
+    // idempotent (Decision 4) — only `world_delta_applied` is suppressed,
+    // since `completeCurrentNode` on an already-completed node returns the
+    // SAME `SceneState`, unchanged, and `diffScene` of a state against
+    // itself is empty.
+    expect(eventTypesOf(frames)).toEqual([
+      "player_input",
+      "intent_classified",
+      "quest_node_completed",
+      "narrative_emitted",
+    ]);
+  });
+});
+
+/** Locates one `event` frame of the given `type`, or throws — every test
+ *  below needs exactly one and a missing one is a broken fixture, not a
+ *  legitimate "not found" case. */
+function eventFrameOf(
+  frames: readonly ServerFrame[],
+  type: string,
+): Extract<ServerFrame, { type: "event" }> {
+  const found = frames.find(
+    (each): each is Extract<ServerFrame, { type: "event" }> =>
+      each.type === "event" && each.event.type === type,
+  );
+  if (found === undefined) throw new Error(`no "${type}" event frame`);
+  return found;
+}
+
+describe("handleCommand — free text: check category", () => {
+  // (a) Determinism is the assertion: the payload's `naturalRoll`/`total`/
+  // `success` are checked against `abilityCheck` called in the test with the
+  // SAME seeded rng, not against a hardcoded die value — the die value is an
+  // implementation detail of `seeded`/`abilityCheck`, the reproducibility is
+  // the contract.
+  it("rolls a named skill check off the seeded rng, at the DC the difficulty names, with the skill's own modifier", async () => {
+    const store = createInMemoryEventStore();
+    const campaign = await sceneCampaign(store);
+    const ports: TurnPorts = {
+      ...portsWith(store),
+      intent: classifiedAs({
+        category: "check",
+        ability: "str",
+        skill: "athletics",
+        difficulty: "medium",
+      }),
+      skillAbilities: skillAbilities(),
+    };
+
+    const frames = await drain(
+      handleCommand(
+        campaign,
+        { type: "free_text", clientMessageId: "c1", text: "I try to climb the ridge" },
+        ports,
+      ),
+    );
+
+    expect(eventTypesOf(frames)).toEqual([
+      "player_input",
+      "intent_classified",
+      "check_rolled",
+      "narrative_emitted",
+    ]);
+
+    const payload = CheckRolledPayload.parse(eventFrameOf(frames, "check_rolled").event.payload);
+    const hero = loadCharacter("hero");
+    // `DerivedCharacter.skills` is a `Partial<Record<Skill, number>>` at the
+    // type level (see `pipeline.ts`'s `checkModifierFor`); the fixture is
+    // known to fill every skill, so a miss here is a broken fixture, not a
+    // legitimate "no modifier" case.
+    const athleticsModifier = hero.skills.athletics;
+    if (athleticsModifier === undefined) throw new Error("fixture: hero has no athletics skill");
+
+    expect(payload.dc).toBe(DC_BY_DIFFICULTY.medium);
+    expect(payload.modifier).toBe(athleticsModifier);
+
+    // `sequence-of-check_rolled`: a scene-only campaign's genesis is ONE
+    // event (sequence 0, `campaign_started` — no board to open), so this
+    // turn's own player_input/intent_classified/check_rolled land at
+    // 1/2/3 — the same `campaign.nextSequence` `pipeline.ts` reads right
+    // before computing this event's seed.
+    const expectedSeed = 42 * 1000 + 3;
+    expect(payload.seed).toBe(expectedSeed);
+
+    const expected = abilityCheck(
+      { abilityScore: 10, situationalBonus: athleticsModifier, dc: DC_BY_DIFFICULTY.medium },
+      seeded(expectedSeed),
+    );
+    expect(payload.naturalRoll).toBe(expected.naturalRoll);
+    expect(payload.total).toBe(expected.total);
+    expect(payload.success).toBe(expected.success);
+  });
+
+  // (b) No skill named: the modifier comes from `abilityModifiers[ability]`
+  // rather than any skill entry.
+  it("uses abilityModifiers[ability] for a skill-less check", async () => {
+    const store = createInMemoryEventStore();
+    const campaign = await sceneCampaign(store);
+    const ports: TurnPorts = {
+      ...portsWith(store),
+      intent: classifiedAs({ category: "check", ability: "wis", difficulty: "easy" }),
+    };
+
+    const frames = await drain(
+      handleCommand(
+        campaign,
+        { type: "free_text", clientMessageId: "c1", text: "I listen at the door" },
+        ports,
+      ),
+    );
+
+    const payload = CheckRolledPayload.parse(eventFrameOf(frames, "check_rolled").event.payload);
+    expect(payload.skill).toBeUndefined();
+    expect(payload.ability).toBe("wis");
+    expect(payload.modifier).toBe(loadCharacter("hero").abilityModifiers.wis);
+  });
+
+  // (c) The model chooses a word; the engine owns every number (design spec
+  // Decision 5): once a skill is named, the payload's `ability` is the SRD
+  // mapping's (`skillAbilities`, "athletics" -> "str"), even though this
+  // fixture's mocked classifier proposes the mismatched "int".
+  it("uses the SRD skill-to-ability mapping, not the model's mismatched ability, when a skill is named", async () => {
+    const store = createInMemoryEventStore();
+    const campaign = await sceneCampaign(store);
+    const ports: TurnPorts = {
+      ...portsWith(store),
+      intent: classifiedAs({
+        category: "check",
+        ability: "int",
+        skill: "athletics",
+        difficulty: "medium",
+      }),
+      skillAbilities: skillAbilities(),
+    };
+
+    const frames = await drain(
+      handleCommand(
+        campaign,
+        { type: "free_text", clientMessageId: "c1", text: "I try to climb the ridge" },
+        ports,
+      ),
+    );
+
+    const payload = CheckRolledPayload.parse(eventFrameOf(frames, "check_rolled").event.payload);
+    expect(payload.ability).toBe("str");
+    expect(payload.modifier).toBe(loadCharacter("hero").skills.athletics);
+  });
+
+  // (d) No state change from a check (design spec Non-goals: a check informs
+  // narration and the log, it does not gate traversal).
+  it("leaves the scene untouched", async () => {
+    const store = createInMemoryEventStore();
+    const campaign = await sceneCampaign(store);
+    const sceneBefore = campaign.state.world.scene;
+    const ports: TurnPorts = {
+      ...portsWith(store),
+      intent: classifiedAs({ category: "check", ability: "str", difficulty: "medium" }),
+    };
+
+    await drain(
+      handleCommand(
+        campaign,
+        { type: "free_text", clientMessageId: "c1", text: "I try to force the door" },
+        ports,
+      ),
+    );
+
+    expect(campaign.state.world.scene).toEqual(sceneBefore);
+  });
+});
+
+describe("handleCommand — free text: narrate-only categories", () => {
+  it.each(["social", "ooc"] as const)(
+    "routes %s to player_input + intent_classified + narration, and nothing else",
+    async (category) => {
+      const store = createInMemoryEventStore();
+      const campaign = await sceneCampaign(store);
+      const ports: TurnPorts = { ...portsWith(store), intent: classifiedAs({ category }) };
+
+      const frames = await drain(
+        handleCommand(
+          campaign,
+          { type: "free_text", clientMessageId: "c1", text: "hello there" },
+          ports,
+        ),
+      );
+
+      expect(eventTypesOf(frames)).toEqual(["player_input", "intent_classified", "narrative_emitted"]);
+    },
+  );
+
+  it("routes combat to a grounded reply beat rather than starting a fight, narration only", async () => {
+    const store = createInMemoryEventStore();
+    const campaign = await sceneCampaign(store);
+    const seen: SceneNarrationInput[] = [];
+    const ports: TurnPorts = {
+      ...portsWith(store),
+      intent: classifiedAs({ category: "combat" }),
+      sceneNarrative: recordingSceneNarrative(seen),
+    };
+
+    const frames = await drain(
+      handleCommand(
+        campaign,
+        { type: "free_text", clientMessageId: "c1", text: "I draw my sword" },
+        ports,
+      ),
+    );
+
+    expect(eventTypesOf(frames)).toEqual(["player_input", "intent_classified", "narrative_emitted"]);
+    expect(seen.map((each) => each.beat)).toEqual([{ kind: "reply", category: "combat" }]);
+  });
+});
+
+// Invariant 4 ("schemas define everything once") only holds if these `.parse`
+// calls actually reject a bad payload rather than being decoration around an
+// object literal that was already correct by construction. Each test here
+// injects a shape that could only ever reach the pipeline through a port
+// (the classifier, or the SRD skill/ability data) — never through normal,
+// correctly-typed control flow — which is exactly why the schema, not the
+// type system, has to be the thing that catches it.
+describe("handleCommand — free text: schema parsing at emit sites", () => {
+  it("rejects an exploration classification whose targetNodeId isn't a valid ContentId, via IntentClassifiedPayload", async () => {
+    const store = createInMemoryEventStore();
+    const campaign = await sceneCampaign(store);
+    // Structurally a valid "exploration" classification — it reaches the
+    // "exploration" case, not `assertNever` — but `targetNodeId` fails
+    // `ContentId`'s regex (lowercase kebab-case only). No real classifier
+    // can produce this (Decision 5: `generateStructured` already
+    // schema-validates), so this stands in for the port contract being
+    // violated some other way. Deliberately NOT a bad `category`: every
+    // category outside the five real ones falls through to `assertNever`
+    // and throws regardless of whether `.parse` runs, which would prove
+    // nothing about the parse specifically. And if this reached
+    // `traverseEdge` unchecked, it would just be "no such edge" — a
+    // graceful, narrated refusal, not a throw — which is what confirms the
+    // throw here comes from `.parse`, not from engine validation downstream.
+    const bogus: IntentClassification = {
+      category: "exploration",
+      targetNodeId: "NOT-A-VALID-ID!!",
+    };
+    const ports: TurnPorts = { ...portsWith(store), intent: classifiedAs(bogus) };
+
+    await expect(
+      drain(handleCommand(campaign, { type: "free_text", clientMessageId: "c1", text: "hello" }, ports)),
+    ).rejects.toThrow();
+  });
+
+  it("rejects a check whose resolved ability isn't a real AbilityKey, via CheckRolledPayload", async () => {
+    const store = createInMemoryEventStore();
+    const campaign = await sceneCampaign(store);
+    // The classification itself is entirely valid — it passes
+    // `IntentClassifiedPayload.parse` cleanly — so this pins `.parse` at the
+    // check_rolled site specifically, not a repeat of the test above. The
+    // bad value enters through `skillAbilities` (a port this file fully
+    // controls), which `checkAbilityFor` trusts for a named skill's
+    // governing ability — the one field `CheckRolledPayload` sees that
+    // never passed through `IntentClassification`'s own `AbilityKey` check.
+    const ports: TurnPorts = {
+      ...portsWith(store),
+      intent: classifiedAs({
+        category: "check",
+        ability: "str",
+        skill: "athletics",
+        difficulty: "medium",
+      }),
+      skillAbilities: new Map([["athletics", "made-up-ability" as AbilityKey]]),
+    };
+
+    await expect(
+      drain(
+        handleCommand(
+          campaign,
+          { type: "free_text", clientMessageId: "c1", text: "I try to climb the ridge" },
+          ports,
+        ),
+      ),
+    ).rejects.toThrow();
+  });
 });
 
 describe("handleCommand — structured action", () => {
@@ -707,18 +1578,19 @@ describe("handleCommand — structured action", () => {
     expect(types).toContain("action_rejected");
   });
 
-  // The bracket refusal (spec §Wiring). Not reachable through any production
-  // path today, though: `POST /campaigns` always starts an encounter before
-  // handing a campaign back (`http.ts`'s `create`), and `resolveEncounter` —
-  // the only thing that could close a bracket and leave one open-ended — has
-  // no production caller anywhere in the tree (grep-verified). The
-  // encounter-less state this test exercises is produced only by the
-  // test-only `encounterlessCampaign` helper below, standing in for the
-  // state a real "between fights" campaign will reach once §4.7's step 4
-  // separates campaign creation from starting a fight and something actually
-  // calls `resolveEncounter` in production. Until then, this pins the guard
-  // itself: a `structured_action` against a closed/never-opened bracket must
-  // refuse cleanly rather than throwing `encounterOf`'s corrupt-log error.
+  // The bracket refusal (spec §Wiring). Reachable in production today: a
+  // `POST /campaigns {worldId}` scene campaign (Task 8) comes back with
+  // `encounter === null`, and nothing in this case gates on campaign kind
+  // before the check below, so a hand-crafted `structured_action` reaches
+  // it. The shipped web client can't send one out of combat (Task 11 keeps
+  // `Grid`/`ActionBar` out of the exploration view), so the guard's real job
+  // today is refusing that message, not being dead code. `resolveEncounter`
+  // — the other way a bracket could close and leave one open-ended — still
+  // has no production caller anywhere in the tree (grep-verified).
+  // `encounterlessCampaign` below is just the deterministic shortcut to the
+  // same state; this pins the guard itself: a `structured_action` against a
+  // closed/never-opened bracket must refuse cleanly rather than throwing
+  // `encounterOf`'s corrupt-log error.
   it("refuses a structured action when no encounter is open, with an error frame", async () => {
     const store = createInMemoryEventStore();
     const campaign = await encounterlessCampaign(store);

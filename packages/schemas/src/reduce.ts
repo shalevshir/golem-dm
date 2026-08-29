@@ -22,14 +22,26 @@
 // catalogue === null`) indefinitely, on a live socket that is otherwise
 // working fine.
 //
-// Unreachable today: a client never resumes from sequence 0 — `POST
-// /campaigns` always starts the one encounter before any client joins, so a
-// join always lands after `encounter_started` and receives it folded into
-// the `campaign_state` snapshot, never as a live `event` frame. §4.7's step
-// 4, which separates campaign creation from starting a fight, is what makes
-// this reachable, and it is the point at which `apps/web` needs its own
-// answer (either a catalogue fetch alongside `reduce`, or giving up on
-// `fold` projecting a bracket at all).
+// §4.7 step 4 has landed the half of this that was actually load-bearing: a
+// campaign no longer has to bundle a fight with its creation at all — a
+// `worldId` campaign never does, and its client joins with `state.encounter`
+// null from the start. That breaks the OLD justification for calling this
+// gap unreachable, which leaned on "campaign creation always bundles a
+// fight" as a blanket fact rather than a property of one HTTP route.
+//
+// It is not yet exercised, though: `POST /campaigns`'s `encounterId` branch
+// still awaits `startEncounter` before it hands back a `campaignId`, so a
+// combat campaign's very first snapshot a client can ever see already has
+// its board — every current path remains as unreachable as this comment used
+// to claim. What changed is WHICH step owns closing it. §4.7 step 5 (the
+// combat bridge) is what starts a fight on a running campaign a client has
+// already joined — the "combat" `free_text` category is explicitly a
+// non-goal of this step (see `pipeline.ts`'s narrate-only categories) — and
+// the moment that lands, its `encounter_started` streams to an already-open
+// socket as a live `event` frame, hitting exactly this gap. This plan does
+// not add the fix; `apps/web` still needs one (a catalogue fetch alongside
+// `reduce`, or giving up on `fold` projecting a bracket at all) before step 5
+// can safely ship.
 //
 // Nothing here may import a Node built-in, or `apps/web`'s bundle breaks — and
 // nothing here may import `@ai-dm/rules-engine`, which would invert the
@@ -43,9 +55,15 @@
 // better than folding a half-understood event into state.
 import { z } from "zod";
 import { Combatant, ActionEconomy } from "./world.js";
-import { EncounterStartedPayload, EncounterResolvedPayload } from "./events.js";
+import {
+  EncounterStartedPayload,
+  EncounterResolvedPayload,
+  QuestNodeEnteredPayload,
+  QuestNodeCompletedPayload,
+  WorldDeltaAppliedPayload,
+} from "./events.js";
 import type { GameEvent } from "./events.js";
-import type { CampaignState } from "./protocol.js";
+import type { CampaignState, SceneSnapshot } from "./protocol.js";
 
 // `GameEvent.type` has no `session_started` or `turn_advanced` member: turn
 // advancement is one `kind` of `scene_changed`, not an event type of its own.
@@ -54,6 +72,19 @@ import type { CampaignState } from "./protocol.js";
 export const PlayerInputPayload = z.object({ clientMessageId: z.string() });
 export const StateDeltaAppliedPayload = z.object({ combatants: z.array(Combatant) });
 export const SceneChangedPayload = z.object({ kind: z.string() });
+
+// Guards the four out-of-combat scene events, mirroring the encounter-null
+// throws above in both structure and message wording family: a scene event
+// with no scene open is the same corrupt-log class as a combat event with no
+// encounter open, and gets the same loud-not-silent treatment.
+function sceneOrThrow(state: CampaignState, event: GameEvent): SceneSnapshot {
+  if (state.world.scene === null) {
+    throw new Error(
+      `Scene event ${event.type} at sequence ${String(event.sequence)} with no scene open`,
+    );
+  }
+  return state.world.scene;
+}
 
 export function reduce(state: CampaignState, event: GameEvent): CampaignState {
   switch (event.type) {
@@ -92,9 +123,13 @@ export function reduce(state: CampaignState, event: GameEvent): CampaignState {
       // Checked after the `kind` gate, not before: `turn_advanced` is the one
       // kind that is a combat signal (this event keeps a narrative name it
       // has never earned), and it is exactly the kind this branch writes the
-      // encounter for. Guarding the whole event type instead would make any
-      // future out-of-combat scene change — the kind §4.7's step 4 will
-      // emit — throw for arriving where it belongs.
+      // encounter for. §4.7 step 4 ended up modeling out-of-combat scene
+      // change as its own event types (`quest_node_entered`,
+      // `quest_node_completed`, `world_delta_applied`) rather than a second
+      // `scene_changed` kind, so this gate has no current out-of-combat
+      // caller — it stays because guarding the whole event type instead would
+      // make any future non-`turn_advanced` kind, should one ever exist,
+      // throw for arriving where it belongs.
       if (state.encounter === null) {
         throw new Error(
           `Combat event ${event.type} at sequence ${String(event.sequence)} with no encounter open`,
@@ -187,6 +222,60 @@ export function reduce(state: CampaignState, event: GameEvent): CampaignState {
       return { ...state, encounter: null };
     }
 
+    // Replaces `scene.currentNodeId` verbatim. Whether the traversal was
+    // legal is `traverseEdge`'s call (`@ai-dm/rules-engine`, invariant 1) —
+    // by the time this event exists, that decision is already made, and this
+    // fold merely records its result. No band math, no clamp, no authored-
+    // world lookup: mechanical, like every branch below it.
+    case "quest_node_entered": {
+      const scene = sceneOrThrow(state, event);
+      const { nodeId } = QuestNodeEnteredPayload.parse(event.payload);
+      return {
+        ...state,
+        world: { ...state.world, scene: { ...scene, currentNodeId: nodeId } },
+      };
+    }
+
+    // Appends to `scene.completedNodeIds`, folding a repeat of the same node
+    // to one entry — idempotent the same way a set would be, without adding
+    // a set to the wire format.
+    case "quest_node_completed": {
+      const scene = sceneOrThrow(state, event);
+      const { nodeId } = QuestNodeCompletedPayload.parse(event.payload);
+      const completedNodeIds = scene.completedNodeIds.includes(nodeId)
+        ? scene.completedNodeIds
+        : [...scene.completedNodeIds, nodeId];
+      return { ...state, world: { ...state.world, scene: { ...scene, completedNodeIds } } };
+    }
+
+    // Merges the engine's already-computed, already-clamped results onto
+    // `scene` — never computes one. `relations` replaces the entry for the
+    // same unordered faction pair (checked both ways, as a plain two-field
+    // comparison — no `pairKey`, which lives in `authored-world.ts` and stays
+    // there per invariant 4) or appends a new pair; `day`, when present,
+    // replaces `scene.day` outright. Neither field present is a true no-op.
+    case "world_delta_applied": {
+      const scene = sceneOrThrow(state, event);
+      const { relations, day } = WorldDeltaAppliedPayload.parse(event.payload);
+      const nextRelations = relations.reduce((acc, entry) => {
+        const index = acc.findIndex(
+          (existing) =>
+            (existing.factionA === entry.factionA && existing.factionB === entry.factionB) ||
+            (existing.factionA === entry.factionB && existing.factionB === entry.factionA),
+        );
+        return index === -1
+          ? [...acc, entry]
+          : acc.map((existing, i) => (i === index ? entry : existing));
+      }, scene.relations);
+      return {
+        ...state,
+        world: {
+          ...state.world,
+          scene: { ...scene, relations: nextRelations, day: day ?? scene.day },
+        },
+      };
+    }
+
     // Recorded for replay, audit and 7b's rejection dataset, but they change
     // no projected field. Listed explicitly rather than caught by `default` so
     // adding a `GameEvent` type fails the exhaustiveness check here.
@@ -196,6 +285,11 @@ export function reduce(state: CampaignState, event: GameEvent): CampaignState {
     // payload before the fold begins, not folded out of it. That is what
     // keeps "fold from a snapshot plus events equals fold from the campaign's
     // starting state" true.
+    //
+    // `check_rolled` joins this group for the same reason `dice_rolled`
+    // already does: the roll is already resolved by the time this event
+    // exists, and the event exists for replay, audit and metrics, not to
+    // change `CampaignState`.
     case "campaign_started":
     case "intent_classified":
     case "action_proposed":
@@ -203,6 +297,7 @@ export function reduce(state: CampaignState, event: GameEvent): CampaignState {
     case "action_rejected":
     case "dice_rolled":
     case "narrative_emitted":
+    case "check_rolled":
       return state;
   }
 }

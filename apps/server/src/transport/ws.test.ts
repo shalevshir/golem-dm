@@ -3,6 +3,7 @@ import WebSocket from "ws";
 import {
   createAgentRuntime,
   createDeterministicNarrative,
+  createDeterministicSceneNarrative,
   createFakePort,
   createTacticalAgent,
   DEFAULT_MODEL_ROUTING,
@@ -57,11 +58,16 @@ async function startServer(overrides?: { narrative?: NarrativePort }) {
       runtime: createAgentRuntime({ routing: DEFAULT_MODEL_ROUTING, port }),
     }),
     narrative: overrides?.narrative ?? createDeterministicNarrative(),
+    intent: {
+      classify: () => Promise.reject(new Error("intent.classify not exercised by ws.test.ts")),
+    },
+    sceneNarrative: createDeterministicSceneNarrative(),
     clock: () => "2026-08-19T10:00:00.000Z",
     uuid,
     seedFor: (rootSeed, sequence) => rootSeed * 1000 + sequence,
     turnTimeoutMs: 10_000,
     conditionNamesHebrew: new Map([["prone", "שרוע"]]),
+    skillAbilities: new Map(),
   };
   const registry = createCampaignRegistry({
     store,

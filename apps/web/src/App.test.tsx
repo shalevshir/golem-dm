@@ -11,6 +11,7 @@ import { StrictMode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, render, screen, waitFor } from "@testing-library/react";
 import type { RenderResult } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { ExecuteTurn, fold } from "@ai-dm/schemas";
 import type { Combatant, GameEvent, CampaignState } from "@ai-dm/schemas";
 import { App, CAMPAIGN_STORAGE_KEY } from "./App.js";
@@ -22,7 +23,7 @@ import { combatant } from "./state/combatant-fixture.js";
 
 function snapshotWith(combatants: Combatant[]): CampaignState {
   return {
-    world: { campaignId: "s1", rootSeed: 3, appliedClientMessageIds: [] },
+    world: { campaignId: "s1", rootSeed: 3, appliedClientMessageIds: [], scene: null },
     encounter: {
       encounterId: "goblin-ambush",
       grid: {
@@ -800,5 +801,280 @@ describe("App", () => {
     });
 
     expect(factory).toHaveBeenCalledTimes(1);
+  });
+});
+
+// §4.7 step 4's web slice. A joined scene campaign has `encounter === null`
+// and `world.scene !== null` -- the gating assertion below is the point of
+// this whole suite: combat controls (Grid/ActionBar) exist ONLY inside an
+// open encounter, which is what keeps the known `not_your_turn`-in-
+// `SILENT_CODES` trap unreachable -- nothing out of combat can send a
+// `structured_action`, so the silent refusal never has a sender.
+describe("App (scene mode, out-of-combat free text)", () => {
+  const scene = {
+    worldId: "emberfall",
+    currentNodeId: "market-square",
+    completedNodeIds: [],
+    relations: [],
+    day: 1,
+  };
+
+  function sceneSnapshot(): CampaignState {
+    return {
+      world: { campaignId: "s1", rootSeed: 3, appliedClientMessageIds: [], scene },
+      encounter: null,
+    };
+  }
+
+  it("renders NarrativePane + FreeTextBar for a joined scene campaign and renders no Grid or ActionBar, keeping the not_your_turn-in-SILENT_CODES trap unreachable since nothing out of combat can send a structured_action", async () => {
+    const { container } = await start();
+    act(() => {
+      socket.emitMessage({ type: "campaign_state", sequence: 0, snapshot: sceneSnapshot() });
+    });
+
+    expect(await screen.findByPlaceholderText(he.freeText.placeholder)).toBeInTheDocument();
+    expect(container.querySelector(".grid")).not.toBeInTheDocument();
+    expect(container.querySelector(".action-bar")).not.toBeInTheDocument();
+    // The gating property stated concretely: no structured_action can ever
+    // be sent from here, because the component that builds one (ActionBar,
+    // via App's `commit`) is simply not mounted.
+    expect(
+      socket.sent.some((each) => (JSON.parse(each) as { type: string }).type === "structured_action"),
+    ).toBe(false);
+  });
+
+  // Whole-branch review finding 3: the scene view had no connection-status
+  // line at all, so a dropped socket presented as a dead input box with
+  // nothing explaining it -- the inert-board soft-lock in an out-of-combat
+  // costume. Drives the same drop -> retry -> reconnect cycle the
+  // pendingFreeTextId test below uses.
+  it("shows a connection-status line in the scene view, switching to reconnecting on a drop and back once reconnected", async () => {
+    await start();
+    act(() => {
+      socket.emitMessage({ type: "campaign_state", sequence: 0, snapshot: sceneSnapshot() });
+    });
+
+    await screen.findByPlaceholderText(he.freeText.placeholder);
+    expect(screen.queryByText(he.app.reconnecting)).not.toBeInTheDocument();
+
+    vi.useFakeTimers();
+    act(() => {
+      socket.emitClose();
+    });
+    expect(screen.getByText(he.app.reconnecting)).toBeInTheDocument();
+
+    act(() => {
+      vi.advanceTimersByTime(1000);
+    });
+    vi.useRealTimers();
+
+    act(() => {
+      socket.emitOpen();
+    });
+
+    expect(screen.queryByText(he.app.reconnecting)).not.toBeInTheDocument();
+  });
+
+  it("keeps today's placeholder when encounter is null and scene is also null (a legacy/pre-genesis campaign)", async () => {
+    await start();
+    act(() => {
+      socket.emitMessage({
+        type: "campaign_state",
+        sequence: 0,
+        snapshot: {
+          world: { campaignId: "s1", rootSeed: 3, appliedClientMessageIds: [], scene: null },
+          encounter: null,
+        },
+      });
+    });
+
+    expect(screen.queryByPlaceholderText(he.freeText.placeholder)).not.toBeInTheDocument();
+    expect(screen.getByText(he.app.connecting)).toBeInTheDocument();
+  });
+
+  it("disables the FreeTextBar on send and re-enables it once narrative_emitted folds", async () => {
+    await start();
+    act(() => {
+      socket.emitMessage({ type: "campaign_state", sequence: 0, snapshot: sceneSnapshot() });
+    });
+
+    const input = await screen.findByPlaceholderText(he.freeText.placeholder);
+    await userEvent.type(input, "לך לשוק{Enter}");
+
+    expect(screen.getByPlaceholderText(he.freeText.placeholder)).toBeDisabled();
+    const sent = socket.sent.map((each) => JSON.parse(each) as Record<string, unknown>);
+    expect(sent.find((each) => each.type === "free_text")).toEqual({
+      type: "free_text",
+      clientMessageId: "11111111-1111-4111-8111-111111111111",
+      text: "לך לשוק",
+    });
+
+    act(() => {
+      socket.emitMessage({
+        type: "event",
+        event: event(1, "narrative_emitted", {
+          actorId: "hero",
+          streamId: "n1",
+          text: NARRATION,
+          source: "deterministic",
+          promptVersion: "v1",
+        }),
+      });
+    });
+
+    expect(screen.getByPlaceholderText(he.freeText.placeholder)).not.toBeDisabled();
+  });
+
+  it("re-enables the FreeTextBar and shows the banner on an error frame -- free_text_not_supported is not in SILENT_CODES, so a typing player actually sees it", async () => {
+    await start();
+    act(() => {
+      socket.emitMessage({ type: "campaign_state", sequence: 0, snapshot: sceneSnapshot() });
+    });
+
+    const input = await screen.findByPlaceholderText(he.freeText.placeholder);
+    await userEvent.type(input, "לך לשוק{Enter}");
+    expect(screen.getByPlaceholderText(he.freeText.placeholder)).toBeDisabled();
+
+    act(() => {
+      socket.emitMessage({
+        type: "error",
+        clientMessageId: "11111111-1111-4111-8111-111111111111",
+        code: "free_text_not_supported",
+        message: "not yet supported",
+      });
+    });
+
+    expect(screen.getByPlaceholderText(he.freeText.placeholder)).not.toBeDisabled();
+    expect(await screen.findByRole("alert")).toBeInTheDocument();
+    expect(screen.getByText(he.errors.free_text_not_supported)).toBeInTheDocument();
+  });
+
+  it("does not latch the FreeTextBar disabled forever on an internal_error with no clientMessageId (the ws.ts catch-all shape)", async () => {
+    // apps/server/src/transport/ws.ts's catch-all around a failed
+    // handleCommand drain sends {type:"error", code:"internal_error"} with
+    // NO clientMessageId -- ServerFrame's error member declares it optional,
+    // so this is schema-legal. This is the exact frame this task's own
+    // manual smoke test received when the configured provider key was
+    // invalid: without treating "no id" as a match, `current === clientMessageId`
+    // (undefined) never holds and the bar stays disabled forever -- a
+    // soft-lock in a new costume, recoverable only by a page refresh.
+    await start();
+    act(() => {
+      socket.emitMessage({ type: "campaign_state", sequence: 0, snapshot: sceneSnapshot() });
+    });
+
+    const input = await screen.findByPlaceholderText(he.freeText.placeholder);
+    await userEvent.type(input, "לך לשוק{Enter}");
+    expect(screen.getByPlaceholderText(he.freeText.placeholder)).toBeDisabled();
+
+    act(() => {
+      // No clientMessageId at all -- distinct from the matching-id case
+      // already covered above.
+      socket.emitMessage({ type: "error", code: "internal_error", message: "boom" });
+    });
+
+    expect(screen.getByPlaceholderText(he.freeText.placeholder)).not.toBeDisabled();
+  });
+
+  it("clears a stuck pendingFreeTextId on a silent socket drop, so the bar re-enables once reconnected instead of staying disabled forever", async () => {
+    // The path the previous version of this test missed: `net/connection.ts`'s
+    // `send()` silently no-ops while the socket is not OPEN -- a `free_text`
+    // dropped that way produces NO error frame (nothing reaches the server at
+    // all), so the `onFrame`-based clears above never fire. The automatic
+    // reconnect loop that follows a real drop (`onStatus("reconnecting")` +
+    // `net/connection.ts`'s own timed retry) never calls this component's
+    // `reconnect()` callback either -- that is wired only to `ErrorBanner`'s
+    // button, which needs an `internal_error` frame to even render. `status`
+    // leaving `"open"` is the one signal actually reachable from a silent
+    // client-side drop, which is why the fix lives on `onStatus`, not on any
+    // frame handler.
+    //
+    // While disconnected the bar is (correctly) disabled by its OWN
+    // `status !== "open"` clause regardless of `pendingFreeTextId` -- so the
+    // fix is only observable once the socket comes back: without it,
+    // `pendingFreeTextId` would still be the old id after reconnecting, and
+    // the bar would stay disabled even once `status` is `"open"` again. This
+    // drives the full drop -> retry -> reconnect cycle (the same fake-timer
+    // dance this file's very first test uses for `net/connection.ts`'s own
+    // 1s retry) and asserts the bar comes back.
+    await start();
+    act(() => {
+      socket.emitMessage({ type: "campaign_state", sequence: 0, snapshot: sceneSnapshot() });
+    });
+
+    const input = await screen.findByPlaceholderText(he.freeText.placeholder);
+    await userEvent.type(input, "לך לשוק{Enter}");
+    expect(screen.getByPlaceholderText(he.freeText.placeholder)).toBeDisabled();
+
+    vi.useFakeTimers();
+    act(() => {
+      socket.emitClose();
+    });
+    act(() => {
+      vi.advanceTimersByTime(1000);
+    });
+    vi.useRealTimers();
+
+    act(() => {
+      socket.emitOpen(); // the reconnected socket's own open event
+    });
+
+    expect(screen.getByPlaceholderText(he.freeText.placeholder)).not.toBeDisabled();
+    // No banner either -- this was a silent drop, not a surfaced fault.
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+});
+
+// §4.7 step 4's only real production path: `?world=` campaign creation. The
+// scene-mode tests above all go through the default `start()` helper, which
+// fetches an encounter catalogue -- so without this suite, the scene branch
+// is never exercised with `catalogue === null`, and nothing pins that the
+// catalogue fetch is genuinely skipped for a world campaign.
+describe("App (?world= query param)", () => {
+  const scene = {
+    worldId: "emberfall",
+    currentNodeId: "market-square",
+    completedNodeIds: [],
+    relations: [],
+    day: 1,
+  };
+
+  function sceneSnapshot(): CampaignState {
+    return {
+      world: { campaignId: "s1", rootSeed: 3, appliedClientMessageIds: [], scene },
+      encounter: null,
+    };
+  }
+
+  beforeEach(() => {
+    window.history.pushState({}, "", "/?world=emberfall");
+  });
+
+  afterEach(() => {
+    window.history.pushState({}, "", "/");
+  });
+
+  it("creates the campaign with {worldId}, never fetches an encounter catalogue, and still renders the FreeTextBar", async () => {
+    await start();
+
+    const posts = fetchMock.mock.calls.filter(
+      (call: unknown[]) => (call[1] as RequestInit | undefined)?.method === "POST",
+    );
+    expect(posts).toHaveLength(1);
+    expect(JSON.parse((posts[0]?.[1] as RequestInit).body as string)).toEqual({
+      worldId: "emberfall",
+    });
+    // The gap this closes: without this assertion, reinstating the old
+    // combined "not ready" condition (requiring a catalogue unconditionally)
+    // would break `?world=` in production while every other test here stays
+    // green, since none of them set `window.location.search`.
+    expect(
+      fetchMock.mock.calls.some((call: unknown[]) => String(call[0]).includes("/encounters/")),
+    ).toBe(false);
+
+    act(() => {
+      socket.emitMessage({ type: "campaign_state", sequence: 0, snapshot: sceneSnapshot() });
+    });
+    expect(await screen.findByPlaceholderText(he.freeText.placeholder)).toBeInTheDocument();
   });
 });

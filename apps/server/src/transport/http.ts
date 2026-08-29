@@ -7,12 +7,38 @@ import { z } from "zod";
 import type { EventStore } from "@ai-dm/memory";
 import { createCampaign, loadCampaign, startEncounter } from "../core/campaign.js";
 import type { Campaign } from "../core/campaign.js";
-import { encounterById, encounterCatalogue, UnknownEncounterError } from "../encounters/index.js";
+import {
+  encounterById,
+  encounterCatalogue,
+  loadCharacter,
+  UnknownEncounterError,
+} from "../encounters/index.js";
+import { loadWorld, UnknownWorldError } from "../world/index.js";
 
-const CreateCampaignBody = z.object({ encounterId: z.string().min(1) });
+/**
+ * ADR-0002: the POC is solo play, exactly one human-controlled character. A
+ * `characterId` body field for `POST /campaigns {worldId}` would be YAGNI
+ * until a second PC exists — the hero is the only character a scene
+ * campaign could ever name.
+ */
+const HERO_CHARACTER_ID = "hero";
+
+// `.strict()` on both arms, not just a comment: plain `z.object` silently
+// strips unknown keys, so a body carrying BOTH `encounterId` and `worldId`
+// matched the first arm and quietly discarded `worldId` — a false claim by
+// the 400 message below, which says "exactly one" but the schema never
+// checked that (whole-branch review finding 5). Strict rejects an unknown
+// key instead of stripping it, so a body with both fails BOTH arms and
+// falls into the same 400 a single bad field already produces, without
+// widening `CreateCampaignBody`'s resolved type or `CampaignRegistry.create`'s
+// input away from the `{ encounterId } | { worldId }` the plan mandated.
+const CreateCampaignBody = z.union([
+  z.object({ encounterId: z.string().min(1) }).strict(),
+  z.object({ worldId: z.string().min(1) }).strict(),
+]);
 
 export interface CampaignRegistry {
-  create(encounterId: string): Promise<Campaign>;
+  create(input: { encounterId: string } | { worldId: string }): Promise<Campaign>;
   get(campaignId: string): Promise<Campaign | null>;
   /**
    * Claims the one in-flight-command slot for `campaignId`. Returns `false`
@@ -71,7 +97,35 @@ export function createCampaignRegistry(input: CampaignRegistryInput): CampaignRe
   const loading = new Map<string, Promise<Campaign | null>>();
 
   return {
-    async create(encounterId) {
+    async create(body) {
+      if ("worldId" in body) {
+        // The world path: no encounter is ever started. `apps/server` authors
+        // exactly one world (`data/world/`), so "unknown world" means the
+        // requested id does not match the one `loadWorld` produced — checked
+        // before anything is written, same posture as `encounterById` below,
+        // for the same reason: `createCampaign` appends `campaign_started`
+        // unconditionally, so a refusal after that append would leave a
+        // durable orphaned row.
+        const authored = loadWorld();
+        if (authored.worldId !== body.worldId) {
+          throw new UnknownWorldError(body.worldId);
+        }
+        const character = loadCharacter(HERO_CHARACTER_ID);
+
+        const campaignId = input.uuid();
+        const campaign = await createCampaign({
+          campaignId,
+          rootSeed: input.seed(),
+          store: input.store,
+          clock: input.clock,
+          uuid: input.uuid,
+          scene: { authored, character },
+        });
+        live.set(campaignId, campaign);
+        return campaign;
+      }
+
+      const { encounterId } = body;
       // Validated before anything is written, deliberately separate from and
       // earlier than `startEncounter`'s own `buildEncounterById` call below.
       // `createCampaign` appends `campaign_started` unconditionally — it has
@@ -96,12 +150,14 @@ export function createCampaignRegistry(input: CampaignRegistryInput): CampaignRe
       });
       // Creating a campaign and entering its first fight are two events and
       // two calls, but one request: the client-visible flow is unchanged, so
-      // a campaign that exists always has a board. §4.7's step 4 is what
-      // separates them — an exploration mode gives the gap between these two
-      // lines somewhere to live, and this call moves out to whatever starts
-      // an encounter then. `startEncounter` mutates `campaign` in place, so
-      // `live` holds the started one either way; it is awaited before the set
-      // so a half-started campaign is never reachable through `get`.
+      // an `encounterId` campaign always has a board. §4.7's step 4 has
+      // landed the gap this comment used to predict — it lives above, in the
+      // `worldId` branch: a scene campaign is created with no board and
+      // never calls `startEncounter` at all. This branch stays exactly as it
+      // was; only the encounter path takes it. `startEncounter` mutates
+      // `campaign` in place, so `live` holds the started one either way; it
+      // is awaited before the set so a half-started campaign is never
+      // reachable through `get`.
       //
       // The id is already known good by the time this runs — the guard above
       // ran first — so `buildEncounterById`'s own `UnknownEncounterError`
@@ -161,29 +217,31 @@ export function registerHttpRoutes(app: FastifyInstance, registry: CampaignRegis
   app.post("/campaigns", async (request, reply) => {
     const body = CreateCampaignBody.safeParse(request.body);
     if (!body.success) {
-      return reply.code(400).send({ error: "encounterId must be a non-empty string" });
+      return reply.code(400).send({ error: "provide exactly one of encounterId or worldId" });
     }
 
     // Scoped tightly around the one call that can throw `UnknownEncounterError`
-    // — not around the response send too, so a failure while writing the
-    // reply (e.g. the connection dropping mid-send) cannot be mistaken for an
-    // encounter-lookup failure and re-enter this `catch`.
+    // or `UnknownWorldError` — not around the response send too, so a failure
+    // while writing the reply (e.g. the connection dropping mid-send) cannot
+    // be mistaken for a lookup failure and re-enter this `catch`.
     let campaign: Campaign;
     try {
-      campaign = await registry.create(body.data.encounterId);
+      campaign = await registry.create(body.data);
     } catch (error) {
-      // `registry.create` throws `UnknownEncounterError` for an id the
-      // catalogue does not know — that is the only case that is a 404. That
-      // error comes from `encounterById`'s guard at the top of `create`,
-      // which runs before anything is written; `startEncounter`'s
-      // own `buildEncounterById` call further down can throw the same error
-      // type in principle, but by the time it runs the id has already
-      // cleared that guard, so it is unreachable in practice. Everything
-      // else `registry.create` can throw (ENOENT from a missing SRD file, a
-      // ZodError from an invalid one, or any of `buildEncounter`'s own
-      // validation errors) is a genuine server fault and must not be
-      // reported to the client as "not found".
-      if (error instanceof UnknownEncounterError) {
+      // `registry.create` throws `UnknownEncounterError` for an encounter id
+      // the catalogue does not know, and `UnknownWorldError` for a `worldId`
+      // that does not match `apps/server`'s one authored world — those are
+      // the only two cases that are a 404. The encounter error comes from
+      // `encounterById`'s guard at the top of `create`, which runs before
+      // anything is written; `startEncounter`'s own `buildEncounterById` call
+      // further down can throw the same error type in principle, but by the
+      // time it runs the id has already cleared that guard, so it is
+      // unreachable in practice. Everything else `registry.create` can throw
+      // (ENOENT from a missing SRD or character file, a ZodError from an
+      // invalid one, or any of `buildEncounter`'s own validation errors) is a
+      // genuine server fault and must not be reported to the client as "not
+      // found".
+      if (error instanceof UnknownEncounterError || error instanceof UnknownWorldError) {
         return reply.code(404).send({ error: error.message });
       }
       throw error;

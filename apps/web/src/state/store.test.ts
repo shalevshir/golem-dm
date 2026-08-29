@@ -20,8 +20,29 @@ const genesisEncounter: EncounterState = {
 };
 
 const genesis: CampaignState = {
-  world: { campaignId: "s1", rootSeed: 3, appliedClientMessageIds: [] },
+  world: { campaignId: "s1", rootSeed: 3, appliedClientMessageIds: [], scene: null },
   encounter: genesisEncounter,
+};
+
+// A scene (out-of-combat) campaign: no encounter open, a scene genesis
+// present. Used by the "scene events" suite below to exercise the four new
+// event types through `applyFrame` -- `reduce` does the actual fold, and
+// these tests prove the client genuinely reaches it rather than silently
+// no-opping the frame the way a stale `default` branch would.
+const sceneGenesis: CampaignState = {
+  world: {
+    campaignId: "s1",
+    rootSeed: 3,
+    appliedClientMessageIds: [],
+    scene: {
+      worldId: "emberfall",
+      currentNodeId: "market-square",
+      completedNodeIds: [],
+      relations: [],
+      day: 1,
+    },
+  },
+  encounter: null,
 };
 
 function event(
@@ -528,5 +549,137 @@ describe("combatLog", () => {
     client = applyFrame(client, { type: "campaign_state", sequence: 12, snapshot: genesis });
     expect(client.narrative).toBe("");
     expect(client.narrativeStreamId).toBeNull();
+  });
+});
+
+// §4.7 step 4's four new event types. The client folds all of them through
+// the shared `reduce` (imported from @ai-dm/schemas) with no client-side
+// fold code of its own -- these tests are what proves the client actually
+// reaches it, not just that `reduce` itself is correct (that is
+// `reduce.test.ts`'s job, in the schemas package).
+describe("scene events", () => {
+  it("folds quest_node_entered, quest_node_completed and world_delta_applied through the shared reduce", () => {
+    let client = applyFrame(initialClientState, {
+      type: "campaign_state",
+      sequence: 0,
+      snapshot: sceneGenesis,
+    });
+
+    client = applyFrame(client, {
+      type: "event",
+      event: event(1, "quest_node_entered", { nodeId: "goblin-camp" }),
+    });
+    expect(client.snapshot?.world.scene?.currentNodeId).toBe("goblin-camp");
+
+    client = applyFrame(client, {
+      type: "event",
+      event: event(2, "quest_node_completed", { nodeId: "goblin-camp" }),
+    });
+    expect(client.snapshot?.world.scene?.completedNodeIds).toEqual(["goblin-camp"]);
+
+    client = applyFrame(client, {
+      type: "event",
+      event: event(3, "world_delta_applied", {
+        relations: [{ factionA: "town", factionB: "raiders", band: "hostile" }],
+        day: 2,
+      }),
+    });
+    expect(client.snapshot?.world.scene?.day).toBe(2);
+    expect(client.snapshot?.world.scene?.relations).toEqual([
+      { factionA: "town", factionB: "raiders", band: "hostile" },
+    ]);
+  });
+
+  it("no-ops check_rolled and intent_classified frames without throwing or changing the scene", () => {
+    let client = applyFrame(initialClientState, {
+      type: "campaign_state",
+      sequence: 0,
+      snapshot: sceneGenesis,
+    });
+    const sceneBefore = client.snapshot?.world.scene;
+
+    expect(() => {
+      client = applyFrame(client, {
+        type: "event",
+        event: event(1, "check_rolled", {
+          actorId: "hero",
+          ability: "str",
+          difficulty: "medium",
+          dc: 12,
+          naturalRoll: 15,
+          rolls: [15],
+          modifier: 2,
+          total: 17,
+          success: true,
+          seed: 7,
+        }),
+      });
+    }).not.toThrow();
+    expect(client.snapshot?.world.scene).toEqual(sceneBefore);
+
+    expect(() => {
+      client = applyFrame(client, {
+        type: "event",
+        event: event(2, "intent_classified", {
+          clientMessageId: "m1",
+          actorId: "hero",
+          classification: { category: "social" },
+          provider: "deterministic",
+          modelId: "none",
+          promptVersion: "v1",
+        }),
+      });
+    }).not.toThrow();
+    expect(client.snapshot?.world.scene).toEqual(sceneBefore);
+  });
+});
+
+// The Task 3 review finding this task owns: `foldCombatLog`'s `default`
+// branch let every event type reach a consumer that never had to
+// acknowledge it. These four types are exactly the ones added since -- the
+// combat log stays combat-only, but the switch is now exhaustive by
+// compiler enforcement rather than falling through a catch-all.
+describe("foldCombatLog pass-through", () => {
+  it("leaves the combat log untouched for every out-of-combat event type", () => {
+    let client = applyFrame(initialClientState, {
+      type: "campaign_state",
+      sequence: 0,
+      snapshot: sceneGenesis,
+    });
+
+    for (const [type, payload] of [
+      ["quest_node_entered", { nodeId: "goblin-camp" }],
+      ["quest_node_completed", { nodeId: "goblin-camp" }],
+      ["world_delta_applied", { relations: [], day: 2 }],
+      [
+        "check_rolled",
+        {
+          actorId: "hero",
+          ability: "str",
+          difficulty: "medium",
+          dc: 12,
+          naturalRoll: 15,
+          rolls: [15],
+          modifier: 2,
+          total: 17,
+          success: true,
+          seed: 7,
+        },
+      ],
+      [
+        "intent_classified",
+        {
+          clientMessageId: "m1",
+          actorId: "hero",
+          classification: { category: "social" },
+          provider: "deterministic",
+          modelId: "none",
+          promptVersion: "v1",
+        },
+      ],
+    ] as const) {
+      client = applyFrame(client, { type: "event", event: event(1, type, payload) });
+      expect(client.combatLog).toEqual([]);
+    }
   });
 });

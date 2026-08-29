@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { fold, reduce } from "./reduce.js";
 import { ActionEconomy, Combatant } from "./world.js";
 import type { GameEvent } from "./events.js";
-import type { CampaignState, EncounterState } from "./protocol.js";
+import type { CampaignState, EncounterState, SceneSnapshot } from "./protocol.js";
 
 const baseEncounter: EncounterState = {
   encounterId: "e1",
@@ -14,9 +14,30 @@ const baseEncounter: EncounterState = {
 };
 
 const base: CampaignState = {
-  world: { campaignId: "s1", rootSeed: 7, appliedClientMessageIds: [] },
+  world: { campaignId: "s1", rootSeed: 7, appliedClientMessageIds: [], scene: null },
   encounter: baseEncounter,
 };
+
+// Fixture for the four scene events (`quest_node_entered`,
+// `quest_node_completed`, `world_delta_applied`, `check_rolled`): a
+// `CampaignState` with `world.scene` populated and no encounter open, since
+// these are exactly the out-of-combat events §4.7 step 4 introduces.
+const baseScene: SceneSnapshot = {
+  worldId: "riverbend",
+  currentNodeId: "find-the-trail",
+  completedNodeIds: [],
+  relations: [{ factionA: "millers", factionB: "raiders", band: "neutral" }],
+  day: 1,
+};
+
+function withScene(patch: Partial<SceneSnapshot>): CampaignState {
+  return {
+    world: { ...base.world, scene: { ...baseScene, ...patch } },
+    encounter: null,
+  };
+}
+
+const noSceneOpen: CampaignState = { world: { ...base.world, scene: null }, encounter: null };
 
 /** `base` with the board overridden. Every case here folds combat events, so
  * every one of them has a bracket open. */
@@ -303,10 +324,12 @@ describe("reduce", () => {
 
   it("ignores a non-turn-advancing scene_changed even with no encounter open", () => {
     // The counterpart the plan's own wording omits: the `kind` gate runs
-    // BEFORE the bracket guard, on purpose, so a non-combat scene change —
-    // the kind §4.7's step 4 will emit for exploration and social scenes —
-    // can arrive with no fight open at all. Guarding the whole event type
-    // instead would make that future, legitimate event throw.
+    // BEFORE the bracket guard, on purpose, so a non-combat `scene_changed`
+    // kind — §4.7 step 4 ended up not needing one, modeling out-of-combat
+    // scene change as its own event types instead, but `kind` stays a bare
+    // `z.string()`, not a closed enum — can arrive with no fight open at
+    // all. Guarding the whole event type instead would make any such kind,
+    // should one ever exist, throw for arriving where it belongs.
     const noBracketOpen: CampaignState = { ...base, encounter: null };
     const narrationCue = event(20, "scene_changed", { kind: "narration_cue" });
     const next = reduce(noBracketOpen, narrationCue);
@@ -333,7 +356,7 @@ describe("reduce", () => {
     // right against an already-empty array. A non-empty one actually
     // discriminates.
     const midEncounter: CampaignState = {
-      world: { campaignId: "s1", rootSeed: 7, appliedClientMessageIds: ["c1", "c2"] },
+      world: { campaignId: "s1", rootSeed: 7, appliedClientMessageIds: ["c1", "c2"], scene: null },
       encounter: { ...baseEncounter, round: 3, currentActorIndex: 1 },
     };
     const before = structuredClone(midEncounter);
@@ -350,6 +373,127 @@ describe("reduce", () => {
     // Matches the purity tests already in the file: `reduce` must not
     // mutate what it's given even on the branch that clears a field.
     expect(midEncounter).toEqual(before);
+  });
+
+  // The four out-of-combat scene events (§4.7 step 4). Every case here is
+  // the plan's single highest-risk change: the fold must be purely
+  // mechanical (append/replace/merge), never a band computation, a clamp,
+  // or an authored-world lookup — that authority belongs to
+  // `@ai-dm/rules-engine`, which `reduce` may never import.
+
+  it("(a) replaces currentNodeId on quest_node_entered", () => {
+    const state = withScene({ currentNodeId: "find-the-trail" });
+    const next = reduce(state, event(21, "quest_node_entered", { nodeId: "cross-the-bridge" }));
+    expect(next.world.scene?.currentNodeId).toBe("cross-the-bridge");
+  });
+
+  it("(b) appends to completedNodeIds on quest_node_completed", () => {
+    const state = withScene({ completedNodeIds: ["find-the-trail"] });
+    const next = reduce(state, event(22, "quest_node_completed", { nodeId: "cross-the-bridge" }));
+    expect(next.world.scene?.completedNodeIds).toEqual(["find-the-trail", "cross-the-bridge"]);
+  });
+
+  it("(b) folds completing the same node twice into one entry (idempotent)", () => {
+    const state = withScene({ completedNodeIds: [] });
+    const once = reduce(state, event(23, "quest_node_completed", { nodeId: "find-the-trail" }));
+    const twice = reduce(once, event(24, "quest_node_completed", { nodeId: "find-the-trail" }));
+    expect(twice.world.scene?.completedNodeIds).toEqual(["find-the-trail"]);
+  });
+
+  it("(c) replaces an existing relation entry for the same unordered pair — payload b/a vs state a/b", () => {
+    const state = withScene({
+      relations: [{ factionA: "millers", factionB: "raiders", band: "neutral" }],
+    });
+    const next = reduce(
+      state,
+      event(25, "world_delta_applied", {
+        relations: [{ factionA: "raiders", factionB: "millers", band: "hostile" }],
+      }),
+    );
+    expect(next.world.scene?.relations).toEqual([
+      { factionA: "raiders", factionB: "millers", band: "hostile" },
+    ]);
+  });
+
+  it("(c) replaces an existing relation entry for the same unordered pair — payload a/b vs state a/b", () => {
+    const state = withScene({
+      relations: [{ factionA: "millers", factionB: "raiders", band: "neutral" }],
+    });
+    const next = reduce(
+      state,
+      event(26, "world_delta_applied", {
+        relations: [{ factionA: "millers", factionB: "raiders", band: "hostile" }],
+      }),
+    );
+    expect(next.world.scene?.relations).toEqual([
+      { factionA: "millers", factionB: "raiders", band: "hostile" },
+    ]);
+  });
+
+  it("(c) appends a relation entry for a pair not already present", () => {
+    const state = withScene({
+      relations: [{ factionA: "millers", factionB: "raiders", band: "neutral" }],
+    });
+    const next = reduce(
+      state,
+      event(27, "world_delta_applied", {
+        relations: [{ factionA: "millers", factionB: "town-guard", band: "cordial" }],
+      }),
+    );
+    expect(next.world.scene?.relations).toEqual([
+      { factionA: "millers", factionB: "raiders", band: "neutral" },
+      { factionA: "millers", factionB: "town-guard", band: "cordial" },
+    ]);
+  });
+
+  it("(d) replaces scene.day on world_delta_applied", () => {
+    const state = withScene({ day: 1 });
+    const next = reduce(state, event(28, "world_delta_applied", { day: 5 }));
+    expect(next.world.scene?.day).toBe(5);
+  });
+
+  it("(d) returns state unchanged when world_delta_applied carries neither relations nor day", () => {
+    const state = withScene({});
+    const next = reduce(state, event(29, "world_delta_applied", {}));
+    expect(next).toEqual(state);
+  });
+
+  it("(e) throws with 'no scene' when quest_node_entered is folded with no scene open", () => {
+    expect(() =>
+      reduce(noSceneOpen, event(30, "quest_node_entered", { nodeId: "cross-the-bridge" })),
+    ).toThrow(/no scene/);
+  });
+
+  it("(e) throws with 'no scene' when quest_node_completed is folded with no scene open", () => {
+    expect(() =>
+      reduce(noSceneOpen, event(31, "quest_node_completed", { nodeId: "cross-the-bridge" })),
+    ).toThrow(/no scene/);
+  });
+
+  it("(e) throws with 'no scene' when world_delta_applied is folded with no scene open", () => {
+    expect(() => reduce(noSceneOpen, event(32, "world_delta_applied", { day: 2 }))).toThrow(
+      /no scene/,
+    );
+  });
+
+  it("(f) ignores check_rolled — it changes no projected field", () => {
+    const state = withScene({});
+    const next = reduce(
+      state,
+      event(33, "check_rolled", {
+        actorId: "hero",
+        ability: "dex",
+        difficulty: "medium",
+        dc: 13,
+        naturalRoll: 15,
+        rolls: [15],
+        modifier: 3,
+        total: 18,
+        success: true,
+        seed: 42,
+      }),
+    );
+    expect(next).toEqual(state);
   });
 });
 
@@ -370,5 +514,30 @@ describe("fold", () => {
     const b = event(1, "scene_changed", { kind: "turn_advanced" });
     expect(boardOf(fold(base, [a, b])).round).toBe(2);
     expect(boardOf(fold(base, [a])).round).toBe(1);
+  });
+
+  it("folds completed -> delta -> entered into the composite scene state", () => {
+    const state = withScene({
+      currentNodeId: "find-the-trail",
+      completedNodeIds: [],
+      relations: [{ factionA: "millers", factionB: "raiders", band: "neutral" }],
+      day: 1,
+    });
+    const events = [
+      event(34, "quest_node_completed", { nodeId: "find-the-trail" }),
+      event(35, "world_delta_applied", {
+        relations: [{ factionA: "raiders", factionB: "millers", band: "hostile" }],
+        day: 2,
+      }),
+      event(36, "quest_node_entered", { nodeId: "cross-the-bridge" }),
+    ];
+    const next = fold(state, events);
+    expect(next.world.scene).toEqual({
+      worldId: "riverbend",
+      currentNodeId: "cross-the-bridge",
+      completedNodeIds: ["find-the-trail"],
+      relations: [{ factionA: "raiders", factionB: "millers", band: "hostile" }],
+      day: 2,
+    });
   });
 });

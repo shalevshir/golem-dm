@@ -24,16 +24,24 @@
 // campaign is a world with no board, which is the state §4.7's step 4 needs
 // and the old single-genesis model could not express.
 import type { EventStore } from "@ai-dm/memory";
-import type { BuiltEncounter, CombatWorld } from "@ai-dm/rules-engine";
+import type { AuthoredWorld, BuiltEncounter, CombatWorld } from "@ai-dm/rules-engine";
 import {
   CampaignStartedPayload,
   EncounterResolvedPayload,
   EncounterStartedPayload,
   NarrativeEmittedPayload,
   reduce,
+  sceneFromGenesis,
 } from "@ai-dm/schemas";
-import type { CampaignState, EncounterState, GameEvent, WorldState } from "@ai-dm/schemas";
-import { buildEncounterById } from "../encounters/index.js";
+import type {
+  CampaignState,
+  DerivedCharacter,
+  EncounterState,
+  GameEvent,
+  WorldState,
+} from "@ai-dm/schemas";
+import { buildEncounterById, loadCharacter } from "../encounters/index.js";
+import { loadWorld, UnknownWorldError } from "../world/index.js";
 
 /**
  * How many past narrations the narrative agent is shown. Two: enough to stop
@@ -41,6 +49,18 @@ import { buildEncounterById } from "../encounters/index.js";
  * cheap. Not in `CampaignState` — see the doc comment on `recentNarrations`.
  */
 export const NARRATION_WINDOW = 2;
+
+/**
+ * A scene campaign's static half: the authored world its `SceneSnapshot`
+ * indexes into, and the solo PC's derived sheet. Mirrors `BuiltEncounter`'s
+ * role for the combat half — content that never changes and, for `authored`,
+ * holds `Map`s that could not be serialized onto `WorldState` even if the
+ * design wanted a second copy of authored data in the log.
+ */
+export interface SceneStatics {
+  authored: AuthoredWorld;
+  character: DerivedCharacter;
+}
 
 export interface Campaign {
   state: CampaignState;
@@ -63,7 +83,7 @@ export interface Campaign {
    * touches `built` at all, so it is a fourth path that CAN set one without
    * the other — it just doesn't today, because no `emit` call site passes a
    * bracket event. `emit` is the natural home for the `encounter_resolved`
-   * that §4.7's step 4 will eventually append there, and the day it does,
+   * that §4.7's step 5 will eventually append there, and the day it does,
    * `built` would go stale exactly at that call. `builtOf`'s guard above is
    * what catches that the moment anything reads the board afterward — that
    * is the design working as intended, not a hole this comment is papering
@@ -74,6 +94,21 @@ export interface Campaign {
    * null in step with the bracket for no gain. Read it through `builtOf`.
    */
   built: BuiltEncounter | null;
+  /**
+   * The scene half's statics, mirroring `built`'s doc contract exactly: null
+   * exactly when `state.world.scene` is null, and the single writer for both
+   * (`createCampaign`, or `loadCampaign` re-deriving it from the genesis ids)
+   * sets them together. `sceneStaticsOf` below is the one reader, for the
+   * same disagreement-guarding reason `builtOf` is `built`'s.
+   *
+   * Combat-only campaigns and scene campaigns are otherwise siblings, not a
+   * union: a campaign has at most one bracket and at most one scene, and
+   * nothing in this plan lets a single campaign have both at once — but
+   * nothing enforces that either, since the two halves are independent
+   * fields on independent projections (`state.encounter` and
+   * `state.world.scene`).
+   */
+  sceneStatics: SceneStatics | null;
   /** The sequence the next appended event will take. */
   nextSequence: number;
   /**
@@ -106,6 +141,13 @@ export interface CampaignPorts {
 export interface CreateCampaignInput extends CampaignPorts {
   campaignId: string;
   rootSeed: number;
+  /**
+   * Present ⇒ a scene campaign: the genesis quartet
+   * (`worldId`/`startingNodeId`/`startingDay`/`characterId`) is derived from
+   * these statics and written into `campaign_started`'s payload. Absent ⇒ a
+   * combat-only campaign, byte-identical to every genesis before this task.
+   */
+  scene?: SceneStatics;
 }
 
 export interface StartEncounterInput extends CampaignPorts {
@@ -125,12 +167,22 @@ export interface ResolveEncounterInput extends CampaignPorts {
  * payload rather than read out of a persisted `state` field. `campaignId` is
  * not in that payload because it is the stream key — every event in the log
  * already carries it, and `loadCampaign` is called with it.
+ *
+ * `scene` comes from `sceneFromGenesis`, the one definition of the
+ * genesis-quartet-to-`SceneSnapshot` rebuild (`@ai-dm/schemas`). Unlike
+ * `initialEncounterState` below, this needs no catalogue lookup and
+ * therefore no substitution step at load time — `loadCampaign` calls this
+ * same function with the parsed genesis payload, not a second projector.
  */
-function initialWorldState(input: { campaignId: string; rootSeed: number }): WorldState {
+function initialWorldState(input: {
+  campaignId: string;
+  genesis: CampaignStartedPayload;
+}): WorldState {
   return {
     campaignId: input.campaignId,
-    rootSeed: input.rootSeed,
+    rootSeed: input.genesis.rootSeed,
     appliedClientMessageIds: [],
+    scene: sceneFromGenesis(input.genesis),
   };
 }
 
@@ -186,17 +238,33 @@ function envelope(input: {
  * turns yet is indistinguishable from a campaign that does not exist, and
  * `loadCampaign` could not tell them apart.
  *
- * The payload deliberately carries only `rootSeed`, not `state` itself:
- * nothing reads a persisted `state` field (`loadCampaign` rebuilds it via
- * `initialWorldState`, on purpose), and including it would alias the exact
- * object returned as `campaign.state` into the store's own event, which the
- * in-memory store then holds by reference. `encounter_started` follows the
- * same rule with `encounterId` — a bracket event names a thing and never
- * snapshots it.
+ * The payload deliberately carries only `rootSeed` (plus, for a scene
+ * campaign, the genesis quartet derived from `input.scene`) — never `state`
+ * itself: nothing reads a persisted `state` field (`loadCampaign` rebuilds it
+ * via `initialWorldState`, on purpose), and including it would alias the
+ * exact object returned as `campaign.state` into the store's own event, which
+ * the in-memory store then holds by reference. `encounter_started` follows
+ * the same rule with `encounterId` — a bracket event names a thing and never
+ * snapshots it. The quartet is no exception: `worldId`/`startingNodeId`/
+ * `startingDay` come from `input.scene.authored`, `characterId` from
+ * `input.scene.character.characterId` — never a `SceneSnapshot` itself.
  */
 export async function createCampaign(input: CreateCampaignInput): Promise<Campaign> {
+  const { scene } = input;
+  const genesisPayload = CampaignStartedPayload.parse(
+    scene === undefined
+      ? { rootSeed: input.rootSeed }
+      : {
+          rootSeed: input.rootSeed,
+          worldId: scene.authored.worldId,
+          startingNodeId: scene.authored.startingNodeId,
+          startingDay: scene.authored.startingDay,
+          characterId: scene.character.characterId,
+        },
+  );
+
   const state: CampaignState = {
-    world: initialWorldState({ campaignId: input.campaignId, rootSeed: input.rootSeed }),
+    world: initialWorldState({ campaignId: input.campaignId, genesis: genesisPayload }),
     encounter: null,
   };
 
@@ -205,11 +273,17 @@ export async function createCampaign(input: CreateCampaignInput): Promise<Campai
     campaignId: input.campaignId,
     sequence: 0,
     type: "campaign_started",
-    payload: CampaignStartedPayload.parse({ rootSeed: input.rootSeed }),
+    payload: genesisPayload,
   });
   await input.store.append(input.campaignId, [genesis]);
 
-  return { state, built: null, nextSequence: 1, recentNarrations: [] };
+  return {
+    state,
+    built: null,
+    sceneStatics: scene ?? null,
+    nextSequence: 1,
+    recentNarrations: [],
+  };
 }
 
 /**
@@ -315,12 +389,44 @@ export async function loadCampaign(input: {
     );
   }
 
-  const { rootSeed } = CampaignStartedPayload.parse(genesis.payload);
+  const genesisPayload = CampaignStartedPayload.parse(genesis.payload);
   let state: CampaignState = {
-    world: initialWorldState({ campaignId: input.campaignId, rootSeed }),
+    world: initialWorldState({ campaignId: input.campaignId, genesis: genesisPayload }),
     encounter: null,
   };
   let built: BuiltEncounter | null = null;
+
+  // The scene half's substitution step — `sceneFromGenesis` needed none (it
+  // is what `initialWorldState` just called), but `sceneStatics` is a live
+  // `AuthoredWorld`/`DerivedCharacter` pair, not serializable data, so it is
+  // re-derived from the genesis ids exactly the way `built` below is
+  // re-derived from `encounterId`.
+  //
+  // Gated on `state.world.scene`, the projection just computed, rather than
+  // re-deriving the genesis quartet's own presence predicate (that check
+  // already happened once, inside `sceneFromGenesis`) — the two are then
+  // structurally incapable of disagreeing, which is `sceneStatics`'s whole
+  // doc contract ("null exactly when `state.world.scene` is null").
+  // `characterId` still needs its own narrowing: it is not part of
+  // `SceneSnapshot`, so its presence has to be read off the payload, but
+  // `state.world.scene !== null` already guarantees it via
+  // `CampaignStartedPayload`'s all-or-none `.refine`.
+  //
+  // `authored.worldId !== scene.worldId` is the same load-time coupling
+  // `buildEncounterById` already has for `encounterId` (documented in the
+  // loop below): a world that has been renamed since this campaign started
+  // makes it permanently unloadable. `loadWorld` here always returns
+  // `apps/server`'s one authored world (`data/world/`), so the check is
+  // "does this deployment's world still match the one this campaign began
+  // in" — not a catalogue lookup, since there is no catalogue of worlds.
+  const { scene } = state.world;
+  const { characterId } = genesisPayload;
+  let sceneStatics: SceneStatics | null = null;
+  if (scene !== null && characterId !== undefined) {
+    const authored = loadWorld();
+    if (authored.worldId !== scene.worldId) throw new UnknownWorldError(scene.worldId);
+    sceneStatics = { authored, character: loadCharacter(characterId) };
+  }
 
   // Folded one event at a time rather than through `fold`, because a campaign
   // log is not foldable by `reduce` alone: every `encounter_started` opens a
@@ -383,6 +489,7 @@ export async function loadCampaign(input: {
   return {
     state,
     built,
+    sceneStatics,
     nextSequence: (last?.sequence ?? 0) + 1,
     recentNarrations: recentNarrations.slice(-NARRATION_WINDOW),
   };
@@ -434,6 +541,29 @@ export function builtOf(campaign: Campaign): BuiltEncounter {
     );
   }
   return built;
+}
+
+/**
+ * The scene's static half, or a throw. The only reader of `Campaign
+ * .sceneStatics` — see that field's doc comment for why nothing reads it
+ * directly. Mirrors `builtOf` exactly: the projection is consulted first, so
+ * statics left behind by a bug can never be served for a campaign with no
+ * scene open; the id check then catches the opposite drift, statics
+ * describing some other world than the one the projection says is open.
+ */
+export function sceneStaticsOf(campaign: Campaign): SceneStatics {
+  const { scene } = campaign.state.world;
+  if (scene === null) {
+    throw new Error(`Campaign ${campaign.state.world.campaignId} has no scene open`);
+  }
+  const { sceneStatics } = campaign;
+  if (sceneStatics === null || sceneStatics.authored.worldId !== scene.worldId) {
+    throw new Error(
+      `Campaign ${campaign.state.world.campaignId} has scene world ${scene.worldId} ` +
+        `open but scene statics world ${sceneStatics?.authored.worldId ?? "none"}`,
+    );
+  }
+  return sceneStatics;
 }
 
 /**

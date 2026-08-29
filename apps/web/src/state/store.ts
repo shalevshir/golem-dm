@@ -164,7 +164,28 @@ function foldCombatLog(
       ];
     }
 
-    default:
+    // Everything else is out-of-combat or metrics-only and the combat log
+    // stays combat-only (the spec's own words): listed explicitly, mirroring
+    // `reduce`'s own no-op group in `packages/schemas/src/reduce.ts`, rather
+    // than caught by a `default` -- a `default` here would let a future
+    // `GameEvent` type reach this function with nobody ever having to decide
+    // whether it belongs in the log. Listing every member makes that
+    // decision the compiler's: adding a member to `GameEvent["type"]` with no
+    // case here fails this switch's exhaustiveness (TS2366) rather than
+    // silently falling through.
+    case "player_input":
+    case "intent_classified":
+    case "action_proposed":
+    case "action_rejected":
+    case "state_delta_applied":
+    case "narrative_emitted":
+    case "campaign_started":
+    case "encounter_started":
+    case "encounter_resolved":
+    case "quest_node_entered":
+    case "quest_node_completed":
+    case "world_delta_applied":
+    case "check_rolled":
       return [...log];
   }
 }

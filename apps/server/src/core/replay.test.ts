@@ -4,8 +4,8 @@
 // here — a failing property means a bug in Tasks 6-10, not a weaker assertion.
 import { afterAll, describe, expect, it } from "vitest";
 import { validateExecuteTurn } from "@ai-dm/rules-engine";
-import type { TacticalAgent } from "@ai-dm/agents";
-import { createDeterministicNarrative } from "@ai-dm/agents";
+import type { IntentAgent, IntentResult, TacticalAgent } from "@ai-dm/agents";
+import { createDeterministicNarrative, createDeterministicSceneNarrative } from "@ai-dm/agents";
 import { connectPostgresEventStore, createInMemoryEventStore } from "@ai-dm/memory";
 import type { EventStore } from "@ai-dm/memory";
 import { fold } from "@ai-dm/schemas";
@@ -13,6 +13,7 @@ import type {
   ClientMessage,
   ExecuteTurn,
   GameEvent,
+  IntentClassification,
   ServerFrame,
   CampaignState,
 } from "@ai-dm/schemas";
@@ -20,6 +21,8 @@ import { SNAPSHOT_EVERY, handleCommand } from "./pipeline.js";
 import type { TurnPorts } from "./pipeline.js";
 import { createCampaign, loadCampaign, resolveEncounter, startEncounter } from "./campaign.js";
 import type { Campaign } from "./campaign.js";
+import { loadCharacter } from "../encounters/index.js";
+import { loadWorld } from "../world/index.js";
 
 const CLOCK = (): string => "2026-08-19T10:00:00.000Z";
 const ENCOUNTER_ID = "goblin-ambush";
@@ -81,12 +84,56 @@ function portsWith(store: EventStore): TurnPorts {
     store,
     tactical: defaultTactical(),
     narrative: createDeterministicNarrative(),
+    // No combat property in this file drives `free_text`, so `intent` is a
+    // double that fails loudly if a property ever reaches it rather than one
+    // that would silently mask a wiring bug. The scene replay-equivalence
+    // property below overrides this per call, via `classifiedAs`.
+    intent: {
+      classify: () => Promise.reject(new Error("intent.classify not exercised by replay.test.ts")),
+    },
+    sceneNarrative: createDeterministicSceneNarrative(),
     clock: CLOCK,
     uuid: uuids(),
     seedFor: (rootSeed, sequence) => rootSeed * 1000 + sequence,
     turnTimeoutMs: 10_000,
     conditionNamesHebrew: new Map([["prone", "שרוע"]]),
+    skillAbilities: new Map(),
   };
+}
+
+/** A classifier double that resolves to exactly this classification, mirroring
+ *  `pipeline.test.ts`'s own `classifiedAs` — this file's scene property is the
+ *  only one that needs `free_text` to actually reach the intent router. */
+function classifiedAs(classification: IntentClassification): IntentAgent {
+  return {
+    classify: () =>
+      Promise.resolve({
+        ok: true,
+        classification,
+        provider: "test-provider",
+        modelId: "test-model",
+        usage: [{ promptTokens: 10, completionTokens: 5, totalTokens: 15 }],
+      } satisfies IntentResult),
+  };
+}
+
+/**
+ * A scene campaign's genesis: `createCampaign` given `scene` statics writes
+ * one event (`campaign_started`, sequence 0) and opens no board — mirrors
+ * `startedCampaign` above for the combat half. The real `emberfall` world and
+ * `hero` character, not a synthetic fixture, for the same reason
+ * `pipeline.test.ts`'s `heroSceneStatics` gives: this plays real quest-node
+ * traversals through real content.
+ */
+async function startedSceneCampaign(store: EventStore, options: PlayOptions = {}): Promise<Campaign> {
+  return createCampaign({
+    campaignId: options.campaignId ?? "s1",
+    rootSeed: options.rootSeed ?? 42,
+    store,
+    clock: CLOCK,
+    uuid: uuids(),
+    scene: { authored: loadWorld(), character: loadCharacter("hero") },
+  });
 }
 
 function dodgeCommand(actorId: string, clientMessageId: string): ClientMessage {
@@ -444,6 +491,98 @@ describe("seed determinism across a bracket", () => {
     const aSpanA = seedsIn(a.events, 0, a.boundary);
     expect(aSpanA).toHaveLength(bSpanA.length);
     expect(bSpanA).not.toEqual(aSpanA);
+  });
+});
+
+// Step 4's own named backstop (this task's brief, and the design spec): a
+// refused proposal must leave state untouched and the log must prove it. The
+// "replay properties" suite above already owns "folding the log from zero
+// equals the live projection" for combat; this is that same property over a
+// SCENE campaign, and the refusal is not optional — a property run only over
+// successful turns cannot tell a refusal that appended nothing from one that
+// half-applied and left the log inconsistent, since both would fold to
+// "whatever the log says" either way. Only a sequence that actually contains
+// a refusal exercises the guarantee `free_text`'s Guard-free branches exist
+// to buy.
+describe("replay equivalence over a scene campaign", () => {
+  it("folds an identical projection across traverse, a refused traverse, a check, and social", async () => {
+    const store = createInMemoryEventStore();
+    const campaign = await startedSceneCampaign(store);
+    // One fixed `ports` object for the whole sequence, per this file's own
+    // header rationale: `eventId` comes from `ports.uuid()`, so calling
+    // `portsWith(store)` fresh per turn (this test's own review finding)
+    // would restart that generator at 1 every turn and collide `eventId`s
+    // across turns — determinism needs the SAME fixed sources threaded
+    // through the whole sequence, not a fresh set per call. `intent` is the
+    // only field that varies per turn, so it is overridden per call instead.
+    const ports = portsWith(store);
+
+    async function freeText(
+      clientMessageId: string,
+      text: string,
+      classification: IntentClassification,
+    ): Promise<ServerFrame[]> {
+      return drain(
+        handleCommand(
+          campaign,
+          { type: "free_text", clientMessageId, text },
+          { ...ports, intent: classifiedAs(classification) },
+        ),
+      );
+    }
+
+    // 1. Traverse: the authored starting node "arrival" has one open edge to
+    // "guild-offer" and no effects of its own — a real, successful
+    // traversal through real content. Asserted, not just driven: without
+    // this, a regressed `traverseEdge` call site that silently no-oped here
+    // would still leave `live.state` and `reloaded.state` in lockstep (both
+    // never moved) — equivalence alone cannot catch a turn that did nothing.
+    await freeText("c1", "hear out the guild factor", {
+      category: "exploration",
+      targetNodeId: "guild-offer",
+    });
+    expect(campaign.state.world.scene?.currentNodeId).toBe("guild-offer");
+
+    // 2. Refused traverse: "guild-offer" is non-terminal (it has an edge to
+    // "the-weir"), so `targetNodeId: null` is refused rather than silently
+    // completing it (Decision 1; the same refusal `pipeline.test.ts` pins as
+    // "refuses targetNodeId: null on a non-terminal node instead of
+    // completing it"). Captured and compared by value — this is the
+    // refusal the property exists to prove survives a fold from zero, so it
+    // must actually be pinned as a refusal (state unchanged), not merely
+    // assumed from the turn not throwing.
+    const sceneBeforeRefusal = campaign.state.world.scene;
+    await freeText("c2", "I look at the sky", { category: "exploration", targetNodeId: null });
+    expect(campaign.state.world.scene).toEqual(sceneBeforeRefusal);
+
+    // 3. Check: no skill named, so this only exercises
+    // `abilityModifiers.str` — `pipeline.test.ts`'s own check tests already
+    // pin the modifier/DC/seed math; this only needs to prove the check
+    // branch actually ran (a `check_rolled` frame landed), not re-derive its
+    // numbers.
+    const checkFrames = await freeText("c3", "I try to force the gate", {
+      category: "check",
+      ability: "str",
+      difficulty: "medium",
+    });
+    expect(
+      checkFrames.some((frame) => frame.type === "event" && frame.event.type === "check_rolled"),
+    ).toBe(true);
+
+    // 4. Social: narration only, no scene event.
+    await freeText("c4", "who's in charge here", { category: "social" });
+
+    // The exact count, not just "some events landed": a turn that silently
+    // produced fewer (or more) events than it should — the refusal guard
+    // regressing to a no-op, a narrate-only category dropping its
+    // narration, the check branch skipping `check_rolled` — shifts this
+    // number, even on a log `reloaded.state` would still fold identically
+    // either way (both sides read the SAME log).
+    expect(campaign.nextSequence).toBe(16);
+
+    const reloaded = await loadCampaign({ campaignId: "s1", store });
+    expect(reloaded?.state).toEqual(campaign.state);
+    expect(reloaded?.nextSequence).toBe(campaign.nextSequence);
   });
 });
 

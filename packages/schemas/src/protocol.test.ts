@@ -7,7 +7,9 @@ import {
   ServerFrame,
   CampaignCreated,
   CampaignState,
+  sceneFromGenesis,
   TurnAffordances,
+  WorldState,
 } from "./protocol.js";
 
 describe("ClientMessage", () => {
@@ -282,5 +284,49 @@ describe("CampaignState", () => {
       encounter: null,
     });
     expect(state.world.appliedClientMessageIds).toStrictEqual(["c1"]);
+  });
+});
+
+describe("WorldState.scene", () => {
+  const legacy = { campaignId: "s1", rootSeed: 7, appliedClientMessageIds: [] };
+
+  it("defaults a legacy object with no scene field to null", () => {
+    const parsed = WorldState.parse(legacy);
+    expect(parsed.scene).toBeNull();
+  });
+
+  it("round-trips a populated SceneSnapshot", () => {
+    const scene = {
+      worldId: "riverbend",
+      currentNodeId: "goblin-camp",
+      completedNodeIds: ["find-the-trail"],
+      relations: [{ factionA: "town-guard", factionB: "goblin-warband", band: "hostile" }],
+      day: 3,
+    };
+    const parsed = WorldState.parse({ ...legacy, scene });
+    expect(parsed.scene).toStrictEqual(scene);
+  });
+});
+
+describe("sceneFromGenesis", () => {
+  it("is null when the payload carries only rootSeed", () => {
+    expect(sceneFromGenesis({ rootSeed: 1 })).toBeNull();
+  });
+
+  it("builds the starting scene from a full genesis quartet", () => {
+    const scene = sceneFromGenesis({
+      rootSeed: 1,
+      worldId: "riverbend",
+      startingNodeId: "find-the-trail",
+      startingDay: 1,
+      characterId: "hero",
+    });
+    expect(scene).toStrictEqual({
+      worldId: "riverbend",
+      currentNodeId: "find-the-trail",
+      completedNodeIds: [],
+      relations: [],
+      day: 1,
+    });
   });
 });

@@ -25,7 +25,7 @@ describe.skipIf(url === undefined || url === "")("replay round-trip over Postgre
   // that does not need a real encounter.
   function genesisState(campaignId: string): CampaignState {
     return {
-      world: { campaignId, rootSeed: 7, appliedClientMessageIds: [] },
+      world: { campaignId, rootSeed: 7, appliedClientMessageIds: [], scene: null },
       encounter: {
         encounterId: "e1",
         grid: {

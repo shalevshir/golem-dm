@@ -80,18 +80,29 @@ describe("fetchCatalogue", () => {
 });
 
 describe("createCampaign", () => {
-  it("returns the campaign id from a valid body", async () => {
+  it("returns the parsed body from a valid response, given an encounterId", async () => {
     stubFetch({ ok: true, body: { campaignId: "s1" } });
-    await expect(createCampaign("goblin-ambush")).resolves.toBe("s1");
+    await expect(createCampaign({ encounterId: "goblin-ambush" })).resolves.toEqual({
+      campaignId: "s1",
+    });
+  });
+
+  it("returns the parsed body from a valid response, given a worldId", async () => {
+    // §4.7 step 4: a scene campaign starts from a world instead of an
+    // encounter -- same envelope, same response shape.
+    stubFetch({ ok: true, body: { campaignId: "s1" } });
+    await expect(createCampaign({ worldId: "emberfall" })).resolves.toEqual({ campaignId: "s1" });
   });
 
   it("rejects a body missing campaignId rather than returning undefined", async () => {
     stubFetch({ ok: true, body: {} });
-    await expect(createCampaign("goblin-ambush")).rejects.toThrow();
+    await expect(createCampaign({ encounterId: "goblin-ambush" })).rejects.toThrow();
   });
 
   it("throws on a non-OK response instead of parsing the error body", async () => {
-    stubFetch({ ok: false, status: 500, body: { error: "boom" } });
-    await expect(createCampaign("goblin-ambush")).rejects.toThrow(/500/);
+    // An unknown world is a 404, surfaced the same way an unknown encounter
+    // would be -- there is no worldId-specific error handling on this side.
+    stubFetch({ ok: false, status: 404, body: { error: "unknown world" } });
+    await expect(createCampaign({ worldId: "no-such-world" })).rejects.toThrow(/404/);
   });
 });

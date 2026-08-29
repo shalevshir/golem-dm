@@ -6,8 +6,10 @@
 // the browser.
 import { z } from "zod";
 import { ActionType, ExecuteTurn, Tile } from "./actions.js";
+import { ContentId, FactionRelationEntry } from "./content.js";
 import { DerivedCharacter } from "./derived.js";
 import { GameEvent } from "./events.js";
+import type { CampaignStartedPayload } from "./events.js";
 import { Combatant, Faction, GridMap } from "./world.js";
 
 /**
@@ -16,6 +18,27 @@ import { Combatant, Faction, GridMap } from "./world.js";
  * front of a model.
  */
 export const MAX_FREE_TEXT_LENGTH = 500;
+
+/**
+ * The exploration/social projection (§4.7 step 4), deltas-only against the
+ * world's authored baseline (see the design spec's Decision 2): `relations`
+ * carries ONLY the faction pairs a completed node has actually shifted, as
+ * absolute bands, never the full authored table. Reading standing between any
+ * two factions always goes through `relationBetween` (the step 3 scene
+ * engine), which falls back to the authored baseline for a pair absent here —
+ * never through this array alone.
+ */
+export const SceneSnapshot = z.object({
+  worldId: ContentId,
+  currentNodeId: ContentId,
+  completedNodeIds: z.array(ContentId),
+  /** Overlay: ONLY pairs a completed node has shifted (absolute bands).
+   *  Read through `relationBetween`'s authored baseline, never alone. */
+  relations: z.array(FactionRelationEntry),
+  day: z.number().int().min(1),
+});
+
+export type SceneSnapshot = z.infer<typeof SceneSnapshot>;
 
 /**
  * What outlives every encounter: the campaign's identity, its randomness, and
@@ -29,15 +52,47 @@ export const MAX_FREE_TEXT_LENGTH = 500;
  * `appliedClientMessageIds` sits here rather than on the encounter because
  * idempotency has to survive a fight ending, and must cover free text and
  * narrative moves later rather than turns alone.
+ *
+ * `scene` is null for a combat-only campaign (a `campaign_started` with no
+ * genesis quartet) and for every campaign that predates §4.7 step 4 — the
+ * `.default(null)` is what keeps a legacy `campaign_started` payload folding
+ * to a valid `WorldState` (append-only compatibility).
  */
 export const WorldState = z.object({
   campaignId: z.string(),
   /** Every seed in the campaign derives from this and a log sequence. */
   rootSeed: z.number().int(),
   appliedClientMessageIds: z.array(z.string()),
+  scene: SceneSnapshot.nullable().default(null),
 });
 
 export type WorldState = z.infer<typeof WorldState>;
+
+/**
+ * The starting `SceneSnapshot`, or null for a campaign with no scene genesis.
+ * `payload.worldId === undefined` is the null case; `CampaignStartedPayload`'s
+ * `.refine` guarantees the other three quartet fields are present whenever it
+ * is not, but each is still narrowed here rather than asserted — a payload
+ * this function is handed may not have gone through that parse.
+ */
+export function sceneFromGenesis(payload: CampaignStartedPayload): SceneSnapshot | null {
+  const { worldId, startingNodeId, startingDay, characterId } = payload;
+  if (
+    worldId === undefined ||
+    startingNodeId === undefined ||
+    startingDay === undefined ||
+    characterId === undefined
+  ) {
+    return null;
+  }
+  return {
+    worldId,
+    currentNodeId: startingNodeId,
+    completedNodeIds: [],
+    relations: [],
+    day: startingDay,
+  };
+}
 
 /**
  * One fight's board, and nothing that outlives it. Deliberately not
@@ -106,11 +161,11 @@ export const StructuredActionMessage = z.object({
 });
 
 /**
- * Accepted by the envelope, but not implemented in this slice: the pipeline
- * answers every `free_text` message with a `free_text_not_supported` error
- * frame rather than routing it to a model. The `.max` cap still matters even
- * so — it stops an oversized message at transport parse, before any future
- * implementation could put it in front of a prompt.
+ * The pipeline routes this to the intent router out of combat (§4.7 step 4);
+ * in combat, or with no scene open at all, it still answers with a
+ * `free_text_not_supported` error frame. The `.max` cap matters regardless of
+ * routing — it stops an oversized message at transport parse, before it ever
+ * reaches a prompt.
  */
 export const FreeTextMessage = z.object({
   type: z.literal("free_text"),

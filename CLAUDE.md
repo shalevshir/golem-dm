@@ -17,7 +17,7 @@ pnpm/TypeScript monorepo. Deterministic rules engine + tiered LLM cascade + Hebr
 ## Architectural invariants (do not violate)
 
 1. **The rules engine is the only authority on game legality and math.** LLMs propose; the engine validates and resolves. Never let an LLM output mutate state directly.
-2. **English inside, Hebrew outside.** All prompts, state, tool schemas, logs, code comments: English. Hebrew exists only in narrative-agent output and the web UI. (Hebrew tokens cost ~2x.)
+2. **English inside, Hebrew outside.** All prompts, state, tool schemas, logs, code comments: English. Hebrew exists only in narrative-agent output and the web UI. (Hebrew tokens cost ~2x.) Exactly two event payload fields are sanctioned exceptions: `narrative_emitted.text`, and `player_input.text` — the player's own words, kept as the audit trail for router misclassifications (§4.7 step 4). A third needs its own decision; do not treat these as a precedent.
 3. **Event log is the source of truth.** State is a projection of the append-only `GameEvent` stream. Every mutation goes through an event. Enables replay, undo, reconnect.
 4. **Schemas define everything once.** Types, runtime validation, and LLM tool definitions all derive from `@ai-dm/schemas` zod schemas. Never hand-write a duplicate interface or JSON schema.
 5. **Dependency direction:** `schemas ← rules-engine ← agents ← server`. `web` depends only on `schemas`. Nothing depends on `server`.

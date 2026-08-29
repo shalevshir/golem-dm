@@ -45,3 +45,17 @@ export interface AuthoredWorld {
 export function pairKey(a: string, b: string): string {
   return a < b ? `${a}|${b}` : `${b}|${a}`;
 }
+
+/**
+ * Recovers the two ids `pairKey` folded together. The ONLY other code, besides
+ * `pairKey` itself, that reads the `|` separator.
+ *
+ * Sliced around the separator's index rather than `.split("|")` so the result
+ * is two `string`s rather than two `string | undefined`s under
+ * `noUncheckedIndexedAccess` — a key `pairKey` produced always has exactly one
+ * `|`, since `ContentId` forbids the character in either id.
+ */
+export function splitPairKey(key: string): [string, string] {
+  const separator = key.indexOf("|");
+  return [key.slice(0, separator), key.slice(separator + 1)];
+}
