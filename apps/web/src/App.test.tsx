@@ -916,4 +916,123 @@ describe("App (scene mode, out-of-combat free text)", () => {
     expect(await screen.findByRole("alert")).toBeInTheDocument();
     expect(screen.getByText(he.errors.free_text_not_supported)).toBeInTheDocument();
   });
+
+  it("does not latch the FreeTextBar disabled forever on an internal_error with no clientMessageId (the ws.ts catch-all shape)", async () => {
+    // apps/server/src/transport/ws.ts's catch-all around a failed
+    // handleCommand drain sends {type:"error", code:"internal_error"} with
+    // NO clientMessageId -- ServerFrame's error member declares it optional,
+    // so this is schema-legal. This is the exact frame this task's own
+    // manual smoke test received when the configured provider key was
+    // invalid: without treating "no id" as a match, `current === clientMessageId`
+    // (undefined) never holds and the bar stays disabled forever -- a
+    // soft-lock in a new costume, recoverable only by a page refresh.
+    await start();
+    act(() => {
+      socket.emitMessage({ type: "campaign_state", sequence: 0, snapshot: sceneSnapshot() });
+    });
+
+    const input = await screen.findByPlaceholderText(he.freeText.placeholder);
+    await userEvent.type(input, "לך לשוק{Enter}");
+    expect(screen.getByPlaceholderText(he.freeText.placeholder)).toBeDisabled();
+
+    act(() => {
+      // No clientMessageId at all -- distinct from the matching-id case
+      // already covered above.
+      socket.emitMessage({ type: "error", code: "internal_error", message: "boom" });
+    });
+
+    expect(screen.getByPlaceholderText(he.freeText.placeholder)).not.toBeDisabled();
+  });
+
+  it("clears a latched pendingFreeTextId on reconnect, so a send dropped by a disconnected socket cannot disable the bar forever", async () => {
+    // net/connection.ts's send() silently no-ops while the socket is not
+    // OPEN. A send made in that window sets pendingFreeTextId for a message
+    // that never reached the wire, so no narrative_emitted or matching
+    // error/rejected will EVER arrive to clear it -- only the reconnect
+    // control (or a full page refresh) can recover.
+    await start();
+    act(() => {
+      socket.emitMessage({ type: "campaign_state", sequence: 0, snapshot: sceneSnapshot() });
+    });
+
+    const input = await screen.findByPlaceholderText(he.freeText.placeholder);
+    await userEvent.type(input, "לך לשוק{Enter}");
+    expect(screen.getByPlaceholderText(he.freeText.placeholder)).toBeDisabled();
+
+    act(() => {
+      socket.emitMessage({ type: "error", code: "internal_error", message: "boom" });
+    });
+    const reconnectButton = await screen.findByRole("button", { name: he.app.reconnect });
+    act(() => {
+      reconnectButton.click();
+    });
+
+    // Reconnecting re-runs the whole connect effect, which (in this non-
+    // `?world=` fixture) re-awaits `fetchCatalogue` before it registers the
+    // NEW socket listeners -- so an `emitOpen()` fired too early lands on
+    // the stale listener from the connection that's being torn down, and a
+    // later, genuine `onStatus("connecting")` from the real reconnect
+    // overwrites the status it set. Polling `emitOpen()` on every retry
+    // (rather than stopping at the first one that lands) rides out that
+    // race the same way a real socket's own async connect would.
+    await waitFor(() => {
+      socket.emitOpen();
+      socket.emitMessage({ type: "campaign_state", sequence: 0, snapshot: sceneSnapshot() });
+      expect(screen.getByPlaceholderText(he.freeText.placeholder)).not.toBeDisabled();
+    });
+  });
+});
+
+// §4.7 step 4's only real production path: `?world=` campaign creation. The
+// scene-mode tests above all go through the default `start()` helper, which
+// fetches an encounter catalogue -- so without this suite, the scene branch
+// is never exercised with `catalogue === null`, and nothing pins that the
+// catalogue fetch is genuinely skipped for a world campaign.
+describe("App (?world= query param)", () => {
+  const scene = {
+    worldId: "emberfall",
+    currentNodeId: "market-square",
+    completedNodeIds: [],
+    relations: [],
+    day: 1,
+  };
+
+  function sceneSnapshot(): CampaignState {
+    return {
+      world: { campaignId: "s1", rootSeed: 3, appliedClientMessageIds: [], scene },
+      encounter: null,
+    };
+  }
+
+  beforeEach(() => {
+    window.history.pushState({}, "", "/?world=emberfall");
+  });
+
+  afterEach(() => {
+    window.history.pushState({}, "", "/");
+  });
+
+  it("creates the campaign with {worldId}, never fetches an encounter catalogue, and still renders the FreeTextBar", async () => {
+    await start();
+
+    const posts = fetchMock.mock.calls.filter(
+      (call: unknown[]) => (call[1] as RequestInit | undefined)?.method === "POST",
+    );
+    expect(posts).toHaveLength(1);
+    expect(JSON.parse((posts[0]?.[1] as RequestInit).body as string)).toEqual({
+      worldId: "emberfall",
+    });
+    // The gap this closes: without this assertion, reinstating the old
+    // combined "not ready" condition (requiring a catalogue unconditionally)
+    // would break `?world=` in production while every other test here stays
+    // green, since none of them set `window.location.search`.
+    expect(
+      fetchMock.mock.calls.some((call: unknown[]) => String(call[0]).includes("/encounters/")),
+    ).toBe(false);
+
+    act(() => {
+      socket.emitMessage({ type: "campaign_state", sequence: 0, snapshot: sceneSnapshot() });
+    });
+    expect(await screen.findByPlaceholderText(he.freeText.placeholder)).toBeInTheDocument();
+  });
 });

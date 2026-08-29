@@ -183,15 +183,25 @@ export function App(props: AppProps): JSX.Element {
           // cleared unconditionally on `narrative_emitted` (there is at most
           // one in flight, since the bar is disabled while pending, so no
           // `clientMessageId` travels on that event to match against), and
-          // on an `error`/`rejected` frame whose `clientMessageId` actually
-          // matches it — an unrelated frame must not re-enable a bar that is
-          // still waiting on its own turn.
+          // on an `error`/`rejected` frame whose `clientMessageId` either
+          // matches it or is ABSENT. Absent matters: `ServerFrame`'s error
+          // member declares `clientMessageId` optional, and
+          // `apps/server/src/transport/ws.ts`'s catch-all around a failed
+          // `handleCommand` drain sends exactly that shape — the frame this
+          // task's own smoke test received when the provider key was
+          // missing. Treating "no id" as "not a match" left the bar latched
+          // disabled forever on that path; treating it as "clear" is safe
+          // because the only other thing an unrelated in-flight id could be
+          // is a stale one from a send this same latch already disabled
+          // further sends for.
           if (frame.type === "event" && frame.event.type === "narrative_emitted") {
             setPendingFreeTextId(null);
           } else if (frame.type === "error" || frame.type === "rejected") {
             const clientMessageId = frame.clientMessageId;
             setPendingFreeTextId((current) =>
-              current !== null && current === clientMessageId ? null : current,
+              current !== null && (clientMessageId === undefined || current === clientMessageId)
+                ? null
+                : current,
             );
           }
         },
@@ -229,6 +239,11 @@ export function App(props: AppProps): JSX.Element {
     setState(initialClientState);
     setCatalogue(null);
     setStarted(false);
+    // Part of "every piece of state a fresh mount would otherwise read as
+    // still in progress" (see the comment above): left set, a NEXT scene
+    // campaign would render its `FreeTextBar` disabled from its very first
+    // frame, for a send that named a campaign this reset just discarded.
+    setPendingFreeTextId(null);
   }, []);
 
   // `internal_error`: the spec's error table says "Surface, and offer
@@ -243,6 +258,12 @@ export function App(props: AppProps): JSX.Element {
   const reconnect = useCallback(() => {
     setState((previous) => ({ ...previous, lastError: null, lastRejection: null }));
     setReconnectNonce((previous) => previous + 1);
+    // A drop between render and click can leave `pendingFreeTextId` set for
+    // a `free_text` that never reached the wire (`net/connection.ts`'s
+    // `send` silently no-ops while disconnected) — the resume replay that
+    // follows has no `narrative_emitted` for it, so nothing would ever
+    // clear the latch without this.
+    setPendingFreeTextId(null);
   }, []);
 
   // `unknown_campaign`: the server has forgotten this campaign (error table,
