@@ -1285,6 +1285,73 @@ describe("handleCommand — free text: narrate-only categories", () => {
   });
 });
 
+// Invariant 4 ("schemas define everything once") only holds if these `.parse`
+// calls actually reject a bad payload rather than being decoration around an
+// object literal that was already correct by construction. Each test here
+// injects a shape that could only ever reach the pipeline through a port
+// (the classifier, or the SRD skill/ability data) — never through normal,
+// correctly-typed control flow — which is exactly why the schema, not the
+// type system, has to be the thing that catches it.
+describe("handleCommand — free text: schema parsing at emit sites", () => {
+  it("rejects an exploration classification whose targetNodeId isn't a valid ContentId, via IntentClassifiedPayload", async () => {
+    const store = createInMemoryEventStore();
+    const campaign = await sceneCampaign(store);
+    // Structurally a valid "exploration" classification — it reaches the
+    // "exploration" case, not `assertNever` — but `targetNodeId` fails
+    // `ContentId`'s regex (lowercase kebab-case only). No real classifier
+    // can produce this (Decision 5: `generateStructured` already
+    // schema-validates), so this stands in for the port contract being
+    // violated some other way. Deliberately NOT a bad `category`: every
+    // category outside the five real ones falls through to `assertNever`
+    // and throws regardless of whether `.parse` runs, which would prove
+    // nothing about the parse specifically. And if this reached
+    // `traverseEdge` unchecked, it would just be "no such edge" — a
+    // graceful, narrated refusal, not a throw — which is what confirms the
+    // throw here comes from `.parse`, not from engine validation downstream.
+    const bogus: IntentClassification = {
+      category: "exploration",
+      targetNodeId: "NOT-A-VALID-ID!!",
+    };
+    const ports: TurnPorts = { ...portsWith(store), intent: classifiedAs(bogus) };
+
+    await expect(
+      drain(handleCommand(campaign, { type: "free_text", clientMessageId: "c1", text: "hello" }, ports)),
+    ).rejects.toThrow();
+  });
+
+  it("rejects a check whose resolved ability isn't a real AbilityKey, via CheckRolledPayload", async () => {
+    const store = createInMemoryEventStore();
+    const campaign = await sceneCampaign(store);
+    // The classification itself is entirely valid — it passes
+    // `IntentClassifiedPayload.parse` cleanly — so this pins `.parse` at the
+    // check_rolled site specifically, not a repeat of the test above. The
+    // bad value enters through `skillAbilities` (a port this file fully
+    // controls), which `checkAbilityFor` trusts for a named skill's
+    // governing ability — the one field `CheckRolledPayload` sees that
+    // never passed through `IntentClassification`'s own `AbilityKey` check.
+    const ports: TurnPorts = {
+      ...portsWith(store),
+      intent: classifiedAs({
+        category: "check",
+        ability: "str",
+        skill: "athletics",
+        difficulty: "medium",
+      }),
+      skillAbilities: new Map([["athletics", "made-up-ability" as AbilityKey]]),
+    };
+
+    await expect(
+      drain(
+        handleCommand(
+          campaign,
+          { type: "free_text", clientMessageId: "c1", text: "I try to climb the ridge" },
+          ports,
+        ),
+      ),
+    ).rejects.toThrow();
+  });
+});
+
 describe("handleCommand — structured action", () => {
   it("refuses an action from someone whose turn it is not", async () => {
     const store = createInMemoryEventStore();
