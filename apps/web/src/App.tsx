@@ -95,12 +95,23 @@ export function App(props: AppProps): JSX.Element {
   );
 
   // The one outstanding `free_text` send, out of combat (§4.7 step 4). Set
-  // when the player submits, and cleared inside the `connect()` effect's
-  // `onFrame` below — a `narrative_emitted` event unconditionally (at most
-  // one send is ever in flight, since the bar disables itself while this is
-  // non-null), or a matching `error`/`rejected` frame (`clientMessageId`
-  // equal to this). `FreeTextBar` stays disabled the whole time, which is
-  // what stops a second send racing the first.
+  // when the player submits; `FreeTextBar` stays disabled the whole time it
+  // is non-null, which is what stops a second send racing the first (and is
+  // why at most one send is ever in flight).
+  //
+  // Four sites clear it, and all four are load-bearing — a path that misses
+  // leaves the bar disabled forever, which is the inert-board soft-lock in an
+  // out-of-combat costume:
+  //   1. `onFrame`, on a `narrative_emitted` event: the turn answered.
+  //   2. `onFrame`, on an `error`/`rejected` frame whose `clientMessageId`
+  //      matches — or carries none at all. `ws.ts`'s catch-all `internal_error`
+  //      is schema-legal without one, so treating absent as a match is what
+  //      keeps that frame from latching the bar.
+  //   3. `onStatus`, on any transition away from `"open"`. A send dropped
+  //      client-side on a closed socket produces no frame at all, so `onFrame`
+  //      never runs; this is the only site that sees that case.
+  //   4. `resetToStart` and `reconnect`, so a fresh campaign or a manual
+  //      reconnect never inherits a stale pending id.
   const [pendingFreeTextId, setPendingFreeTextId] = useState<string | null>(null);
 
   // `resumeFrom` is read at join time, not captured at connect time — a
