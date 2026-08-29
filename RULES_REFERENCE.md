@@ -32,6 +32,7 @@ were corrected (Temporary HP choice, narrow openings) — see §4, §5, §8.
 | Ability modifier | `floor((score − 10) / 2)`. Table runs 3→−4 … 20→+5; formula extends past 20 for monsters. | `checks/` `abilityModifier` |
 | Proficiency bonus | `2 + floor((level − 1) / 4)` → levels 1–4:+2, 5–8:+3, 9–12:+4, 13–16:+5, 17–20:+6. | `checks/` `proficiencyBonusForLevel` |
 | Success test | Total **equals or exceeds** the DC. | `checks/` `resolveD20Test` |
+| Typical Difficulty Classes | Very Easy 5, Easy 10, Medium 15, Hard 20, Very Hard 25, Nearly Impossible 30. | `checks/` `DC_BY_DIFFICULTY` |
 | Advantage / disadvantage | Roll 2d20, take higher / lower. Never stacks — one instance is the same as three. | `dice/` `d20` |
 | Expertise | Doubles the proficiency bonus. | `checks/` `totalModifier` |
 | Passive score | `10 + check bonus`, **+5** with Advantage, **−5** with Disadvantage. No die is rolled. | `checks/` `passiveScore`; a character's Passive Perception is derived instead via `PASSIVE_BASE` in `character/` `deriveCharacter` (`passivePerception`) — the one a character actually goes through |

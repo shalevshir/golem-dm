@@ -5,9 +5,9 @@ import type { CheckDifficulty } from "@ai-dm/schemas";
 
 /**
  * SRD 5.2.1 "Typical Difficulty Classes" table, verified against the SRD
- * NotebookLM notebook (RULES_REFERENCE.md does not carry this table). The
- * intent router proposes a `CheckDifficulty` label only — this is the
- * engine's sole authority translating that label to a DC number.
+ * NotebookLM notebook (see RULES_REFERENCE.md §1 for the row). The intent
+ * router proposes a `CheckDifficulty` label only — this is the engine's sole
+ * authority translating that label to a DC number.
  */
 export const DC_BY_DIFFICULTY: Record<CheckDifficulty, number> = {
   very_easy: 5,

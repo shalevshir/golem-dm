@@ -17,6 +17,8 @@ and those modules are the versioned source of record:
 |---|---|
 | tactical | `packages/agents/src/tactical/prompt-text.ts` |
 | narrative | `packages/agents/src/narrative/prompt-text.ts` |
+| intent | `packages/agents/src/intent/prompt-text.ts` |
+| scene narrative | `packages/agents/src/narrative/scene-prompt-text.ts` |
 | rules digest | `packages/agents/src/rules-digest.ts` |
 
 A markdown copy here would be a twin that drifts, and loading markdown at

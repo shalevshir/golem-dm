@@ -22,14 +22,26 @@
 // catalogue === null`) indefinitely, on a live socket that is otherwise
 // working fine.
 //
-// Unreachable today: a client never resumes from sequence 0 — `POST
-// /campaigns` always starts the one encounter before any client joins, so a
-// join always lands after `encounter_started` and receives it folded into
-// the `campaign_state` snapshot, never as a live `event` frame. §4.7's step
-// 4, which separates campaign creation from starting a fight, is what makes
-// this reachable, and it is the point at which `apps/web` needs its own
-// answer (either a catalogue fetch alongside `reduce`, or giving up on
-// `fold` projecting a bracket at all).
+// §4.7 step 4 has landed the half of this that was actually load-bearing: a
+// campaign no longer has to bundle a fight with its creation at all — a
+// `worldId` campaign never does, and its client joins with `state.encounter`
+// null from the start. That breaks the OLD justification for calling this
+// gap unreachable, which leaned on "campaign creation always bundles a
+// fight" as a blanket fact rather than a property of one HTTP route.
+//
+// It is not yet exercised, though: `POST /campaigns`'s `encounterId` branch
+// still awaits `startEncounter` before it hands back a `campaignId`, so a
+// combat campaign's very first snapshot a client can ever see already has
+// its board — every current path remains as unreachable as this comment used
+// to claim. What changed is WHICH step owns closing it. §4.7 step 5 (the
+// combat bridge) is what starts a fight on a running campaign a client has
+// already joined — the "combat" `free_text` category is explicitly a
+// non-goal of this step (see `pipeline.ts`'s narrate-only categories) — and
+// the moment that lands, its `encounter_started` streams to an already-open
+// socket as a live `event` frame, hitting exactly this gap. This plan does
+// not add the fix; `apps/web` still needs one (a catalogue fetch alongside
+// `reduce`, or giving up on `fold` projecting a bracket at all) before step 5
+// can safely ship.
 //
 // Nothing here may import a Node built-in, or `apps/web`'s bundle breaks — and
 // nothing here may import `@ai-dm/rules-engine`, which would invert the

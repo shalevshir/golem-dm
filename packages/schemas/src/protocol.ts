@@ -161,11 +161,11 @@ export const StructuredActionMessage = z.object({
 });
 
 /**
- * Accepted by the envelope, but not implemented in this slice: the pipeline
- * answers every `free_text` message with a `free_text_not_supported` error
- * frame rather than routing it to a model. The `.max` cap still matters even
- * so — it stops an oversized message at transport parse, before any future
- * implementation could put it in front of a prompt.
+ * The pipeline routes this to the intent router out of combat (§4.7 step 4);
+ * in combat, or with no scene open at all, it still answers with a
+ * `free_text_not_supported` error frame. The `.max` cap matters regardless of
+ * routing — it stops an oversized message at transport parse, before it ever
+ * reaches a prompt.
  */
 export const FreeTextMessage = z.object({
   type: z.literal("free_text"),
