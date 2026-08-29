@@ -324,10 +324,12 @@ describe("reduce", () => {
 
   it("ignores a non-turn-advancing scene_changed even with no encounter open", () => {
     // The counterpart the plan's own wording omits: the `kind` gate runs
-    // BEFORE the bracket guard, on purpose, so a non-combat scene change —
-    // the kind §4.7's step 4 will emit for exploration and social scenes —
-    // can arrive with no fight open at all. Guarding the whole event type
-    // instead would make that future, legitimate event throw.
+    // BEFORE the bracket guard, on purpose, so a non-combat `scene_changed`
+    // kind — §4.7 step 4 ended up not needing one, modeling out-of-combat
+    // scene change as its own event types instead, but `kind` stays a bare
+    // `z.string()`, not a closed enum — can arrive with no fight open at
+    // all. Guarding the whole event type instead would make any such kind,
+    // should one ever exist, throw for arriving where it belongs.
     const noBracketOpen: CampaignState = { ...base, encounter: null };
     const narrationCue = event(20, "scene_changed", { kind: "narration_cue" });
     const next = reduce(noBracketOpen, narrationCue);

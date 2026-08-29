@@ -14,7 +14,7 @@ The LLM cascade: intent router, enemy tactical agent, Hebrew narrative agent, be
 
 ## Prompt rules
 
-- Prompt strings are versioned, English-only TypeScript modules — `intent/prompt-text.ts`, `tactical/prompt-text.ts`, `narrative/prompt-text.ts`, `rules-digest.ts` — not markdown; `docs/prompts/README.md` explains why. `docs/prompts/hebrew-glossary.md` is the one exception: an editable data file, not prompt text.
+- Prompt strings are versioned, English-only TypeScript modules — `intent/prompt-text.ts`, `tactical/prompt-text.ts`, `narrative/prompt-text.ts`, `narrative/scene-prompt-text.ts`, `rules-digest.ts` — not markdown; `docs/prompts/README.md` explains why. `docs/prompts/hebrew-glossary.md` is the one exception: an editable data file, not prompt text.
 - Cache-stable prefix ordering: static system + glossary → semi-static (character sheet, NPC cards) → dynamic turn state. Don't interleave dynamic content into the static prefix — it breaks prompt caching.
 - Combat context = compact structured state snapshot (positions, HP, conditions, initiative), NOT raw dialogue history.
 

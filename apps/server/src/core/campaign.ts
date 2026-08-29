@@ -83,7 +83,7 @@ export interface Campaign {
    * touches `built` at all, so it is a fourth path that CAN set one without
    * the other — it just doesn't today, because no `emit` call site passes a
    * bracket event. `emit` is the natural home for the `encounter_resolved`
-   * that §4.7's step 4 will eventually append there, and the day it does,
+   * that §4.7's step 5 will eventually append there, and the day it does,
    * `built` would go stale exactly at that call. `builtOf`'s guard above is
    * what catches that the moment anything reads the board afterward — that
    * is the design working as intended, not a hole this comment is papering

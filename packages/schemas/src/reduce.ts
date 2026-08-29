@@ -123,9 +123,13 @@ export function reduce(state: CampaignState, event: GameEvent): CampaignState {
       // Checked after the `kind` gate, not before: `turn_advanced` is the one
       // kind that is a combat signal (this event keeps a narrative name it
       // has never earned), and it is exactly the kind this branch writes the
-      // encounter for. Guarding the whole event type instead would make any
-      // future out-of-combat scene change — the kind §4.7's step 4 will
-      // emit — throw for arriving where it belongs.
+      // encounter for. §4.7 step 4 ended up modeling out-of-combat scene
+      // change as its own event types (`quest_node_entered`,
+      // `quest_node_completed`, `world_delta_applied`) rather than a second
+      // `scene_changed` kind, so this gate has no current out-of-combat
+      // caller — it stays because guarding the whole event type instead would
+      // make any future non-`turn_advanced` kind, should one ever exist,
+      // throw for arriving where it belongs.
       if (state.encounter === null) {
         throw new Error(
           `Combat event ${event.type} at sequence ${String(event.sequence)} with no encounter open`,

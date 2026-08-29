@@ -177,7 +177,7 @@ describe("imposedSaveDc", () => {
 
 describe("DC_BY_DIFFICULTY", () => {
   // SRD 5.2.1 "Typical Difficulty Classes" table, verified via the NotebookLM
-  // SRD notebook (RULES_REFERENCE.md does not carry this table).
+  // SRD notebook (see RULES_REFERENCE.md §1 for the row).
   it("matches the SRD's Typical Difficulty Classes table exactly", () => {
     expect(DC_BY_DIFFICULTY).toStrictEqual({
       very_easy: 5,
