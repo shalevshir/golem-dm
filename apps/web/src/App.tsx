@@ -423,6 +423,15 @@ export function App(props: AppProps): JSX.Element {
       <main>
         <h1>{he.app.title}</h1>
 
+        {/* Out of combat there is no "turn" concept, so this mirrors only
+            the connection half of the combat view's status line below --
+            a dropped socket must not present as a dead input box with
+            nothing explaining it (the inert-board soft-lock in a scene
+            costume, whole-branch review finding 3). */}
+        <p className="status">
+          {status === "reconnecting" ? he.app.reconnecting : he.app.waiting}
+        </p>
+
         <ErrorBanner
           error={state.lastError}
           rejection={state.lastRejection}

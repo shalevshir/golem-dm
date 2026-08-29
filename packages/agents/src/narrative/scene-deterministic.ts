@@ -17,6 +17,7 @@ type GenderedForms = Readonly<Record<GrammaticalGender, string>>;
 
 const FORMS: Readonly<Record<string, GenderedForms>> = {
   arrives: { masculine: "מגיע", feminine: "מגיעה" },
+  concludes: { masculine: "מסיים", feminine: "מסיימת" },
   succeeds: { masculine: "מצליח", feminine: "מצליחה" },
   fails: { masculine: "נכשל", feminine: "נכשלת" },
 };
@@ -43,6 +44,8 @@ function sentenceFor(input: SceneNarrationInput): string {
   switch (beat.kind) {
     case "arrived":
       return `${playerNameHebrew} ${form("arrives", playerGender)} אל ${beat.locationNameHebrew}.`;
+    case "concluded":
+      return `${playerNameHebrew} ${form("concludes", playerGender)} את העניין ליד ${beat.locationNameHebrew}.`;
     // Generic on purpose — see the file header. `beat.messages` is never read.
     case "refused":
       return "הדרך חסומה כרגע.";

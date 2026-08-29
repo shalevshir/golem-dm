@@ -15,6 +15,15 @@ describe("FreeTextBar", () => {
     expect(screen.getByRole("button", { name: he.freeText.send })).toBeInTheDocument();
   });
 
+  // Whole-branch review finding 4: a placeholder is not an accessible name --
+  // it disappears once the field has a value, and every test before this one
+  // located the input by placeholder text alone.
+  it("gives the input an accessible name, not just a placeholder", () => {
+    render(<FreeTextBar disabled={false} onSend={() => undefined} />);
+
+    expect(screen.getByRole("textbox", { name: he.freeText.placeholder })).toBeInTheDocument();
+  });
+
   it("respects the disabled prop on both the input and the send button", () => {
     render(<FreeTextBar disabled onSend={() => undefined} />);
 

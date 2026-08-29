@@ -31,6 +31,7 @@ export function FreeTextBar(props: FreeTextBarProps): JSX.Element {
         dir="rtl"
         maxLength={MAX_FREE_TEXT_LENGTH}
         placeholder={he.freeText.placeholder}
+        aria-label={he.freeText.placeholder}
         value={text}
         disabled={props.disabled}
         onChange={(event) => {

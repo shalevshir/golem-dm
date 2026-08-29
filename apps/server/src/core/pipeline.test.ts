@@ -1036,6 +1036,39 @@ describe("handleCommand — free text", () => {
     ]);
   });
 
+  // Whole-branch review finding 2: `completeCurrentNode` with no traversal
+  // is not an arrival — the player never moved. Narrating it as `arrived`
+  // would tell the player they just reached a place they were already
+  // standing in. Asserted on the actual `SceneBeat` the pipeline builds,
+  // not just the event list, which is identical for both beat kinds.
+  it("narrates a terminal node completed in place as concluded, not arrived", async () => {
+    const store = createInMemoryEventStore();
+    const before: SceneSnapshot = {
+      worldId: "emberfall",
+      currentNodeId: "reckoning",
+      completedNodeIds: ["arrival", "guild-offer", "the-weir"],
+      relations: [{ factionA: "ashen-guild", factionB: "river-wardens", band: "hostile" }],
+      day: 1,
+    };
+    const campaign = await sceneCampaign(store, before);
+    const seen: SceneNarrationInput[] = [];
+    const ports: TurnPorts = {
+      ...portsWith(store),
+      intent: classifiedAs({ category: "exploration", targetNodeId: null }),
+      sceneNarrative: recordingSceneNarrative(seen),
+    };
+
+    await drain(
+      handleCommand(
+        campaign,
+        { type: "free_text", clientMessageId: "c1", text: "let's settle this" },
+        ports,
+      ),
+    );
+
+    expect(seen.map((each) => each.beat)).toEqual([{ kind: "concluded", locationNameHebrew: "אמברפול" }]);
+  });
+
   it("does not re-apply a world delta when re-completing an already-completed node", async () => {
     const store = createInMemoryEventStore();
     const before: SceneSnapshot = {

@@ -843,6 +843,38 @@ describe("App (scene mode, out-of-combat free text)", () => {
     ).toBe(false);
   });
 
+  // Whole-branch review finding 3: the scene view had no connection-status
+  // line at all, so a dropped socket presented as a dead input box with
+  // nothing explaining it -- the inert-board soft-lock in an out-of-combat
+  // costume. Drives the same drop -> retry -> reconnect cycle the
+  // pendingFreeTextId test below uses.
+  it("shows a connection-status line in the scene view, switching to reconnecting on a drop and back once reconnected", async () => {
+    await start();
+    act(() => {
+      socket.emitMessage({ type: "campaign_state", sequence: 0, snapshot: sceneSnapshot() });
+    });
+
+    await screen.findByPlaceholderText(he.freeText.placeholder);
+    expect(screen.queryByText(he.app.reconnecting)).not.toBeInTheDocument();
+
+    vi.useFakeTimers();
+    act(() => {
+      socket.emitClose();
+    });
+    expect(screen.getByText(he.app.reconnecting)).toBeInTheDocument();
+
+    act(() => {
+      vi.advanceTimersByTime(1000);
+    });
+    vi.useRealTimers();
+
+    act(() => {
+      socket.emitOpen();
+    });
+
+    expect(screen.queryByText(he.app.reconnecting)).not.toBeInTheDocument();
+  });
+
   it("keeps today's placeholder when encounter is null and scene is also null (a legacy/pre-genesis campaign)", async () => {
     await start();
     act(() => {

@@ -1345,11 +1345,17 @@ export async function* handleCommand(
             // Reads `currentScene()` fresh, post-emit: for a traversal this
             // is the new node; for a `completeCurrentNode` it is the same
             // one, and either way `sceneNarrate` narrates whatever node the
-            // player is standing in now.
+            // player is standing in now. `targetNodeId === null` means no
+            // traversal happened (Decision 1's "conclude the current node"
+            // path) — narrating that as `arrived` would tell the player they
+            // reached a place they were already standing in, so it gets its
+            // own beat instead (whole-branch review finding 2).
             const card = questNodeCard(statics.authored, currentScene().currentNodeId);
             yield* sceneNarrate(
               statics.character.characterId,
-              { kind: "arrived", sceneEnglish: card.sceneEnglish, locationNameHebrew: card.locationNameHebrew },
+              targetNodeId === null
+                ? { kind: "concluded", locationNameHebrew: card.locationNameHebrew }
+                : { kind: "arrived", locationNameHebrew: card.locationNameHebrew },
               deadline,
             );
             // For symmetry with `structured_action`'s ending — out of combat

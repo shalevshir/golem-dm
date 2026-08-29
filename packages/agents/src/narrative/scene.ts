@@ -22,6 +22,8 @@ function renderBeat(beat: SceneBeat): string {
   switch (beat.kind) {
     case "arrived":
       return `- arrived: the player reached ${beat.locationNameHebrew}`;
+    case "concluded":
+      return `- concluded: the player concluded matters at ${beat.locationNameHebrew} without leaving it`;
     case "refused":
       return ["- refused. REFUSAL REASON (ground truth, translate, do not invent an alternative):"]
         .concat(beat.messages.map((message) => `  - ${message}`))

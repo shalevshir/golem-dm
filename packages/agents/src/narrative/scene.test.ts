@@ -10,7 +10,7 @@ import { HEBREW_GLOSSARY } from "./prompt-text.js";
 import type { SceneNarrationInput } from "./scene-port.js";
 
 const INPUT: SceneNarrationInput = {
-  beat: { kind: "arrived", sceneEnglish: "A quiet market square.", locationNameHebrew: "הכיכר" },
+  beat: { kind: "arrived", locationNameHebrew: "הכיכר" },
   sceneEnglish: "A quiet market square.",
   playerNameHebrew: "אלדד",
   playerGender: "masculine",
@@ -97,6 +97,18 @@ describe("buildScenePrompt", () => {
     const reply = { ...INPUT, beat: { kind: "reply" as const, category: "combat" as const } };
     const prompt = buildScenePrompt(reply);
     expect(prompt.dynamic?.some((segment) => segment.includes("combat"))).toBe(true);
+  });
+
+  // Whole-branch review finding 2: `completeCurrentNode` with no traversal
+  // must not be narrated as `arrived` (a false "the player just got here"
+  // statement) — it gets its own beat, so the model tier must actually
+  // receive it as something distinct.
+  it("puts the concluded beat's location in the dynamic tier, distinct from arrived", () => {
+    const concluded = { ...INPUT, beat: { kind: "concluded" as const, locationNameHebrew: "הכיכר" } };
+    const prompt = buildScenePrompt(concluded);
+    expect(prompt.dynamic?.some((segment) => segment.includes("concluded"))).toBe(true);
+    expect(prompt.dynamic?.some((segment) => segment.includes("הכיכר"))).toBe(true);
+    expect(prompt.dynamic?.some((segment) => segment.includes("arrived"))).toBe(false);
   });
 });
 

@@ -6,7 +6,8 @@
 import type { AbilityKey, GrammaticalGender, Skill } from "@ai-dm/schemas";
 
 export type SceneBeat =
-  | { kind: "arrived"; sceneEnglish: string; locationNameHebrew: string }
+  | { kind: "arrived"; locationNameHebrew: string }
+  | { kind: "concluded"; locationNameHebrew: string }
   | { kind: "refused"; messages: readonly string[] }
   | { kind: "check"; ability: AbilityKey; skill?: Skill; success: boolean }
   | { kind: "reply"; category: "social" | "combat" | "ooc" };

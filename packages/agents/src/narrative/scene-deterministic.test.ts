@@ -34,7 +34,7 @@ function endsComplete(text: string): boolean {
 describe("createDeterministicSceneNarrative", () => {
   it("names the location on arrival", async () => {
     const text = await textOf(
-      input(ELDAD, { kind: "arrived", sceneEnglish: "A quiet market square.", locationNameHebrew: "הכיכר" }),
+      input(ELDAD, { kind: "arrived", locationNameHebrew: "הכיכר" }),
     );
     expect(text).toContain("הכיכר");
     expect(endsComplete(text)).toBe(true);
@@ -42,16 +42,35 @@ describe("createDeterministicSceneNarrative", () => {
 
   it("agrees the arrival verb with a feminine subject", async () => {
     const text = await textOf(
-      input(RANGER, { kind: "arrived", sceneEnglish: "A quiet market square.", locationNameHebrew: "הכיכר" }),
+      input(RANGER, { kind: "arrived", locationNameHebrew: "הכיכר" }),
     );
     expect(text).toBe("רעות מגיעה אל הכיכר.");
   });
 
   it("agrees the arrival verb with a masculine subject", async () => {
     const text = await textOf(
-      input(ELDAD, { kind: "arrived", sceneEnglish: "A quiet market square.", locationNameHebrew: "הכיכר" }),
+      input(ELDAD, { kind: "arrived", locationNameHebrew: "הכיכר" }),
     );
     expect(text).toBe("אלדד מגיע אל הכיכר.");
+  });
+
+  // Whole-branch review finding 2: concluding a terminal node in place is
+  // NOT an arrival — it must get its own template, never reuse `arrives`.
+  it("names the location on conclusion, without an arrival verb", async () => {
+    const text = await textOf(input(ELDAD, { kind: "concluded", locationNameHebrew: "הכיכר" }));
+    expect(text).toContain("הכיכר");
+    expect(text).not.toContain("מגיע");
+    expect(endsComplete(text)).toBe(true);
+  });
+
+  it("agrees the conclusion verb with a feminine subject", async () => {
+    const text = await textOf(input(RANGER, { kind: "concluded", locationNameHebrew: "הכיכר" }));
+    expect(text).toBe("רעות מסיימת את העניין ליד הכיכר.");
+  });
+
+  it("agrees the conclusion verb with a masculine subject", async () => {
+    const text = await textOf(input(ELDAD, { kind: "concluded", locationNameHebrew: "הכיכר" }));
+    expect(text).toBe("אלדד מסיים את העניין ליד הכיכר.");
   });
 
   it("renders a generic blocked-path line for a refusal, never echoing the English messages", async () => {
@@ -94,7 +113,7 @@ describe("createDeterministicSceneNarrative", () => {
 
   it("never emits a digit", async () => {
     const text = await textOf(
-      input(ELDAD, { kind: "arrived", sceneEnglish: "A quiet market square.", locationNameHebrew: "הכיכר" }),
+      input(ELDAD, { kind: "arrived", locationNameHebrew: "הכיכר" }),
     );
     expect(text).not.toMatch(/[0-9]/);
   });

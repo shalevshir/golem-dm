@@ -72,6 +72,29 @@ describe("POST /campaigns", () => {
     expect(response.statusCode).toBe(400);
   });
 
+  // Whole-branch review finding 5: the 400 message claims "exactly one of
+  // encounterId or worldId", but plain `z.object` strips unknown keys, so a
+  // body with BOTH used to match the first union arm and silently discard
+  // `worldId` -- a false claim about the contract at a trust boundary. This
+  // pins the schema actually enforcing what the message says.
+  it("rejects a body with both encounterId and worldId with 400, per the message's own claim", async () => {
+    const { app, store } = appWith();
+    const appendSpy = vi.spyOn(store, "append");
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/campaigns",
+      payload: { encounterId: "goblin-ambush", worldId: "emberfall" },
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(JSON.parse(response.body)).toEqual({
+      error: "provide exactly one of encounterId or worldId",
+    });
+    // Never silently created a campaign from the (wrong) arm it used to match.
+    expect(appendSpy).not.toHaveBeenCalled();
+  });
+
   it("creates a scene campaign from a worldId, reachable with scene state and no board", async () => {
     const { app, registry } = appWith();
     const response = await app.inject({

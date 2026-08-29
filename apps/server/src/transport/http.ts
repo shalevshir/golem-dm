@@ -23,9 +23,18 @@ import { loadWorld, UnknownWorldError } from "../world/index.js";
  */
 const HERO_CHARACTER_ID = "hero";
 
+// `.strict()` on both arms, not just a comment: plain `z.object` silently
+// strips unknown keys, so a body carrying BOTH `encounterId` and `worldId`
+// matched the first arm and quietly discarded `worldId` — a false claim by
+// the 400 message below, which says "exactly one" but the schema never
+// checked that (whole-branch review finding 5). Strict rejects an unknown
+// key instead of stripping it, so a body with both fails BOTH arms and
+// falls into the same 400 a single bad field already produces, without
+// widening `CreateCampaignBody`'s resolved type or `CampaignRegistry.create`'s
+// input away from the `{ encounterId } | { worldId }` the plan mandated.
 const CreateCampaignBody = z.union([
-  z.object({ encounterId: z.string().min(1) }),
-  z.object({ worldId: z.string().min(1) }),
+  z.object({ encounterId: z.string().min(1) }).strict(),
+  z.object({ worldId: z.string().min(1) }).strict(),
 ]);
 
 export interface CampaignRegistry {
