@@ -50,12 +50,14 @@ import {
   createAgentRuntime,
   createDeterministicNarrative,
   createDeterministicSceneNarrative,
+  createDeterministicSceneSummary,
+  createFakeEmbeddingPort,
   createFakePort,
   createTacticalAgent,
   DEFAULT_MODEL_ROUTING,
 } from "@ai-dm/agents";
 import type { IntentAgent, IntentResult } from "@ai-dm/agents";
-import { createInMemoryEventStore } from "@ai-dm/memory";
+import { createInMemoryEpisodicStore, createInMemoryEventStore } from "@ai-dm/memory";
 import type { EventStore } from "@ai-dm/memory";
 import { CampaignCreated, ServerFrame, fold } from "@ai-dm/schemas";
 import type { GameEvent, CampaignState, IntentClassification } from "@ai-dm/schemas";
@@ -128,6 +130,9 @@ async function startServer(): Promise<{ app: FastifyInstance; url: string; store
     narrative: createDeterministicNarrative(),
     intent: walkingIntentAgent(),
     sceneNarrative: createDeterministicSceneNarrative(),
+    episodic: createInMemoryEpisodicStore(),
+    embedding: createFakeEmbeddingPort(),
+    summary: createDeterministicSceneSummary(),
     clock: () => "2026-08-19T10:00:00.000Z",
     uuid,
     seedFor: (rootSeed, sequence) => rootSeed * 1000 + sequence,

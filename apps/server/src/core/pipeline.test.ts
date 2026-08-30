@@ -23,6 +23,8 @@ import {
   createAgentRuntime,
   createDeterministicNarrative,
   createDeterministicSceneNarrative,
+  createDeterministicSceneSummary,
+  createFakeEmbeddingPort,
   createFakePort,
   createHebrewNarrative,
   createTacticalAgent,
@@ -31,7 +33,7 @@ import {
   NARRATIVE_PROMPT_VERSION,
   SCENE_PROMPT_VERSION,
 } from "@ai-dm/agents";
-import { createInMemoryEventStore, EventStoreUnavailableError } from "@ai-dm/memory";
+import { createInMemoryEpisodicStore, createInMemoryEventStore, EventStoreUnavailableError } from "@ai-dm/memory";
 import type { EventStore } from "@ai-dm/memory";
 import { CheckRolledPayload, DiceRolledPayload, NarrativeEmittedPayload } from "@ai-dm/schemas";
 import type {
@@ -139,6 +141,11 @@ function portsWith(store: EventStore, tactical: TacticalAgent = defaultTactical(
     // narration ladder specifically, exactly the way `createDeterministicNarrative()`
     // already does for combat.
     sceneNarrative: createDeterministicSceneNarrative(),
+    // Real, no-network implementations — episodic memory is best-effort by
+    // design (`episodic.ts`'s doc comments), so nothing here needs mocking.
+    episodic: createInMemoryEpisodicStore(),
+    embedding: createFakeEmbeddingPort(),
+    summary: createDeterministicSceneSummary(),
     clock: () => "2026-08-19T10:00:00.000Z",
     uuid: uuids(),
     seedFor: (rootSeed, sequence) => rootSeed * 1000 + sequence,

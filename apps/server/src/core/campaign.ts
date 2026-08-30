@@ -123,6 +123,24 @@ export interface Campaign {
    * memory of what it just said is not a property of the fight.
    */
   recentNarrations: string[];
+  /**
+   * Retrieved episode summaries for the current node, English. Refreshed
+   * only when the current node changes — the query is the node's card and
+   * the NPCs there, both static while the campaign stands at one node, so a
+   * six-turn conversation costs one embedding call rather than six
+   * (episodic-memory spec, Decision 7). A cache, not a projection: a
+   * reloaded campaign starts with an empty list and refills on the next
+   * node transition.
+   */
+  recentMemories: string[];
+  /**
+   * The node id `recentMemories` was retrieved for, or `null` before the
+   * first retrieval. `sceneNarrate` (`pipeline.ts`) refreshes
+   * `recentMemories` exactly when this disagrees with the current node —
+   * `null` on a freshly loaded campaign guarantees the first scene turn
+   * after a load always retrieves rather than serving a stale empty cache.
+   */
+  memoriesForNodeId: string | null;
 }
 
 /**
@@ -290,6 +308,8 @@ export async function createCampaign(input: CreateCampaignInput): Promise<Campai
     sceneStatics: scene ?? null,
     nextSequence: 1,
     recentNarrations: [],
+    recentMemories: [],
+    memoriesForNodeId: null,
   };
 }
 
@@ -525,6 +545,11 @@ export async function loadCampaign(input: {
     sceneStatics,
     nextSequence: (last?.sequence ?? 0) + 1,
     recentNarrations: recentNarrations.slice(-NARRATION_WINDOW),
+    // A cache, not a projection — see `Campaign.recentMemories`'s doc
+    // comment. A reload always starts empty and re-retrieves on the next
+    // node transition rather than replaying the log to rebuild it.
+    recentMemories: [],
+    memoriesForNodeId: null,
   };
 }
 
