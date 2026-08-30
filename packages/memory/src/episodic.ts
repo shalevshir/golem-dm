@@ -4,3 +4,4 @@
 // root, so nothing here calls a model.
 export * from "./episodic/port.js";
 export * from "./episodic/in-memory.js";
+export * from "./episodic/postgres.js";
