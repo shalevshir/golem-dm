@@ -17,6 +17,7 @@
 // turn.
 import {
   abilityCheck,
+  affinityOf,
   affordancesFor,
   applyTurn,
   availableEdges,
@@ -34,17 +35,20 @@ import {
   buildNarrationBrief,
   createDeterministicNarrative,
   createDeterministicSceneNarrative,
+  DEFAULT_EMBEDDING_SPEC,
   INTENT_PROMPT_VERSION,
   NARRATIVE_PROMPT_VERSION,
   SCENE_PROMPT_VERSION,
 } from "@ai-dm/agents";
 import type {
+  EmbeddingPort,
   IntentAgent,
   IntentResult,
   NarrativePort,
   SceneBeat,
   SceneNarrationInput,
   SceneNarrativePort,
+  SceneSummaryPort,
   TacticalAgent,
   TurnProposalFailure,
   TurnProposalResult,
@@ -55,8 +59,9 @@ import {
   SequenceConflictError,
   CampaignMismatchError,
 } from "@ai-dm/memory";
-import type { EventStore } from "@ai-dm/memory";
+import type { EpisodicStore, EventStore } from "@ai-dm/memory";
 import { CheckRolledPayload, conclusionOf, IntentClassifiedPayload, reduce } from "@ai-dm/schemas";
+import { indexEpisode, memoryLines, retrieveMemories, summarizeEpisode } from "./episodic.js";
 import type {
   AbilityKey,
   CampaignState,
@@ -176,6 +181,40 @@ export interface IntentCallMetrics {
   totalTokens: number;
 }
 
+/**
+ * The fourth billed source. `outcome` is `"ok"` or an `AdapterErrorCode`,
+ * an open `string` for the same reason `IntentCallMetrics.outcome` is.
+ */
+export interface SummaryCallMetrics {
+  outcome: string;
+  /** `"model"` when the tier produced the summary, `"deterministic"` when it fell back. */
+  source: string;
+  promptVersion: string;
+  latencyMs: number;
+  promptTokens: number;
+  completionTokens: number;
+  totalTokens: number;
+}
+
+/**
+ * The fifth. `completionTokens` is always 0 — an embedding bills input only,
+ * which is truthful rather than a gap.
+ *
+ * Cost is still not computed here: `cache_read_input_tokens` is unreported
+ * and the pricing table lives in `tools/sim`, which this app may not import.
+ * These are tokens and latency only, so step 11's fix prices them without
+ * touching these call sites (episodic-memory spec, Decision 11).
+ */
+export interface EmbeddingCallMetrics {
+  outcome: string;
+  /** `"index"` when writing a closed episode, `"retrieve"` when reading on node entry. */
+  purpose: string;
+  latencyMs: number;
+  promptTokens: number;
+  completionTokens: number;
+  totalTokens: number;
+}
+
 /** A `putSnapshot` rejection, contained inside `emit` — see `MetricsPort`. */
 export interface SnapshotFailureRecord {
   campaignId: string;
@@ -224,6 +263,24 @@ export interface MetricsPort {
    * invalidate a `MetricsPort` implementation written before this task.
    */
   recordIntentCall?(record: IntentCallMetrics): void;
+  /**
+   * The summary tier's per-call metrics, mirroring its four siblings' shape.
+   * Not yet called from `handleCommand`: `SceneSummaryPort.summarize`
+   * (`@ai-dm/agents`, Task 5) reports no token usage or source to its
+   * caller, so there is nothing truthful to put in `promptTokens` or
+   * `source` at a call site today — reporting zeros would misrepresent a
+   * real cost, the opposite of `EmbeddingCallMetrics.completionTokens`'s
+   * honest zero. Declared now so the type exists the day that port grows a
+   * usage-reporting return value; optional for the same reason
+   * `recordIntentCall` is.
+   */
+  recordSummaryCall?(record: SummaryCallMetrics): void;
+  /**
+   * One call per `indexEpisode`/`retrieveMemories` embedding call —
+   * `purpose` tells the two apart. Optional for the same reason its four
+   * siblings are.
+   */
+  recordEmbeddingCall?(record: EmbeddingCallMetrics): void;
 }
 
 export interface TurnPorts {
@@ -234,6 +291,13 @@ export interface TurnPorts {
   intent: IntentAgent;
   /** The out-of-combat narrator — `free_text`'s sibling of `narrative`. */
   sceneNarrative: SceneNarrativePort;
+  /** Episodic memory's durable index — `@ai-dm/memory`. Never imported
+   *  alongside `embedding` anywhere but here and `episodic.ts` (invariant 5). */
+  episodic: EpisodicStore;
+  /** Episodic memory's embedding adapter — `@ai-dm/agents`. */
+  embedding: EmbeddingPort;
+  /** The scene-summarizer tier that closes an episode. */
+  summary: SceneSummaryPort;
   clock: () => string;
   uuid: () => string;
   /** Deterministic per turn. Recorded in `dice_rolled`; replay reads it back. */
@@ -355,6 +419,16 @@ async function* untilDeadline(
  */
 const NARRATION_TERMINATORS = [".", "!", "?", "…"] as const;
 
+/**
+ * `retrieveMemories`'s own sub-deadline inside `sceneNarrate`, capped well
+ * under the turn's full `turnTimeoutMs` budget. Retrieval only enriches the
+ * prompt with past episodes — losing it degrades to "no memories this turn",
+ * a far better outcome than retrieval eating enough of the shared deadline
+ * that narration itself has to fall back to deterministic prose (whole-
+ * branch review finding 1).
+ */
+const RETRIEVAL_BUDGET_MS = 750;
+
 function endsComplete(text: string): boolean {
   const trimmed = text.trimEnd();
   return trimmed !== "" && NARRATION_TERMINATORS.some((mark) => trimmed.endsWith(mark));
@@ -452,7 +526,12 @@ async function* narrationLadder(args: {
 function questNodeCard(
   authored: AuthoredWorld,
   nodeId: string,
-): { sceneEnglish: string; locationNameHebrew: string; npcNamesHebrew: string[] } {
+): {
+  sceneEnglish: string;
+  locationNameHebrew: string;
+  npcNamesHebrew: string[];
+  npcIds: string[];
+} {
   const node = authored.questNodes.get(nodeId);
   if (node === undefined) {
     throw new Error(`No quest node "${nodeId}" in world ${authored.worldId}`);
@@ -461,10 +540,15 @@ function questNodeCard(
   if (location === undefined) {
     throw new Error(`No location "${node.locationId}" in world ${authored.worldId}`);
   }
-  const npcNamesHebrew = Array.from(authored.npcs.values())
-    .filter((npc) => npc.locationId === node.locationId)
-    .map((npc) => npc.nameHebrew);
-  return { sceneEnglish: node.sceneEnglish, locationNameHebrew: location.nameHebrew, npcNamesHebrew };
+  const present = Array.from(authored.npcs.values()).filter(
+    (npc) => npc.locationId === node.locationId,
+  );
+  return {
+    sceneEnglish: node.sceneEnglish,
+    locationNameHebrew: location.nameHebrew,
+    npcNamesHebrew: present.map((npc) => npc.nameHebrew),
+    npcIds: present.map((npc) => npc.npcId),
+  };
 }
 
 /**
@@ -802,6 +886,68 @@ export async function* handleCommand(
     const statics = sceneStaticsOf(campaign);
     const card = questNodeCard(statics.authored, currentScene().currentNodeId);
 
+    // Retrieval is keyed to the node, not the turn: the query (the node's
+    // card plus its NPCs) is static for as long as the campaign stands at
+    // this node, so refreshing only on a node change is what makes a
+    // six-turn conversation cost one embedding call rather than six
+    // (episodic-memory spec, Decision 7).
+    const nodeId = currentScene().currentNodeId;
+    if (campaign.memoriesForNodeId !== nodeId) {
+      const retrieveStartedAt = ports.clock();
+      // Latched only on success: a transient failure (a timeout, a
+      // rate-limited provider, a store hiccup) must not freeze an empty
+      // result in the cache for the rest of the node visit — the whole
+      // point of keying the cache to the node is to pay once, not to pay
+      // once and then never again try (code review finding). A property on
+      // a holder object, not a bare `let`, so the `if` below reads the
+      // real post-`onFailure` value rather than TypeScript's control-flow
+      // narrowing of a captured primitive back to its pre-call literal.
+      const retrieval = { failed: false };
+      campaign.recentMemories = await retrieveMemories({
+        store: ports.episodic,
+        embedding: ports.embedding,
+        spec: DEFAULT_EMBEDDING_SPEC,
+        campaignId: campaign.state.world.campaignId,
+        queryEnglish: [card.sceneEnglish, ...card.npcIds].join(" "),
+        limit: 3,
+        // A tighter sub-deadline than `sceneNarrate`'s own `deadline`
+        // parameter — retrieval is background prompt enrichment, not the
+        // narration itself, so it gets its own small budget rather than a
+        // share of whatever the turn has left (`RETRIEVAL_BUDGET_MS`'s doc
+        // comment; whole-branch review finding 1).
+        deadline: Math.min(deadline, Date.now() + RETRIEVAL_BUDGET_MS),
+        onUsage: (usage) => {
+          ports.metrics?.recordEmbeddingCall?.({
+            outcome: "ok",
+            purpose: "retrieve",
+            latencyMs: Date.parse(ports.clock()) - Date.parse(retrieveStartedAt),
+            promptTokens: usage.promptTokens,
+            completionTokens: usage.completionTokens,
+            totalTokens: usage.totalTokens,
+          });
+        },
+        onFailure: (code) => {
+          retrieval.failed = true;
+          ports.metrics?.recordEmbeddingCall?.({
+            outcome: code,
+            purpose: "retrieve",
+            latencyMs: Date.parse(ports.clock()) - Date.parse(retrieveStartedAt),
+            promptTokens: 0,
+            completionTokens: 0,
+            totalTokens: 0,
+          });
+        },
+      });
+      if (!retrieval.failed) {
+        campaign.memoriesForNodeId = nodeId;
+      }
+    }
+
+    // `affinityOf` reads the engine's `SceneState`, not the wire
+    // `SceneSnapshot` `currentScene()` returns — the same conversion
+    // `before`/`sceneStateFrom(currentScene())` uses everywhere else in this
+    // file. This is `affinityOf`'s first call site outside `@ai-dm/rules-engine`.
+    const sceneState = sceneStateFrom(currentScene());
     const input: SceneNarrationInput = {
       beat,
       sceneEnglish: card.sceneEnglish,
@@ -809,6 +955,17 @@ export async function* handleCommand(
       playerGender: statics.character.grammaticalGender,
       npcNamesHebrew: card.npcNamesHebrew,
       recentNarrations: campaign.recentNarrations,
+      memoryEnglish: memoryLines({
+        npcs: card.npcIds.map((npcId) => {
+          const affinity = affinityOf(sceneState, npcId);
+          return {
+            nameEnglish: statics.authored.npcs.get(npcId)?.nameEnglish ?? npcId,
+            band: affinity.band,
+            facts: affinity.facts,
+          };
+        }),
+        retrieved: campaign.recentMemories,
+      }),
     };
 
     const streamId = ports.uuid();
@@ -1066,15 +1223,46 @@ export async function* handleCommand(
           : null;
     if (outcome === null) return;
 
+    const survivorIds = encounter.combatants
+      .filter((each) => each.status === "alive")
+      .map((each) => each.combatantId);
+
+    // A fresh budget, not a stale one: nothing upstream in this turn (the
+    // player's `narrate`, `runEnemyTurns`) left a deadline in scope here,
+    // and reusing an earlier stage's would already be spent by the time
+    // this stage starts — the same reasoning `enemyTurn` and `narrate`
+    // already follow, each striking its own `ports.turnTimeoutMs` budget
+    // for its own independent model call rather than sharing one across
+    // stages that run in sequence.
+    const deadline = Date.now() + ports.turnTimeoutMs;
+
+    // Closes the "encounter" episode, unconditionally — win, loss or
+    // stalemate all end the fight and are all worth remembering. Computed
+    // before `events` is built so the summary can travel in
+    // `encounter_resolved`'s own payload rather than a later event.
+    const summaryEnglish = await summarizeEpisode({
+      summary: ports.summary,
+      input: {
+        kind: "encounter",
+        // `BuiltEncounter` carries no `descriptionEnglish` (that field lives
+        // only on the catalogue's `EncounterDefinition`) — `sceneEnglish` is
+        // its narrator-facing copy, the same field `narrate()` above already
+        // reads off `builtOf(campaign)` for this encounter's atmosphere.
+        contextEnglish: builtOf(campaign).sceneEnglish,
+        factsEnglish: [`Outcome: ${outcome}.`, `Survivors: ${survivorIds.join(", ")}.`],
+        recentNarrations: campaign.recentNarrations,
+      },
+      deadline,
+    });
+
     const events: { type: GameEvent["type"]; payload: Record<string, unknown> }[] = [
       {
         type: "encounter_resolved",
         payload: {
           encounterId: encounter.encounterId,
           outcome,
-          survivorIds: encounter.combatants
-            .filter((each) => each.status === "alive")
-            .map((each) => each.combatantId),
+          survivorIds,
+          summaryEnglish,
         },
       },
     ];
@@ -1085,6 +1273,14 @@ export async function* handleCommand(
     // the catalogue. Known ceiling, recorded in the spec: a defeated solo PC
     // narratively walking it off is wrong, and permadeath wants its own
     // decision rather than a subsystem smuggled into this step.
+    //
+    // Set only on a won fight, and read after `emitAll` below to index the
+    // node's own "quest_node" episode — a node completed by combat is
+    // otherwise never summarized or indexed at all, unlike one completed
+    // through exploration, and its combat-resolved history becomes silently
+    // unretrievable (code review finding).
+    let completedNode: { nodeId: string; summaryEnglish: string } | null = null;
+
     if (outcome === "victory") {
       const statics = sceneStaticsOf(campaign);
       const before = sceneStateFrom(currentScene());
@@ -1101,15 +1297,41 @@ export async function* handleCommand(
             `${before.currentNodeId}: ${transition.rejections.map((each) => each.message).join("; ")}`,
         );
       }
-      events.push({
-        type: "quest_node_completed",
-        payload: { nodeId: before.currentNodeId },
-      });
       // Diffed off the engine's own pre/post states, never re-read from the
       // node's declared effects — the same rule the exploration branch
       // follows, so the payload records what the engine actually did,
       // post-clamp, and cannot disagree with it.
       const delta = diffScene(before, transition.state);
+
+      // Closes the "quest_node" episode for the node this victory completed
+      // — the same summarize-and-index treatment the exploration path's own
+      // node completion gets, so a node finished by combat is exactly as
+      // retrievable later as one finished by talking.
+      const nodeSummaryEnglish = await summarizeEpisode({
+        summary: ports.summary,
+        input: {
+          kind: "quest_node",
+          contextEnglish: questNodeCard(statics.authored, before.currentNodeId).sceneEnglish,
+          factsEnglish: [
+            `Node completed: ${before.currentNodeId}.`,
+            ...delta.npcAffinities.map(
+              (entry) => `${entry.npcId} now regards the player as ${entry.band}.`,
+            ),
+            ...delta.relations.map(
+              (entry) => `${entry.factionA} and ${entry.factionB} now stand at ${entry.band}.`,
+            ),
+          ],
+          recentNarrations: campaign.recentNarrations,
+        },
+        // Same closing-stage budget the encounter's own `summaryEnglish`
+        // was computed under, above.
+        deadline,
+      });
+
+      events.push({
+        type: "quest_node_completed",
+        payload: { nodeId: before.currentNodeId, summaryEnglish: nodeSummaryEnglish },
+      });
       if (delta.relations.length > 0 || delta.npcAffinities.length > 0 || delta.day !== undefined) {
         events.push({
           type: "world_delta_applied",
@@ -1120,7 +1342,15 @@ export async function* handleCommand(
           },
         });
       }
+
+      completedNode = { nodeId: before.currentNodeId, summaryEnglish: nodeSummaryEnglish };
     }
+
+    // `emitAll` (unlike `emit`) yields no return value either, and
+    // `encounter_resolved` is always `events[0]` — so its sequence is
+    // whatever `campaign.nextSequence` is right now, one read before the
+    // append that assigns it.
+    const resolvedSequence = campaign.nextSequence;
 
     yield* emitAll(events);
     // `emitAll` moves `campaign.state` and never `built`. Clearing it here
@@ -1128,6 +1358,95 @@ export async function* handleCommand(
     // `Campaign.built`'s doc comment actually asks for — rather than leaving
     // `builtOf`'s guard to catch the desync one read later.
     campaign.built = null;
+
+    // Fire-and-forget, not `await`ed: nothing in `resolveIfConcluded`
+    // narrates after this point (the turn's narration already streamed via
+    // `narrate()` before `runEnemyTurns`/`resolveIfConcluded` ran), so there
+    // is no "after the narration yield" point to defer past here the way the
+    // quest-node-completion site defers past its own `sceneNarrate`. Making
+    // the player's response wait on indexing anyway would cost latency for
+    // no narration benefit — `indexEpisode` is already best-effort and never
+    // throws, so `void` is safe (whole-branch review finding 1).
+    const indexStartedAt = ports.clock();
+    void indexEpisode({
+      store: ports.episodic,
+      embedding: ports.embedding,
+      spec: DEFAULT_EMBEDDING_SPEC,
+      record: {
+        campaignId: campaign.state.world.campaignId,
+        sequence: resolvedSequence,
+        kind: "encounter",
+        refId: encounter.encounterId,
+        summaryEnglish,
+        day: currentScene().day,
+      },
+      // The same budget `summaryEnglish` was computed under, above — one
+      // closing-stage deadline shared across both its calls, mirroring how
+      // `enemyTurn` shares one `deadline` between its tactical call and its
+      // own `narrate`.
+      deadline,
+      onUsage: (usage) => {
+        ports.metrics?.recordEmbeddingCall?.({
+          outcome: "ok",
+          purpose: "index",
+          latencyMs: Date.parse(ports.clock()) - Date.parse(indexStartedAt),
+          promptTokens: usage.promptTokens,
+          completionTokens: usage.completionTokens,
+          totalTokens: usage.totalTokens,
+        });
+      },
+      onFailure: (code) => {
+        ports.metrics?.recordEmbeddingCall?.({
+          outcome: code,
+          purpose: "index",
+          latencyMs: Date.parse(ports.clock()) - Date.parse(indexStartedAt),
+          promptTokens: 0,
+          completionTokens: 0,
+          totalTokens: 0,
+        });
+      },
+    });
+
+    // `quest_node_completed` is always `events[1]` in the victory branch —
+    // right after `encounter_resolved` — the same one-read-before-the-append
+    // rule `resolvedSequence` itself relies on.
+    if (completedNode !== null) {
+      const nodeIndexStartedAt = ports.clock();
+      void indexEpisode({
+        store: ports.episodic,
+        embedding: ports.embedding,
+        spec: DEFAULT_EMBEDDING_SPEC,
+        record: {
+          campaignId: campaign.state.world.campaignId,
+          sequence: resolvedSequence + 1,
+          kind: "quest_node",
+          refId: completedNode.nodeId,
+          summaryEnglish: completedNode.summaryEnglish,
+          day: currentScene().day,
+        },
+        deadline,
+        onUsage: (usage) => {
+          ports.metrics?.recordEmbeddingCall?.({
+            outcome: "ok",
+            purpose: "index",
+            latencyMs: Date.parse(ports.clock()) - Date.parse(nodeIndexStartedAt),
+            promptTokens: usage.promptTokens,
+            completionTokens: usage.completionTokens,
+            totalTokens: usage.totalTokens,
+          });
+        },
+        onFailure: (code) => {
+          ports.metrics?.recordEmbeddingCall?.({
+            outcome: code,
+            purpose: "index",
+            latencyMs: Date.parse(ports.clock()) - Date.parse(nodeIndexStartedAt),
+            promptTokens: 0,
+            completionTokens: 0,
+            totalTokens: 0,
+          });
+        },
+      });
+    }
   }
 
   try {
@@ -1422,8 +1741,38 @@ export async function* handleCommand(
             // `emitAll` makes the group one append; Decision 4's three
             // separate EVENTS are unchanged, only the append granularity is.
             const delta = diffScene(before, transition.state);
+
+            // Closes the "quest_node" episode for the node just left —
+            // unconditional, mirroring `quest_node_completed`'s own
+            // unconditional emit above: a repeat completion of an
+            // already-completed node still gets summarized, the same
+            // harmless-no-op posture `reduce`'s idempotent fold takes.
+            const nodeSummaryEnglish = await summarizeEpisode({
+              summary: ports.summary,
+              input: {
+                kind: "quest_node",
+                contextEnglish: questNodeCard(statics.authored, before.currentNodeId).sceneEnglish,
+                factsEnglish: [
+                  `Node completed: ${before.currentNodeId}.`,
+                  ...delta.npcAffinities.map(
+                    (entry) => `${entry.npcId} now regards the player as ${entry.band}.`,
+                  ),
+                  ...delta.relations.map(
+                    (entry) => `${entry.factionA} and ${entry.factionB} now stand at ${entry.band}.`,
+                  ),
+                ],
+                recentNarrations: campaign.recentNarrations,
+              },
+              // This case's own shared budget — the same `deadline` the
+              // classify call above and `sceneNarrate` below both run under.
+              deadline,
+            });
+
             const sceneEvents: { type: GameEvent["type"]; payload: Record<string, unknown> }[] = [
-              { type: "quest_node_completed", payload: { nodeId: before.currentNodeId } },
+              {
+                type: "quest_node_completed",
+                payload: { nodeId: before.currentNodeId, summaryEnglish: nodeSummaryEnglish },
+              },
             ];
             if (
               delta.relations.length > 0 ||
@@ -1472,6 +1821,11 @@ export async function* handleCommand(
               });
             }
 
+            // `quest_node_completed` is always `sceneEvents[0]` — same
+            // one-read-before-the-append rule `resolveIfConcluded` uses,
+            // since `emitAll` returns no sequence of its own.
+            const completedSequence = campaign.nextSequence;
+
             yield* emitAll(sceneEvents);
 
             // `emitAll` moves `campaign.state` but never `built` — the
@@ -1496,6 +1850,53 @@ export async function* handleCommand(
                 : { kind: "arrived", locationNameHebrew: card.locationNameHebrew },
               deadline,
             );
+
+            // Fire-and-forget, not `await`ed: `indexEpisode` needs nothing
+            // from `sceneNarrate` (the summary it writes is already durable
+            // in the event log via `emitAll` above), and is explicitly
+            // best-effort. Narration has already streamed by this point, but
+            // `handleCommand`'s generator is drained under the campaign lock
+            // (`transport/ws.ts`) until it returns — an `await` here would
+            // still hold that lock, and therefore the player's NEXT command,
+            // for as long as the embed+write call takes. `void` releases it
+            // immediately, matching the encounter-resolution site's identical
+            // reasoning (whole-branch review finding 1, code review finding).
+            const indexStartedAt = ports.clock();
+            void indexEpisode({
+              store: ports.episodic,
+              embedding: ports.embedding,
+              spec: DEFAULT_EMBEDDING_SPEC,
+              record: {
+                campaignId: campaign.state.world.campaignId,
+                sequence: completedSequence,
+                kind: "quest_node",
+                refId: before.currentNodeId,
+                summaryEnglish: nodeSummaryEnglish,
+                day: currentScene().day,
+              },
+              deadline,
+              onUsage: (usage) => {
+                ports.metrics?.recordEmbeddingCall?.({
+                  outcome: "ok",
+                  purpose: "index",
+                  latencyMs: Date.parse(ports.clock()) - Date.parse(indexStartedAt),
+                  promptTokens: usage.promptTokens,
+                  completionTokens: usage.completionTokens,
+                  totalTokens: usage.totalTokens,
+                });
+              },
+              onFailure: (code) => {
+                ports.metrics?.recordEmbeddingCall?.({
+                  outcome: code,
+                  purpose: "index",
+                  latencyMs: Date.parse(ports.clock()) - Date.parse(indexStartedAt),
+                  promptTokens: 0,
+                  completionTokens: 0,
+                  totalTokens: 0,
+                });
+              },
+            });
+
             // For symmetry with `structured_action`'s ending — out of combat
             // (guaranteed by guard 2 above) this yields nothing; the
             // client's input re-enables on the `narrative_emitted` fold

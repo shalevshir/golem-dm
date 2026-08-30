@@ -716,13 +716,18 @@ cannot import it from there under invariant 5 — holds both implementations
 to one conformance suite, and makes `DATABASE_URL` optional so the
 in-memory path survives for tests and for `pnpm dev` without docker.
 
-**Spec #2 — episodic memory**, not yet designed. It needs a scene-summary
-producer and a prompt tier that reads retrieval back; today the narrator's
-history is `recentNarrations`, a two-turn window of raw strings. It also
-needs an embedding port, which does not exist in `@ai-dm/agents` and cannot
-simply be imported: `@ai-dm/memory` depends only on `@ai-dm/schemas`. §4.7's
-sequence step 7 records which of these the narrative foundation resolves and
-which are still spec #2's to solve.
+**Spec #2 — episodic memory.**
+[`docs/superpowers/specs/2026-08-30-episodic-memory-design.md`](docs/superpowers/specs/2026-08-30-episodic-memory-design.md),
+plan at
+[`docs/superpowers/plans/2026-08-30-episodic-memory.md`](docs/superpowers/plans/2026-08-30-episodic-memory.md).
+Designed 2026-08-30 as §4.7's sequence step 7, which is where its status
+lives. The embedding port this paragraph called spec #2's first question
+turned out not to need placing: a store that accepts vectors rather than text
+has no adapter to reach, so `@ai-dm/memory` keeps depending only on
+`@ai-dm/schemas` and `apps/server` composes the embedding call with the write.
+The scene-summary producer this paragraph also named was still unbuilt at
+`2a71326` — §4.7 had recorded it as resolved — so spec #2 builds it after
+all, with a deterministic fallback.
 
 **The quest DAG is deferred out of step 10 entirely.** A grep for
 "campaign" across the repo returns a line of `packages/memory`'s charter, a
@@ -1046,34 +1051,58 @@ combat with a UI that can still send them.
    [`docs/superpowers/specs/2026-08-30-character-profiles-design.md`](docs/superpowers/specs/2026-08-30-character-profiles-design.md),
    plan at
    [`docs/superpowers/plans/2026-08-30-character-profiles.md`](docs/superpowers/plans/2026-08-30-character-profiles.md).
-7. **Episodic memory (step 10 spec #2)** — now with a real consumer. §4.6
-   left it undesignable for want of a corpus, a consumer and a producer.
-   This sequence supplies all three, and closes one of §4.6's two named
-   blockers but not the other — so what remains is stated here rather than
-   left to be rediscovered at step 7:
-   - *Corpus* — ADR-0004 makes `campaignId` the stream key and an encounter
-     a bracketed span, so a log finally spans more than one scene. Before
-     that there is nothing to retrieve over.
-   - *Consumer* — step 6's NPC affinity projection (`npcId` → band +
-     remembered facts) asks a question a two-turn `recentNarrations` window
-     genuinely cannot answer.
-   - *Producer* — `encounter_resolved` carries a scene summary, and this
-     sequence adds the scene-summarizer tier that writes it. Spec #2 no
-     longer has to invent its own summary producer, which §4.6 listed as a
-     blocker.
-   - *Still open — the embedding port.* §4.6's other blocker survives
-     untouched: `@ai-dm/memory` depends only on `@ai-dm/schemas`
-     (invariant 5), so an adapter living in `@ai-dm/agents` is unreachable
-     from where the store lives. Nothing above adds a port. Deciding where
-     it belongs is spec #2's first question, not a detail inside it.
-   - *Still open — cost.* Embedding calls are a fourth per-turn cost source
-     on top of intent, GM and scene summarizer, on the meter that is
-     unreportable by construction until the fix below lands.
+7. **Episodic memory (step 10 spec #2).** Scene summaries written into the
+   log at the two events that already close an episode, indexed into
+   pgvector behind the same two-implementations-one-conformance-suite shape
+   the event log uses, retrieved on scene entry, and delivered to the
+   narrator through one English memory block that step 6's authored NPC
+   facts share. **Designed 2026-08-30; implemented, not yet merged to
+   `main`.**
+   [`docs/superpowers/specs/2026-08-30-episodic-memory-design.md`](docs/superpowers/specs/2026-08-30-episodic-memory-design.md),
+   plan at
+   [`docs/superpowers/plans/2026-08-30-episodic-memory.md`](docs/superpowers/plans/2026-08-30-episodic-memory.md).
+   Both of §4.6's blockers are resolved in the spec, and reading the code at
+   `2a71326` corrected two premises this section had asserted:
+   - *The embedding port — resolved by deletion, not placement.* The store
+     takes vectors, never text to embed, so `@ai-dm/memory` needs no LLM
+     call, no port to reach and no new dependency edge; `apps/server`
+     embeds through `@ai-dm/agents` and writes through `@ai-dm/memory` at
+     the composition root that already pairs `EventStore` with
+     `SceneNarrativePort`. `EMBEDDING_DIMENSIONS` in `@ai-dm/schemas` is the
+     only shared addition (spec Decision 1).
+   - *Cost — deferred, but instrumented.* Fixing the meter stays step 11's.
+     The embedding call site reports usage through `MetricsPort`
+     (`recordEmbeddingCall`) so that fix needs no retrofit there (spec
+     Decision 11). The summary call site (`recordSummaryCall`) is declared
+     and wired into `main.ts`'s structured-log implementation, but has no
+     live call site yet: `SceneSummaryPort.summarize()` returns only
+     `string | null`, discarding the `TokenUsage` its underlying model call
+     receives one layer down — widening that port to return `{text, usage}`
+     is a follow-up, not done in this branch. Note the embedding call is
+     **not** per-turn as this section assumed: retrieval fires once per node
+     transition, so an ordinary turn adds nothing (spec Decision 7).
+   - *Correction — the producer was never built.* This section listed it as
+     resolved. At `2a71326` `EncounterResolvedPayload` is
+     `{ encounterId, outcome, survivorIds }` and `QuestNodeCompletedPayload`
+     is `{ nodeId }`; no summary field, no summarizer tier, no call site
+     existed. Step 7 builds both, with a deterministic fallback so a
+     summary is written with or without a provider.
+   - *Correction — step 6's consumer wire was dangling.* The projection
+     exists, but `affinityOf` had no call site outside the rules engine and
+     `SceneNarrationInput` had no memory field at all — affinity reached the
+     client through the protocol snapshot and never reached a prompt. Step 7
+     builds the prompt slot that both authored facts and retrieval land in.
 8. **Closed beta (step 11).**
 
 Two items are independent of this ordering. The
 `cache_read_input_tokens`-plus-pricing-relocation fix described for step 11
-becomes *more* urgent, not less, because this sequence adds three model tiers
-(intent, GM, scene summarizer) — four cost sources once step 7's embeddings
-join them — and cost is currently unreportable by construction. And none of
-the above requires party play — ADR-0002 stands.
+becomes *more* urgent, not less, because this sequence adds two model tiers
+to the three that already bill (intent, tactical, narrative): step 4's intent
+router and step 7's scene summarizer, plus step 7's embedding call — five
+billed sources in all, none of them priced, on a meter that is unreportable
+by construction. Step 7 wires its embedding call site to `MetricsPort`
+(`recordEmbeddingCall`); its summary call site (`recordSummaryCall`) is
+declared but not yet live, pending the `SceneSummaryPort` widening noted
+above. The fix prices what already reports without touching it, and
+inherits that one open wire. None of the above requires party play —
+ADR-0002 stands.

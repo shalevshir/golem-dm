@@ -14,7 +14,10 @@ export * from "./runtime.js";
 export * from "./timing.js";
 export * from "./tool-schema.js";
 export * from "./vercel.js";
+export * from "./embedding-port.js";
+export * from "./vercel-embedding.js";
 
 // Exported so step 7's tactical-agent tests script the same double rather than
 // writing a second one. Kept under `testing/` to keep its status obvious.
 export * from "./testing/fake-port.js";
+export * from "./testing/fake-embedding-port.js";

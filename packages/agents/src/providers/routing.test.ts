@@ -41,10 +41,18 @@ describe("DEFAULT_MODEL_ROUTING", () => {
     expect(DEFAULT_MODEL_ROUTING.narrative.temperature).toBe(0.8);
   });
 
+  it("routes summary to the cheapest tier at zero temperature", () => {
+    expect(DEFAULT_MODEL_ROUTING.summary.provider).toBe("google");
+    expect(DEFAULT_MODEL_ROUTING.summary.modelId).toBe("gemini-3-flash");
+    expect(DEFAULT_MODEL_ROUTING.summary.temperature).toBe(0);
+    expect(DEFAULT_MODEL_ROUTING.summary.reasoningEffort).toBe("low");
+  });
+
   it("covers every agent role", () => {
     expect(Object.keys(DEFAULT_MODEL_ROUTING).sort()).toStrictEqual([
       "intent",
       "narrative",
+      "summary",
       "tactical",
     ]);
   });

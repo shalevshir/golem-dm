@@ -2,6 +2,7 @@ export * from "./primitives.js";
 export * from "./character.js";
 export * from "./actions.js";
 export * from "./events.js";
+export * from "./episodic.js";
 export * from "./world.js";
 export * from "./content.js";
 export * from "./intent.js";

@@ -2,7 +2,8 @@
 // the snapshots in `drizzle/meta` to produce the migration SQL — the SQL is
 // output, never hand-edited (packages/memory/CLAUDE.md: "Schema changes only
 // via generated migrations").
-import { integer, jsonb, pgTable, primaryKey, text, timestamp } from "drizzle-orm/pg-core";
+import { integer, jsonb, pgTable, primaryKey, text, timestamp, vector } from "drizzle-orm/pg-core";
+import { EMBEDDING_DIMENSIONS } from "@ai-dm/schemas";
 import type { CampaignState } from "@ai-dm/schemas";
 
 export const gameEvents = pgTable(
@@ -38,3 +39,29 @@ export const campaignSnapshots = pgTable("campaign_snapshots", {
   state: jsonb("state").$type<CampaignState>().notNull(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 });
+
+/**
+ * The episodic index. A cache over the log in exactly the sense
+ * `campaign_snapshots` is: every row's `summary_english` also sits in the
+ * event that produced it, so this table is rebuildable and never authority.
+ *
+ * The primary key is the event log's own `(campaign_id, sequence)`, which is
+ * what makes `write` idempotent and a reindex a no-op.
+ */
+export const episodicMemories = pgTable(
+  "episodic_memories",
+  {
+    campaignId: text("campaign_id").notNull(),
+    sequence: integer("sequence").notNull(),
+    // `text`, not a PG enum, for the reason `game_events.type` gives: the zod
+    // enum is the authority (invariant 4) and an enum here is a migration per
+    // new kind.
+    kind: text("kind").notNull(),
+    refId: text("ref_id").notNull(),
+    summaryEnglish: text("summary_english").notNull(),
+    day: integer("day").notNull(),
+    embedding: vector("embedding", { dimensions: EMBEDDING_DIMENSIONS }).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [primaryKey({ columns: [table.campaignId, table.sequence] })],
+);

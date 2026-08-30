@@ -118,6 +118,16 @@ export const EncounterResolvedPayload = z.object({
    * step 5 onward, not here.
    */
   survivorIds: z.array(z.string()),
+  /**
+   * What happened, in English, for episodic retrieval to index. Optional
+   * because this payload is persisted forever and a log written before
+   * summaries existed must still load — the same tolerance `campaign.ts`
+   * applies when projecting `recentNarrations`.
+   *
+   * Not folded: `reduce` ignores it and `CampaignState` gains no field. It
+   * is a fact recorded for the indexer, not campaign state.
+   */
+  summaryEnglish: z.string().min(1).optional(),
 });
 export type EncounterResolvedPayload = z.infer<typeof EncounterResolvedPayload>;
 
@@ -296,7 +306,11 @@ export type QuestNodeEnteredPayload = z.infer<typeof QuestNodeEnteredPayload>;
  * `scene.completedNodeIds`, folding a repeat of the same id to one entry —
  * mechanical, same as the rest of this event's fold.
  */
-export const QuestNodeCompletedPayload = z.object({ nodeId: ContentId });
+export const QuestNodeCompletedPayload = z.object({
+  nodeId: ContentId,
+  /** Same contract as `EncounterResolvedPayload.summaryEnglish`. */
+  summaryEnglish: z.string().min(1).optional(),
+});
 export type QuestNodeCompletedPayload = z.infer<typeof QuestNodeCompletedPayload>;
 
 /**

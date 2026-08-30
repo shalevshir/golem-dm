@@ -23,16 +23,19 @@ import {
   createAgentRuntime,
   createDeterministicNarrative,
   createDeterministicSceneNarrative,
+  createDeterministicSceneSummary,
+  createFakeEmbeddingPort,
   createFakePort,
   createHebrewNarrative,
   createTacticalAgent,
+  DEFAULT_EMBEDDING_SPEC,
   DEFAULT_MODEL_ROUTING,
   INTENT_PROMPT_VERSION,
   NARRATIVE_PROMPT_VERSION,
   SCENE_PROMPT_VERSION,
 } from "@ai-dm/agents";
-import { createInMemoryEventStore, EventStoreUnavailableError } from "@ai-dm/memory";
-import type { EventStore } from "@ai-dm/memory";
+import { createInMemoryEpisodicStore, createInMemoryEventStore, EventStoreUnavailableError } from "@ai-dm/memory";
+import type { EpisodicStore, EventStore } from "@ai-dm/memory";
 import { CheckRolledPayload, DiceRolledPayload, NarrativeEmittedPayload } from "@ai-dm/schemas";
 import type {
   AbilityKey,
@@ -139,6 +142,11 @@ function portsWith(store: EventStore, tactical: TacticalAgent = defaultTactical(
     // narration ladder specifically, exactly the way `createDeterministicNarrative()`
     // already does for combat.
     sceneNarrative: createDeterministicSceneNarrative(),
+    // Real, no-network implementations — episodic memory is best-effort by
+    // design (`episodic.ts`'s doc comments), so nothing here needs mocking.
+    episodic: createInMemoryEpisodicStore(),
+    embedding: createFakeEmbeddingPort(),
+    summary: createDeterministicSceneSummary(),
     clock: () => "2026-08-19T10:00:00.000Z",
     uuid: uuids(),
     seedFor: (rootSeed, sequence) => rootSeed * 1000 + sequence,
@@ -875,6 +883,15 @@ describe("handleCommand — free text", () => {
       relations: [{ factionA: "ashen-guild", factionB: "river-wardens", band: "hostile" }],
     });
 
+    // Task 7: closing the "quest_node" episode stamps a summary into the
+    // event that closed it, not a separate event — `portsWith`'s
+    // `createDeterministicSceneSummary()` guarantees a non-empty string here
+    // with no model in the loop.
+    expect(eventOfType("quest_node_completed")?.event.payload).toMatchObject({
+      nodeId: "guild-offer",
+      summaryEnglish: expect.any(String) as string,
+    });
+
     const { tokens, emitted } = narrativeOf(frames);
     expect(emitted.text).toBe(tokens.join(""));
     expect(emitted.source).toBe("deterministic");
@@ -1094,6 +1111,94 @@ describe("handleCommand — free text", () => {
     expect(reloaded?.state.world.scene?.npcAffinities).toEqual(
       campaign.state.world.scene?.npcAffinities,
     );
+  });
+
+  // Code review finding: `indexEpisode` at the quest-node-completion site
+  // used to be `await`ed, so a slow/hung store call held the whole turn
+  // (and the campaign lock a real transport keeps for the duration) open
+  // even though narration had already streamed. It is now `void`d, the
+  // same treatment `resolveIfConcluded`'s encounter-resolution site already
+  // had — this proves the turn completes even when the store never
+  // resolves at all.
+  it("completes the turn without waiting on episode indexing, even if the store hangs", async () => {
+    const store = createInMemoryEventStore();
+    const before: SceneSnapshot = {
+      worldId: "emberfall",
+      currentNodeId: "reckoning",
+      completedNodeIds: ["arrival", "guild-offer", "the-weir"],
+      relations: [{ factionA: "ashen-guild", factionB: "river-wardens", band: "hostile" }],
+      npcAffinities: [],
+      day: 1,
+    };
+    const campaign = await sceneCampaign(store, before);
+    const hangingEpisodic: EpisodicStore = {
+      write: () => new Promise(() => {}),
+      search: () => Promise.resolve([]),
+    };
+    const ports: TurnPorts = {
+      ...portsWith(store),
+      intent: classifiedAs({ category: "exploration", targetNodeId: null }),
+      episodic: hangingEpisodic,
+    };
+
+    const outcome = await Promise.race([
+      drain(
+        handleCommand(
+          campaign,
+          { type: "free_text", clientMessageId: "c1", text: "let's settle this" },
+          ports,
+        ),
+      ).then(() => "drained" as const),
+      new Promise<"timed-out">((resolve) => {
+        setTimeout(() => {
+          resolve("timed-out");
+        }, 200);
+      }),
+    ]);
+
+    expect(outcome).toBe("drained");
+  });
+
+  // Code review finding: `campaign.memoriesForNodeId` used to latch even
+  // when `retrieveMemories` degraded to `[]` on a transient failure —
+  // suppressing every retry for the rest of the node visit. This test
+  // fails a retrieval once, then succeeds, and asserts the second attempt
+  // is not skipped by the cache guard.
+  it("retries memory retrieval on the next scene turn after a transient failure, instead of latching an empty cache", async () => {
+    const store = createInMemoryEventStore();
+    const campaign = await sceneCampaign(store);
+    let embedCalls = 0;
+    const flakyEmbedding = {
+      embed: (spec: typeof DEFAULT_EMBEDDING_SPEC, texts: readonly string[]) => {
+        embedCalls += 1;
+        return embedCalls === 1
+          ? Promise.resolve({
+              ok: false as const,
+              error: { code: "provider_error" as const, message: "transient" },
+            })
+          : createFakeEmbeddingPort().embed(spec, texts);
+      },
+    };
+    const ports: TurnPorts = {
+      ...portsWith(store),
+      intent: classifiedAs({ category: "ooc" }),
+      embedding: flakyEmbedding,
+    };
+
+    await drain(
+      handleCommand(campaign, { type: "free_text", clientMessageId: "c1", text: "hi" }, ports),
+    );
+    expect(campaign.memoriesForNodeId).toBeNull();
+    expect(embedCalls).toBe(1);
+
+    await drain(
+      handleCommand(campaign, { type: "free_text", clientMessageId: "c2", text: "hi again" }, ports),
+    );
+    // A latched failure would have left `memoriesForNodeId` matching the
+    // current node after the first (failed) attempt, skipping this second
+    // retrieval entirely — `embedCalls` staying at 1 would be the bug.
+    expect(embedCalls).toBe(2);
+    expect(campaign.memoriesForNodeId).toBe(campaign.state.world.scene?.currentNodeId ?? null);
   });
 
   // Whole-branch review finding 2: `completeCurrentNode` with no traversal
@@ -1377,6 +1482,103 @@ describe("handleCommand — free text: narrate-only categories", () => {
 
     expect(eventTypesOf(frames)).toEqual(["player_input", "intent_classified", "narrative_emitted"]);
     expect(seen.map((each) => each.beat)).toEqual([{ kind: "reply", category: "combat" }]);
+  });
+});
+
+describe("handleCommand — episodic memory", () => {
+  // The design's headline cost claim (episodic-memory spec, Decision 7): a
+  // campaign that spends several turns talking at one node makes one
+  // embedding call, not one per turn. `ooc` routes straight to `sceneNarrate`
+  // with no node change, so two turns here must retrieve exactly once.
+  it("retrieves once per node transition, not once per turn", async () => {
+    const store = createInMemoryEventStore();
+    const campaign = await sceneCampaign(store);
+    const embedding = createFakeEmbeddingPort();
+    const ports: TurnPorts = {
+      ...portsWith(store),
+      intent: classifiedAs({ category: "ooc" }),
+      embedding,
+    };
+
+    await drain(
+      handleCommand(campaign, { type: "free_text", clientMessageId: "c1", text: "hello" }, ports),
+    );
+    expect(embedding.calls).toHaveLength(1);
+
+    await drain(
+      handleCommand(campaign, { type: "free_text", clientMessageId: "c2", text: "hello again" }, ports),
+    );
+    // Still 1: same node, so `campaign.memoriesForNodeId` already matches
+    // and `sceneNarrate` must not retrieve a second time.
+    expect(embedding.calls).toHaveLength(1);
+  });
+
+  it("renders authored NPC standing and facts into the narration input's memoryEnglish", async () => {
+    const store = createInMemoryEventStore();
+    const campaign = await sceneCampaign(store, {
+      npcAffinities: [{ npcId: "old-tobin", band: "friendly", facts: ["You mended his weir."] }],
+    });
+    const seen: SceneNarrationInput[] = [];
+    const ports: TurnPorts = {
+      ...portsWith(store),
+      intent: classifiedAs({ category: "ooc" }),
+      sceneNarrative: recordingSceneNarrative(seen),
+    };
+
+    await drain(
+      handleCommand(campaign, { type: "free_text", clientMessageId: "c1", text: "hi there" }, ports),
+    );
+
+    expect(seen[0]?.memoryEnglish).toContain(
+      "Old Tobin regards you as friendly. You mended his weir.",
+    );
+  });
+
+  it("memoryEnglish carries retrieved episodes alongside authored NPC facts", async () => {
+    const store = createInMemoryEventStore();
+    const campaign = await sceneCampaign(store);
+    const embedding = createFakeEmbeddingPort();
+    const episodic = createInMemoryEpisodicStore();
+    // Seed the episodic store directly — `retrieveMemories` embeds the query
+    // and searches by vector, so a fixture written under the same fake
+    // port's deterministic hash is exactly what a real prior turn's
+    // `indexEpisode` would have produced. The query text mirrors what
+    // `sceneNarrate` actually builds: `[card.sceneEnglish, ...card.npcIds].join(" ")`
+    // for `arrival` (`sceneCampaign`'s default starting node).
+    const queryEnglish = [
+      "The road drops out of the pines and Emberfall is below you: a weir throwing white water on the left, a hillside of smoking kilns on the right, and a town wedged between them that has clearly not been sleeping well. Two people are waiting at the bridge, and they are not standing together.",
+      "maren-vess",
+      "old-tobin",
+      "sela-the-innkeeper",
+    ].join(" ");
+    const embedded = await embedding.embed(DEFAULT_EMBEDDING_SPEC, [queryEnglish]);
+    if (!embedded.ok) throw new Error("fixture: fake embedding port does not fail");
+    await episodic.write(
+      {
+        campaignId: "s1",
+        sequence: 0,
+        kind: "quest_node",
+        refId: "arrival",
+        summaryEnglish: "Goblins were driven off at the weir.",
+        day: 1,
+      },
+      embedded.value.vectors[0] ?? [],
+    );
+
+    const seen: SceneNarrationInput[] = [];
+    const ports: TurnPorts = {
+      ...portsWith(store),
+      intent: classifiedAs({ category: "ooc" }),
+      sceneNarrative: recordingSceneNarrative(seen),
+      embedding,
+      episodic,
+    };
+
+    await drain(
+      handleCommand(campaign, { type: "free_text", clientMessageId: "c1", text: "hi there" }, ports),
+    );
+
+    expect(seen[0]?.memoryEnglish).toContain("Goblins were driven off at the weir.");
   });
 });
 
@@ -2846,19 +3048,60 @@ describe("handleCommand — end of combat", () => {
     const store = createInMemoryEventStore();
     const campaign = await bridgedCampaign(store);
     poseBoard(campaign, slain);
+    // Explicit episodic/embedding instances, not `portsWith`'s defaults, so
+    // the test can inspect what actually got written after the turn —
+    // proving the victory branch's own "quest_node" episode is indexed, not
+    // just the "encounter" one (code review finding: a node completed by
+    // combat previously never got summarized or indexed at all).
+    const episodic = createInMemoryEpisodicStore();
+    const embedding = createFakeEmbeddingPort();
 
-    const frames = await drain(handleCommand(campaign, dodge("hero", "c-win"), portsWith(store)));
+    const frames = await drain(
+      handleCommand(campaign, dodge("hero", "c-win"), { ...portsWith(store), episodic, embedding }),
+    );
 
     expect(eventTypesOf(frames)).toContain("encounter_resolved");
     const resolved = frames
       .filter((each): each is Extract<ServerFrame, { type: "event" }> => each.type === "event")
       .map((each) => each.event)
       .find((each) => each.type === "encounter_resolved");
+    // Task 7: closing the "encounter" episode stamps a summary into
+    // `encounter_resolved`'s own payload — `portsWith`'s
+    // `createDeterministicSceneSummary()` guarantees a non-empty string
+    // here with no model in the loop.
     expect(resolved?.payload).toMatchObject({
       encounterId: "goblin-ambush",
       outcome: "victory",
       survivorIds: ["hero"],
+      summaryEnglish: expect.any(String) as string,
     });
+    const completedNode = frames
+      .filter((each): each is Extract<ServerFrame, { type: "event" }> => each.type === "event")
+      .map((each) => each.event)
+      .find((each) => each.type === "quest_node_completed");
+    // Same guarantee, for the node the victory completed — this is the
+    // payload half of the fix; the store half is checked below.
+    expect(completedNode?.payload).toMatchObject({
+      nodeId: "saboteurs",
+      summaryEnglish: expect.any(String) as string,
+    });
+
+    // Both `indexEpisode` calls in the victory branch are fire-and-forget
+    // (`void`, not `await`ed — code review finding: the quest-node one used
+    // to block the turn). A tick lets both settle before asserting on the
+    // store, the same idiom `ws.test.ts`/`e2e.test.ts` already use to wait
+    // out fire-and-forget work.
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    const anyVector = await embedding.embed(DEFAULT_EMBEDDING_SPEC, ["anything"]);
+    if (!anyVector.ok) throw new Error("fixture: fake embedding port does not fail");
+    const indexed = await episodic.search("s1", anyVector.value.vectors[0] ?? [], 10);
+    expect(indexed.map((hit) => hit.memory)).toContainEqual(
+      expect.objectContaining({ kind: "quest_node", refId: "saboteurs" }) as unknown,
+    );
+    expect(indexed.map((hit) => hit.memory)).toContainEqual(
+      expect.objectContaining({ kind: "encounter", refId: "goblin-ambush" }) as unknown,
+    );
+
     expect(campaign.state.encounter).toBeNull();
     expect(campaign.built).toBeNull();
     expect(campaign.state.world.scene?.completedNodeIds).toContain("saboteurs");

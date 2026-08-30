@@ -10,7 +10,7 @@ import type { AgentRuntime } from "../providers/runtime.js";
 import type { NarrativeFinish } from "./hebrew.js";
 import { HEBREW_GLOSSARY } from "./prompt-text.js";
 import type { SceneBeat, SceneNarrationInput, SceneNarrativePort } from "./scene-port.js";
-import { SCENE_PROMPT_VERSION, SCENE_SYSTEM_PROMPT } from "./scene-prompt-text.js";
+import { SCENE_MEMORY_HEADING, SCENE_PROMPT_VERSION, SCENE_SYSTEM_PROMPT } from "./scene-prompt-text.js";
 
 /**
  * The beat as English system material for the dynamic tier. Hebrew fields
@@ -49,6 +49,14 @@ export function buildScenePrompt(input: SceneNarrationInput): LayeredPrompt {
   // `recentNarrations`.
   if (input.npcNamesHebrew.length > 0) {
     semiStatic.push(renderNpcs(input.npcNamesHebrew));
+  }
+
+  // Stable for as long as the campaign stands at this node — semiStatic, not
+  // dynamic, so it rides the cached prefix instead of busting it every turn.
+  if (input.memoryEnglish.length > 0) {
+    semiStatic.push(
+      [SCENE_MEMORY_HEADING, ...input.memoryEnglish.map((each) => `- ${each}`)].join("\n"),
+    );
   }
 
   const dynamic = [renderBeat(input.beat)];

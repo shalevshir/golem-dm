@@ -12,12 +12,24 @@ import {
   createHebrewNarrative,
   createHebrewSceneNarrative,
   createIntentAgent,
+  createSceneSummarizer,
   createTacticalAgent,
+  createVercelEmbeddingPort,
   createVercelPort,
   DEFAULT_MODEL_ROUTING,
 } from "@ai-dm/agents";
-import { connectPostgresEventStore, createInMemoryEventStore } from "@ai-dm/memory";
-import type { EventStore, PostgresEventStoreHandle } from "@ai-dm/memory";
+import {
+  connectPostgresEpisodicStore,
+  connectPostgresEventStore,
+  createInMemoryEpisodicStore,
+  createInMemoryEventStore,
+} from "@ai-dm/memory";
+import type {
+  EpisodicStore,
+  EventStore,
+  PostgresEpisodicStoreHandle,
+  PostgresEventStoreHandle,
+} from "@ai-dm/memory";
 import type { FastifyBaseLogger } from "fastify";
 import { buildApp } from "./app.js";
 import { loadConfig } from "./config.js";
@@ -39,6 +51,17 @@ if (postgresHandle !== null) {
   await postgresHandle.probe();
 }
 const store: EventStore = postgresHandle?.store ?? createInMemoryEventStore();
+
+// Episodic memory's own connection, opened alongside the event store's for
+// the same "fail at boot, not on a player's turn" reason — but never probed:
+// `connectPostgresEpisodicStore` has no `probe()` (unlike
+// `PostgresEventStoreHandle`), and `indexEpisode`/`retrieveMemories` are
+// best-effort by design (`episodic.ts`), so there is nothing here that must
+// fail loudly before the first turn the way a missing event log would.
+const episodicHandle: PostgresEpisodicStoreHandle | null =
+  config.databaseUrl === undefined ? null : connectPostgresEpisodicStore(config.databaseUrl);
+const episodic: EpisodicStore = episodicHandle?.store ?? createInMemoryEpisodicStore();
+
 const clock = (): string => new Date().toISOString();
 
 // The pipeline does no file I/O of its own (`TurnPorts.conditionNamesHebrew`'s
@@ -106,6 +129,13 @@ const intentRuntime = createAgentRuntime({
   port: createVercelPort({}),
 });
 
+// A fourth runtime, for the summary tier — the same one-runtime-per-role
+// reasoning as the two above.
+const summaryRuntime = createAgentRuntime({
+  routing: DEFAULT_MODEL_ROUTING,
+  port: createVercelPort({}),
+});
+
 const metrics: MetricsPort = {
   recordTacticalTurn(turn) {
     logHolder.current?.info(turn, "tactical_turn_metrics");
@@ -127,6 +157,12 @@ const metrics: MetricsPort = {
   },
   recordIntentCall(record) {
     logHolder.current?.info(record, "intent_call_metrics");
+  },
+  recordSummaryCall(record) {
+    logHolder.current?.info(record, "summary_call_metrics");
+  },
+  recordEmbeddingCall(record) {
+    logHolder.current?.info(record, "embedding_call_metrics");
   },
 };
 
@@ -168,6 +204,9 @@ const app = buildApp({
         logHolder.current?.info({ ...finish, agent: "scene_narrative" }, "narrative_stream_finished");
       },
     }),
+    episodic,
+    embedding: createVercelEmbeddingPort({}),
+    summary: createSceneSummarizer({ runtime: summaryRuntime }),
     clock,
     uuid: randomUUID,
     // Derived, not random: the same root seed and the same commands must
@@ -269,6 +308,11 @@ for (const signal of ["SIGTERM", "SIGINT"] as const) {
       // which is the guarantee `Promise.allSettled` was here for.
       try {
         await postgresHandle?.close();
+      } catch (error) {
+        failures.push(error);
+      }
+      try {
+        await episodicHandle?.close();
       } catch (error) {
         failures.push(error);
       }

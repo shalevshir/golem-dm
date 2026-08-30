@@ -238,3 +238,38 @@ describe("EncounterStartedPayload", () => {
     ).toThrow();
   });
 });
+
+describe("summaryEnglish on the closing payloads", () => {
+  it("accepts an encounter_resolved payload carrying a summary", () => {
+    const parsed = EncounterResolvedPayload.parse({
+      encounterId: "e1",
+      outcome: "victory",
+      survivorIds: ["pc1"],
+      summaryEnglish: "The party won.",
+    });
+    expect(parsed.summaryEnglish).toBe("The party won.");
+  });
+
+  it("still accepts an encounter_resolved payload written before summaries existed", () => {
+    const parsed = EncounterResolvedPayload.parse({
+      encounterId: "e1",
+      outcome: "victory",
+      survivorIds: ["pc1"],
+    });
+    expect(parsed.summaryEnglish).toBeUndefined();
+  });
+
+  it("accepts a quest_node_completed payload with and without a summary", () => {
+    expect(QuestNodeCompletedPayload.parse({ nodeId: "n1" }).summaryEnglish).toBeUndefined();
+    expect(
+      QuestNodeCompletedPayload.parse({ nodeId: "n1", summaryEnglish: "Tobin talked." })
+        .summaryEnglish,
+    ).toBe("Tobin talked.");
+  });
+
+  it("rejects an empty summary rather than storing a blank memory", () => {
+    expect(
+      QuestNodeCompletedPayload.safeParse({ nodeId: "n1", summaryEnglish: "" }).success,
+    ).toBe(false);
+  });
+});

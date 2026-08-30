@@ -4,12 +4,14 @@ import {
   createAgentRuntime,
   createDeterministicNarrative,
   createDeterministicSceneNarrative,
+  createDeterministicSceneSummary,
+  createFakeEmbeddingPort,
   createFakePort,
   createTacticalAgent,
   DEFAULT_MODEL_ROUTING,
 } from "@ai-dm/agents";
 import type { NarrativePort } from "@ai-dm/agents";
-import { createInMemoryEventStore } from "@ai-dm/memory";
+import { createInMemoryEpisodicStore, createInMemoryEventStore } from "@ai-dm/memory";
 import type { EventStore } from "@ai-dm/memory";
 import { ServerFrame } from "@ai-dm/schemas";
 import { buildApp } from "../app.js";
@@ -62,6 +64,9 @@ async function startServer(overrides?: { narrative?: NarrativePort }) {
       classify: () => Promise.reject(new Error("intent.classify not exercised by ws.test.ts")),
     },
     sceneNarrative: createDeterministicSceneNarrative(),
+    episodic: createInMemoryEpisodicStore(),
+    embedding: createFakeEmbeddingPort(),
+    summary: createDeterministicSceneSummary(),
     clock: () => "2026-08-19T10:00:00.000Z",
     uuid,
     seedFor: (rootSeed, sequence) => rootSeed * 1000 + sequence,

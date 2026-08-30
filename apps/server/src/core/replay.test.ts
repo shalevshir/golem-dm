@@ -5,8 +5,13 @@
 import { afterAll, describe, expect, it } from "vitest";
 import { validateExecuteTurn } from "@ai-dm/rules-engine";
 import type { IntentAgent, IntentResult, TacticalAgent } from "@ai-dm/agents";
-import { createDeterministicNarrative, createDeterministicSceneNarrative } from "@ai-dm/agents";
-import { connectPostgresEventStore, createInMemoryEventStore } from "@ai-dm/memory";
+import {
+  createDeterministicNarrative,
+  createDeterministicSceneNarrative,
+  createDeterministicSceneSummary,
+  createFakeEmbeddingPort,
+} from "@ai-dm/agents";
+import { connectPostgresEventStore, createInMemoryEpisodicStore, createInMemoryEventStore } from "@ai-dm/memory";
 import type { EventStore } from "@ai-dm/memory";
 import { fold } from "@ai-dm/schemas";
 import type {
@@ -92,6 +97,9 @@ function portsWith(store: EventStore): TurnPorts {
       classify: () => Promise.reject(new Error("intent.classify not exercised by replay.test.ts")),
     },
     sceneNarrative: createDeterministicSceneNarrative(),
+    episodic: createInMemoryEpisodicStore(),
+    embedding: createFakeEmbeddingPort(),
+    summary: createDeterministicSceneSummary(),
     clock: CLOCK,
     uuid: uuids(),
     seedFor: (rootSeed, sequence) => rootSeed * 1000 + sequence,
