@@ -120,6 +120,18 @@ export const WorldEffect = z.discriminatedUnion("kind", [
     delta: z.number().int().min(-6).max(6),
   }),
   z.object({ kind: z.literal("advance_calendar"), days: z.number().int().min(1) }),
+  z.object({
+    kind: z.literal("shift_npc_affinity"),
+    npcId: ContentId,
+    /** Same bound as shift_faction_relation's delta, reusing FactionBand. */
+    delta: z.number().int().min(-6).max(6),
+  }),
+  z.object({
+    kind: z.literal("add_npc_fact"),
+    npcId: ContentId,
+    /** English, internal-only — never shown to the player verbatim (spec Decision 5). */
+    fact: z.string().min(1),
+  }),
 ]);
 
 /** A destination and a label. Predicates gate the target node, not the edge. */
@@ -166,6 +178,18 @@ export const FactionRelationEntry = z.object({
   band: FactionBand,
 });
 
+/**
+ * An NPC's standing with the player and what the campaign remembers about
+ * them — the projection step 7 names as its consumer (`npcId` -> band +
+ * facts). `facts` is English and internal-only: never shown to the player
+ * verbatim (spec Decision 5).
+ */
+export const NpcAffinityEntry = z.object({
+  npcId: ContentId,
+  band: FactionBand,
+  facts: z.array(z.string()).default([]),
+});
+
 export const WorldManifest = z.object({
   worldId: ContentId,
   /**
@@ -198,4 +222,5 @@ export type WorldEffect = z.infer<typeof WorldEffect>;
 export type QuestEdge = z.infer<typeof QuestEdge>;
 export type QuestNode = z.infer<typeof QuestNode>;
 export type FactionRelationEntry = z.infer<typeof FactionRelationEntry>;
+export type NpcAffinityEntry = z.infer<typeof NpcAffinityEntry>;
 export type WorldManifest = z.infer<typeof WorldManifest>;

@@ -3,6 +3,7 @@ import {
   ContentId,
   FACTION_BANDS,
   FactionBand,
+  NpcAffinityEntry,
   NpcDefinition,
   QuestNode,
   WorldEffect,
@@ -111,7 +112,7 @@ describe("WorldPredicate and WorldEffect", () => {
     ).toBe(true);
   });
 
-  it("accepts the two effect kinds", () => {
+  it("accepts the four effect kinds", () => {
     expect(
       WorldEffect.safeParse({
         kind: "shift_faction_relation",
@@ -121,6 +122,33 @@ describe("WorldPredicate and WorldEffect", () => {
       }).success,
     ).toBe(true);
     expect(WorldEffect.safeParse({ kind: "advance_calendar", days: 1 }).success).toBe(true);
+    expect(
+      WorldEffect.safeParse({ kind: "shift_npc_affinity", npcId: "sela-the-innkeeper", delta: 1 })
+        .success,
+    ).toBe(true);
+    expect(
+      WorldEffect.safeParse({
+        kind: "add_npc_fact",
+        npcId: "sela-the-innkeeper",
+        fact: "helped broker the reckoning",
+      }).success,
+    ).toBe(true);
+  });
+
+  // Same reason shift_faction_relation's delta is checked: FACTION_BANDS[3.5]
+  // is undefined, so a fractional delta would find no band at all.
+  it("refuses a fractional shift_npc_affinity delta", () => {
+    expect(
+      WorldEffect.safeParse({ kind: "shift_npc_affinity", npcId: "sela-the-innkeeper", delta: 0.5 })
+        .success,
+    ).toBe(false);
+  });
+
+  it("refuses an empty add_npc_fact fact string", () => {
+    expect(
+      WorldEffect.safeParse({ kind: "add_npc_fact", npcId: "sela-the-innkeeper", fact: "" })
+        .success,
+    ).toBe(false);
   });
 
   // The one field that could run the calendar BACKWARDS — the replay
@@ -180,6 +208,28 @@ describe("WorldManifest", () => {
         startingNodeId: "arrival",
         factionRelations: [],
       }).success,
+    ).toBe(false);
+  });
+});
+
+describe("NpcAffinityEntry", () => {
+  it("defaults facts to an empty array", () => {
+    const parsed = NpcAffinityEntry.parse({ npcId: "sela-the-innkeeper", band: "cordial" });
+    expect(parsed.facts).toEqual([]);
+  });
+
+  it("accepts declared facts", () => {
+    const parsed = NpcAffinityEntry.parse({
+      npcId: "sela-the-innkeeper",
+      band: "cordial",
+      facts: ["helped broker the reckoning"],
+    });
+    expect(parsed.facts).toEqual(["helped broker the reckoning"]);
+  });
+
+  it("rejects an unrecognised band", () => {
+    expect(
+      NpcAffinityEntry.safeParse({ npcId: "sela-the-innkeeper", band: "smitten" }).success,
     ).toBe(false);
   });
 });

@@ -140,8 +140,19 @@ describe("the scene event payloads (§4.7 step 4)", () => {
     expect(parsed.day).toBe(2);
   });
 
-  it("accepts an empty world_delta_applied payload, defaulting relations to []", () => {
-    expect(WorldDeltaAppliedPayload.parse({})).toEqual({ relations: [] });
+  it("accepts an empty world_delta_applied payload, defaulting relations and npcAffinities to []", () => {
+    expect(WorldDeltaAppliedPayload.parse({})).toEqual({ relations: [], npcAffinities: [] });
+  });
+
+  it("accepts a world_delta_applied payload with npcAffinities", () => {
+    const parsed = WorldDeltaAppliedPayload.parse({
+      npcAffinities: [
+        { npcId: "sela-the-innkeeper", band: "cordial", facts: ["helped broker the reckoning"] },
+      ],
+    });
+    expect(parsed.npcAffinities).toEqual([
+      { npcId: "sela-the-innkeeper", band: "cordial", facts: ["helped broker the reckoning"] },
+    ]);
   });
 
   it("rejects a world_delta_applied payload with a non-integer day", () => {

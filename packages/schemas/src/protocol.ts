@@ -6,7 +6,7 @@
 // the browser.
 import { z } from "zod";
 import { ActionType, ExecuteTurn, Tile } from "./actions.js";
-import { ContentId, FactionRelationEntry } from "./content.js";
+import { ContentId, FactionRelationEntry, NpcAffinityEntry } from "./content.js";
 import { DerivedCharacter } from "./derived.js";
 import { GameEvent } from "./events.js";
 import type { CampaignStartedPayload } from "./events.js";
@@ -35,6 +35,11 @@ export const SceneSnapshot = z.object({
   /** Overlay: ONLY pairs a completed node has shifted (absolute bands).
    *  Read through `relationBetween`'s authored baseline, never alone. */
   relations: z.array(FactionRelationEntry),
+  /** Deltas-only overlay: ONLY NPCs an authored effect has actually touched.
+   *  Read through `affinityOf`, never alone — absent means neutral, no
+   *  facts. Unlike `relations` there is no authored baseline behind this:
+   *  a single hardcoded default covers every NPC nobody has touched yet. */
+  npcAffinities: z.array(NpcAffinityEntry).default([]),
   day: z.number().int().min(1),
 });
 
@@ -90,6 +95,7 @@ export function sceneFromGenesis(payload: CampaignStartedPayload): SceneSnapshot
     currentNodeId: startingNodeId,
     completedNodeIds: [],
     relations: [],
+    npcAffinities: [],
     day: startingDay,
   };
 }
