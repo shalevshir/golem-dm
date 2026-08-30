@@ -1035,7 +1035,15 @@ combat with a UI that can still send them.
    already derives from the campaign `rootSeed` and the campaign sequence,
    so the rule this section states is already true by construction and
    `replay.test.ts` already pins it.
-6. **Character profiles and NPC affinity projection.**
+6. **Character profiles and NPC affinity projection.** Two new
+   `WorldEffect` kinds (`shift_npc_affinity`, `add_npc_fact`) reusing
+   `FactionBand`, applied by the scene engine on quest-node completion —
+   authored-only, no dynamic/LLM-proposed path. No new player-character
+   schema: `DerivedCharacter` already serves that role. Designed, not yet
+   implemented.
+   [`docs/superpowers/specs/2026-08-30-character-profiles-design.md`](docs/superpowers/specs/2026-08-30-character-profiles-design.md),
+   plan at
+   [`docs/superpowers/plans/2026-08-30-character-profiles.md`](docs/superpowers/plans/2026-08-30-character-profiles.md).
 7. **Episodic memory (step 10 spec #2)** — now with a real consumer. §4.6
    left it undesignable for want of a corpus, a consumer and a producer.
    This sequence supplies all three, and closes one of §4.6's two named
