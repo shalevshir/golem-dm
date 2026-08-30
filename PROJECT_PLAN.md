@@ -1056,8 +1056,17 @@ combat with a UI that can still send them.
    pgvector behind the same two-implementations-one-conformance-suite shape
    the event log uses, retrieved on scene entry, and delivered to the
    narrator through one English memory block that step 6's authored NPC
-   facts share. **Designed 2026-08-30; implemented, not yet merged to
-   `main`.**
+   facts share. **Merged to `main`** 2026-08-30 as `2ecace7` (PR
+   [#14](https://github.com/shalevshir/golem-dm/pull/14)), CI green at
+   1662 passed / 31 skipped (1700 passed / 0 skipped with Postgres). One
+   post-merge fix wave (an independent code review of the merged PR) landed
+   in the same commit: a quest node completed via combat victory was never
+   summarized or indexed as its own episode; the quest-node-completion
+   site's indexing call was still blocking the turn on the embed+write
+   call; a failed memory retrieval latched an empty cache for the rest of a
+   node visit; and a store failure was mislabeled as an embedding failure
+   in metrics. `recordSummaryCall`'s missing wiring (noted below) was left
+   as-is — a genuine `SceneSummaryPort` interface gap, not a bug.
    [`docs/superpowers/specs/2026-08-30-episodic-memory-design.md`](docs/superpowers/specs/2026-08-30-episodic-memory-design.md),
    plan at
    [`docs/superpowers/plans/2026-08-30-episodic-memory.md`](docs/superpowers/plans/2026-08-30-episodic-memory.md).
