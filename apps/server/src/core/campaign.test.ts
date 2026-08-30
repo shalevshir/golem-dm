@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { createInMemoryEventStore, EventStoreUnavailableError } from "@ai-dm/memory";
 import type { EventStore } from "@ai-dm/memory";
-import { fold, reduce, sceneFromGenesis } from "@ai-dm/schemas";
+import { EncounterStartedPayload, fold, reduce, sceneFromGenesis } from "@ai-dm/schemas";
 import type { GameEvent } from "@ai-dm/schemas";
 import {
   builtOf,
@@ -159,13 +159,13 @@ describe("startEncounter", () => {
     expect(encounterOf(campaign).currentActorIndex).toBe(0);
   });
 
-  it("writes an encounter_started event carrying only the encounter id", async () => {
+  it("writes an encounter_started event carrying the encounter id", async () => {
     const input = baseInput();
     await startedCampaign(input);
     const events = await input.store.readSince("s1", -1);
     expect(events).toHaveLength(2);
     expect(events[1]).toMatchObject({ sequence: 1, type: "encounter_started" });
-    expect(events[1]?.payload).toEqual({ encounterId: ENCOUNTER_ID });
+    expect(events[1]?.payload).toMatchObject({ encounterId: ENCOUNTER_ID });
   });
 
   it("seeds encounterId, grid and turnOrder — the three reduce never writes", async () => {
@@ -262,6 +262,28 @@ describe("startEncounter", () => {
     expect(campaign.state).toBe(stateBefore);
     expect(campaign.built).toBe(builtBefore);
     expect(campaign.nextSequence).toBe(nextSequenceBefore);
+  });
+});
+
+describe("startEncounter — the board travels in the payload", () => {
+  it("writes grid, combatants and turnOrder into encounter_started", async () => {
+    const input = { ...baseInput(), campaignId: "c-board" };
+    await startedCampaign(input);
+
+    const events = await input.store.readSince("c-board", -1);
+    const started = events.find((each) => each.type === "encounter_started");
+    const payload = EncounterStartedPayload.parse(started?.payload);
+    expect(payload.turnOrder).toEqual(["hero", "goblin-a", "goblin-b"]);
+    expect(payload.combatants).toHaveLength(3);
+    expect(payload.grid?.width).toBe(12);
+  });
+
+  it("projects the same board on a cold load, with no substitution needed", async () => {
+    const input = { ...baseInput(), campaignId: "c-parity" };
+    const campaign = await startedCampaign(input);
+
+    const reloaded = await loadCampaign({ campaignId: "c-parity", store: input.store });
+    expect(reloaded?.state.encounter).toEqual(campaign.state.encounter);
   });
 });
 
