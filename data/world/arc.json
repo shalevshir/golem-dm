@@ -73,7 +73,13 @@
         "factionB": "river-wardens",
         "delta": 2
       },
-      { "kind": "advance_calendar", "days": 2 }
+      { "kind": "advance_calendar", "days": 2 },
+      { "kind": "shift_npc_affinity", "npcId": "sela-the-innkeeper", "delta": 1 },
+      {
+        "kind": "add_npc_fact",
+        "npcId": "sela-the-innkeeper",
+        "fact": "hosted and helped broker the reckoning between the Guild and the Wardens"
+      }
     ]
   }
 ]

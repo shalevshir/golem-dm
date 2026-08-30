@@ -1045,6 +1045,51 @@ describe("handleCommand — free text", () => {
     ]);
   });
 
+  it("shifts an npc's affinity and records a fact when reckoning completes, and a reload folds identically", async () => {
+    const store = createInMemoryEventStore();
+    const before: SceneSnapshot = {
+      worldId: "emberfall",
+      currentNodeId: "reckoning",
+      completedNodeIds: ["arrival", "guild-offer", "the-weir"],
+      relations: [{ factionA: "ashen-guild", factionB: "river-wardens", band: "hostile" }],
+      npcAffinities: [],
+      day: 1,
+    };
+    const campaign = await sceneCampaign(store, before);
+    const ports: TurnPorts = {
+      ...portsWith(store),
+      intent: classifiedAs({ category: "exploration", targetNodeId: null }),
+    };
+
+    const frames = await drain(
+      handleCommand(
+        campaign,
+        { type: "free_text", clientMessageId: "c1", text: "let's settle this" },
+        ports,
+      ),
+    );
+
+    expect(eventTypesOf(frames)).toEqual([
+      "player_input",
+      "intent_classified",
+      "quest_node_completed",
+      "world_delta_applied",
+      "narrative_emitted",
+    ]);
+    expect(campaign.state.world.scene?.npcAffinities).toEqual([
+      {
+        npcId: "sela-the-innkeeper",
+        band: "cordial",
+        facts: ["hosted and helped broker the reckoning between the Guild and the Wardens"],
+      },
+    ]);
+
+    const reloaded = await loadCampaign({ campaignId: campaign.state.world.campaignId, store });
+    expect(reloaded?.state.world.scene?.npcAffinities).toEqual(
+      campaign.state.world.scene?.npcAffinities,
+    );
+  });
+
   // Whole-branch review finding 2: `completeCurrentNode` with no traversal
   // is not an arrival — the player never moved. Narrating it as `arrived`
   // would tell the player they just reached a place they were already

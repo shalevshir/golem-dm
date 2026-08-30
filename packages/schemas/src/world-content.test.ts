@@ -56,13 +56,15 @@ describe("the authored world", () => {
     expect(reckoning?.edges).toEqual([]);
   });
 
-  // Both effect kinds and both predicate kinds appear in the shipped arc, so
-  // the schemas are exercised by content and not only by unit fixtures.
-  it("uses both predicate kinds and both effect kinds", () => {
+  // Both predicate kinds and all four effect kinds appear in the shipped arc,
+  // so the schemas are exercised by content and not only by unit fixtures.
+  it("uses both predicate kinds and all four effect kinds", () => {
     const nodes = QuestNode.array().parse(readJson("arc.json"));
     const predicateKinds = new Set(nodes.flatMap((n) => n.preconditions.map((p) => p.kind)));
     const effectKinds = new Set(nodes.flatMap((n) => n.effects.map((e) => e.kind)));
     expect(predicateKinds).toEqual(new Set(["node_completed", "faction_band_at_least"]));
-    expect(effectKinds).toEqual(new Set(["shift_faction_relation", "advance_calendar"]));
+    expect(effectKinds).toEqual(
+      new Set(["shift_faction_relation", "advance_calendar", "shift_npc_affinity", "add_npc_fact"]),
+    );
   });
 });

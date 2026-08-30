@@ -908,6 +908,7 @@ describe("App (scene mode, out-of-combat free text)", () => {
     currentNodeId: "market-square",
     completedNodeIds: [],
     relations: [],
+    npcAffinities: [],
     day: 1,
   };
 
@@ -1128,6 +1129,7 @@ describe("App (?world= query param)", () => {
     currentNodeId: "market-square",
     completedNodeIds: [],
     relations: [],
+    npcAffinities: [],
     day: 1,
   };
 
