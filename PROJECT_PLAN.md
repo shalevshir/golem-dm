@@ -940,16 +940,22 @@ file by file.
   the first matter; a growing world makes the second. Memoizing the
   catalogue lookup handles the first outright; the second needs a decision,
   not a fix.
-  **Narrower after step 5, not closed.** `loadCampaign`'s per-event loop
-  only substitutes a rebuilt `state.encounter` for an `encounter_started`
-  payload written *before* this step — a payload written since already
-  carries its own board, and `reduce` has already folded it. The catalogue
-  LOOKUP itself does not go away either way: `built` still needs stat
-  blocks, which no payload carries, so `buildEncounterById` still runs once
-  per `encounter_started` regardless of which side of step 5 it was
-  written on — the blocking I/O cost and the retired-id unloadability risk
-  this bullet names are both still live for new logs, only the state-fold
-  substitution is now legacy-only.
+  **Closed for modern logs, by step 5's own fix wave.** `loadCampaign`'s
+  per-event loop only substitutes a rebuilt `state.encounter` for an
+  `encounter_started` payload written *before* this step — a payload
+  written since already carries its own board, and `reduce` has already
+  folded it. The catalogue LOOKUP was initially left running once per
+  `encounter_started` regardless of which side of step 5 it was written
+  on, which delivered neither of Decision 2's two promised wins for a
+  modern log with more than one historical fight; the fix wave defers that
+  lookup to after the loop, resolved once for whichever encounter the fold
+  leaves open (or not at all, between fights) — one blocking build per cold
+  load, not one per historical fight, and a retired/renamed id used only by
+  an already-resolved fight no longer breaks loading either, since its
+  build is never attempted. Both costs remain live for a legacy (pre-step-5)
+  payload, unavoidably: its build cannot be deferred, since
+  `initialEncounterState` is what seeds the fold for that bracket's own
+  events.
 - **`pipeline.ts`'s `emit` is a fourth writer of the bracket, and does not
   know it** (`campaign.ts`'s doc comment on `Campaign.built`). It sets
   `campaign.state = reduce(...)` for every event it appends and never

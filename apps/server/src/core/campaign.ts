@@ -444,34 +444,23 @@ export async function loadCampaign(input: {
   // log is not foldable by `reduce` alone: every `encounter_started` opens a
   // bracket whose contents only the catalogue can rebuild. `reduce` still
   // sees every event — it holds the bracket invariants — and this loop only
-  // supplies the two things it cannot reach.
+  // supplies the one thing it cannot reach for a legacy payload (the board
+  // itself); the catalogue lookup for stat blocks (`built`) is resolved once,
+  // after the loop, from whatever `state.encounter` the fold actually lands
+  // on — see the comment below the loop for why.
   //
-  // Two real costs this carries that the split does not otherwise name:
-  //
-  // - `buildEncounterById` re-reads and re-parses SRD files on every call,
-  //   with no memoization (`encounters/index.ts`). A campaign with N
-  //   resolved fights therefore does N blocking `readFileSync` + zod passes
-  //   on the event loop for every cold `registry.get`, even though only the
-  //   final `built` survives past this loop. That is NOT N-1 wasted builds,
-  //   though: each intermediate one is still needed while it runs, because
-  //   its `initialEncounterState` is what seeds the fold for that
-  //   encounter's own events: `scene_changed` reads `turnOrder`,
-  //   `currentActorIndex` and `round` straight off the seed on the first
-  //   `turn_advanced` of a bracket, and maps over `combatants` to reset the
-  //   up-next actor's economy. `state_delta_applied` replaces `combatants`
-  //   wholesale from its own payload, so once one has been folded the seed's
-  //   combatants no longer matter — but the pipeline can emit a bare
-  //   `turn_advanced` with no delta before it, and this fold is for an
-  //   arbitrary log, so do not read that as "never" — before the next
-  //   `encounter_resolved` discards it. Memoizing the catalogue lookup would
-  //   still be a legitimate follow-up; it is out of scope for this commit.
-  // - Load success is coupled to the catalogue's entire history, not just
-  //   its current contents: retiring or renaming an encounter id makes every
-  //   campaign that ever fought it permanently unloadable, because
-  //   `UnknownEncounterError` propagates straight out of `buildEncounterById`
-  //   here with nothing to catch it. A catalogue that only ever grows never
-  //   hits this; one that prunes or renames needs an answer this loop does
-  //   not have.
+  // One real cost the legacy path (and a still-open bracket) still carries,
+  // unavoidably: `buildEncounterById` re-reads and re-parses SRD files on
+  // every call, with no memoization (`encounters/index.ts`). Load success is
+  // therefore coupled to the catalogue's contents at that one id: retiring
+  // or renaming it makes that one campaign unloadable, because
+  // `UnknownEncounterError` propagates straight out of `buildEncounterById`
+  // here with nothing to catch it. A HISTORICAL (already-resolved) fight in
+  // a modern log carries no such risk at all — its build, deferred below, is
+  // never attempted, so retiring or renaming an id no longer touches a
+  // campaign whose only fight against it is already over. A catalogue that
+  // only ever grows never hits this; one that prunes or renames needs an
+  // answer this loop does not have for a legacy payload or an open bracket.
   for (const event of events.slice(1)) {
     state = reduce(state, event);
     if (event.type === "encounter_started") {
@@ -479,22 +468,40 @@ export async function loadCampaign(input: {
       // filled the bracket, so the SUBSTITUTION — patching a rebuilt board
       // into `state.encounter` — disappears for those logs; only a payload
       // persisted BEFORE step 5 leaves `state.encounter` null and still
-      // needs it. The catalogue LOOKUP itself does not disappear either
-      // way: `built` needs stat blocks, which the payload never carries, so
-      // `buildEncounterById` still runs once per `encounter_started` in
-      // both arms below.
+      // needs it immediately: `initialEncounterState(legacy)` is what seeds
+      // the fold for that encounter's own events (`scene_changed` reads
+      // `turnOrder`/`currentActorIndex`/`round` straight off the seed on the
+      // first `turn_advanced` of a bracket), so this build cannot be
+      // deferred the way the modern arm's can.
       if (state.encounter === null) {
         const legacy = buildEncounterById(EncounterStartedPayload.parse(event.payload).encounterId);
         state = { ...state, encounter: initialEncounterState(legacy) };
         built = legacy;
       } else {
-        built = buildEncounterById(state.encounter.encounterId);
+        // Deferred rather than built here: `state.encounter` already has its
+        // board (the fold supplied it), so nothing downstream in this loop
+        // reads `built` before the next `encounter_started`/
+        // `encounter_resolved` overwrites or clears it again — only its
+        // FINAL value, once the whole log has been folded, ever escapes.
+        // Building on every iteration was one `buildEncounterById` call per
+        // historical fight for a result every call but the last one
+        // immediately discarded; null here and a single build after the
+        // loop (once, only if a bracket is still open) is the same
+        // observable result for one catalogue lookup instead of N.
+        built = null;
       }
     } else if (event.type === "encounter_resolved") {
       // `reduce` already cleared `state.encounter`; the static half goes with
       // it, so a campaign between fights reloads with both halves null.
       built = null;
     }
+  }
+
+  // The modern-payload build deferred above: resolved exactly once, for
+  // whichever encounter the fold leaves open once the whole log has been
+  // read — never for one a later event has already closed or replaced.
+  if (built === null && state.encounter !== null) {
+    built = buildEncounterById(state.encounter.encounterId);
   }
 
   // A projection of the `narrative_emitted` events in the log, not something

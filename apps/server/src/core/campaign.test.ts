@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { createInMemoryEventStore, EventStoreUnavailableError } from "@ai-dm/memory";
 import type { EventStore } from "@ai-dm/memory";
 import { EncounterStartedPayload, fold, reduce, sceneFromGenesis } from "@ai-dm/schemas";
@@ -15,6 +15,11 @@ import {
 } from "./campaign.js";
 import type { Campaign, CreateCampaignInput, SceneStatics } from "./campaign.js";
 import { buildEncounterById, loadCharacter, UnknownEncounterError } from "../encounters/index.js";
+// A namespace import purely so `buildEncounterById` can be spied on below —
+// `campaign.ts` imports the same named binding from the same module
+// specifier, and Vitest's module transform routes both through one mutable
+// namespace object, so a spy set up here is visible to calls made there too.
+import * as encountersModule from "../encounters/index.js";
 import { loadWorld, UnknownWorldError } from "../world/index.js";
 
 const clock = (): string => "2026-08-19T10:00:00.000Z";
@@ -424,6 +429,40 @@ describe("loadCampaign", () => {
     expect(loaded?.state).toEqual(created.state);
     expect(loaded?.built?.encounterId).toBe(ENCOUNTER_ID);
     expect(loaded?.nextSequence).toBe(created.nextSequence);
+  });
+
+  it("calls buildEncounterById once, not once per historical fight, for a modern log", async () => {
+    // Fix for the whole-branch review's performance finding: the loop used
+    // to call `buildEncounterById` inside the modern (board-carrying) arm on
+    // every `encounter_started`, even though only the LAST one's result ever
+    // survives the loop. Two fights (one resolved, one still open) is enough
+    // to distinguish "once per historical fight" (2 calls) from "once per
+    // cold load" (1 call, deferred to after the loop).
+    const input = baseInput();
+    const firstFight = await startedCampaign(input);
+    const betweenFights = await resolveEncounter({
+      campaign: firstFight,
+      outcome: "victory",
+      survivorIds: ["hero"],
+      store: input.store,
+      clock: input.clock,
+      uuid: input.uuid,
+    });
+    await startEncounter({
+      campaign: betweenFights,
+      encounterId: ENCOUNTER_ID,
+      store: input.store,
+      clock: input.clock,
+      uuid: input.uuid,
+    });
+
+    const spy = vi.spyOn(encountersModule, "buildEncounterById");
+    spy.mockClear();
+    const loaded = await loadCampaign({ campaignId: "s1", store: input.store });
+    expect(loaded?.built?.encounterId).toBe(ENCOUNTER_ID);
+    expect(loaded?.state.encounter).not.toBeNull();
+    expect(spy).toHaveBeenCalledTimes(1);
+    spy.mockRestore();
   });
 
   it("rebuilds a scene campaign's state.world.scene and sceneStatics from its genesis", async () => {
