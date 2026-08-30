@@ -7,7 +7,7 @@ import type { EmbeddingSpec } from "./embedding-port.js";
 /** JSON as providers accept it. Declared here so routing stays SDK-free. */
 export type JsonValue = null | string | number | boolean | JsonValue[] | { [key: string]: JsonValue };
 
-export type AgentRole = "intent" | "tactical" | "narrative";
+export type AgentRole = "intent" | "tactical" | "narrative" | "summary";
 export type ProviderId = "anthropic" | "google" | "openai";
 
 /**
@@ -81,6 +81,17 @@ export const DEFAULT_MODEL_ROUTING: ModelRouting = {
     provider: "anthropic",
     modelId: "claude-sonnet-5",
     temperature: 0.8,
+  },
+  /**
+   * Cheap and cold: a summary is a compression of material already in hand,
+   * not a creative act. `temperature: 0` so the same episode summarizes the
+   * same way, which keeps the corpus stable across a reindex.
+   */
+  summary: {
+    provider: "google",
+    modelId: "gemini-3-flash",
+    temperature: 0,
+    reasoningEffort: "low",
   },
 };
 
