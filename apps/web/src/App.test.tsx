@@ -342,8 +342,12 @@ describe("App", () => {
       });
     });
 
+    // The board mounts only once the (now reactive, §4.7 step 5) catalogue
+    // fetch resolves, so this waits for the button rather than assuming it is
+    // already there the instant the frames above are applied.
+    const dodgeButton = await screen.findByRole("button", { name: he.actions.dodge });
     act(() => {
-      screen.getByRole("button", { name: he.actions.dodge }).click();
+      dodgeButton.click();
     });
 
     const sent = socket.sent.map((each) => JSON.parse(each) as Record<string, unknown>);
@@ -636,8 +640,12 @@ describe("App", () => {
       });
     });
 
+    // The board mounts only once the (now reactive, §4.7 step 5) catalogue
+    // fetch resolves, so this waits for the tile rather than assuming it is
+    // already there the instant the frames above are applied.
+    const initialTile = await screen.findByRole("button", { name: /\(5,5\)/ });
     act(() => {
-      screen.getByRole("button", { name: /\(5,5\)/ }).click();
+      initialTile.click();
     });
 
     // A fresh affordance frame lands — same actor, same turn in terms of the
@@ -695,8 +703,12 @@ describe("App", () => {
       });
     });
 
+    // The board mounts only once the (now reactive, §4.7 step 5) catalogue
+    // fetch resolves, so this waits for the tile rather than assuming it is
+    // already there the instant the frames above are applied.
+    const tile = await screen.findByRole("button", { name: /\(5,5\)/ });
     act(() => {
-      screen.getByRole("button", { name: /\(5,5\)/ }).click();
+      tile.click();
     });
     act(() => {
       screen.getByRole("button", { name: he.actions.dodge }).click();
@@ -735,8 +747,12 @@ describe("App", () => {
       });
     });
 
+    // The board mounts only once the (now reactive, §4.7 step 5) catalogue
+    // fetch resolves, so this waits for the tile rather than assuming it is
+    // already there the instant the frames above are applied.
+    const tile = await screen.findByRole("button", { name: /\(5,5\)/ });
     act(() => {
-      screen.getByRole("button", { name: /\(5,5\)/ }).click();
+      tile.click();
     });
 
     // A new offer that STILL contains the clicked tile.
@@ -776,13 +792,26 @@ describe("App", () => {
     // mount -> cleanup -> mount. A single shared `cancelled` boolean gets
     // reset to false by the SECOND mount before the FIRST mount's still
     // -pending async IIFE ever reads it, so both runs reach `connect()` —
-    // the socket factory call count is the observable proxy for that.
+    // that shared-boolean bug is what the monotonic `runIdRef` in App.tsx
+    // guards against.
+    //
+    // Since §4.7 step 5 (this task) removed the unconditional mount-time
+    // catalogue fetch, this reconnect path (a stored id, no `?world=`) has no
+    // `await` left before `connect()` at all -- `stored ?? (await
+    // createCampaign(...))` short-circuits without ever evaluating its right
+    // side. So the mount -> cleanup -> mount sequence now runs synchronously
+    // start to finish: TWO sockets are genuinely constructed (the factory
+    // call count below), not one. That is fine -- the property this test
+    // actually cares about is that cleanup disposes of the first one before
+    // the second is ever used, i.e. no connection is left open and
+    // forgotten. `close` is spied per socket to prove exactly that.
     sessionStorage.setItem(CAMPAIGN_STORAGE_KEY, "s1");
     const sockets: FakeSocket[] = [];
     const factory = vi.fn((): FakeSocket => {
       const created = fakeSocket();
-      sockets.push(created);
-      return created;
+      const withCloseSpy = { ...created, close: vi.fn(created.close) };
+      sockets.push(withCloseSpy);
+      return withCloseSpy;
     });
 
     render(
@@ -791,16 +820,18 @@ describe("App", () => {
       </StrictMode>,
     );
 
-    // Whichever socket survives eventually opens and joins; by that point a
-    // second, erroneous `connect()` call (if the guard were broken) would
-    // already have happened too — every run shares the exact same two
-    // mocked awaits, with no extra delay on either.
+    // Whichever socket survives eventually opens and joins.
     await waitFor(() => {
       for (const each of sockets) each.emitOpen();
       expect(sockets.some((each) => each.sent.length > 0)).toBe(true);
     });
 
-    expect(factory).toHaveBeenCalledTimes(1);
+    expect(factory).toHaveBeenCalledTimes(2);
+    // The first (stale) connection was torn down by cleanup before the
+    // second (surviving) one was ever created -- the actual bug the old
+    // shared-boolean guard let through was this NOT happening.
+    expect(sockets[0]?.close).toHaveBeenCalledTimes(1);
+    expect(sockets[1]?.close).not.toHaveBeenCalled();
   });
 });
 
@@ -1046,6 +1077,15 @@ describe("App (?world= query param)", () => {
     };
   }
 
+  // Ids matched to the shared `catalogue` fixture (not `goblin-ambush`'s real
+  // spawns) since `fetchMock` answers every non-POST call with that fixture.
+  function bracketOpen(): CampaignState["encounter"] {
+    return snapshotWith([
+      combatant("hero", "party", "alive"),
+      combatant("goblin-a", "hostile", "alive"),
+    ]).encounter;
+  }
+
   beforeEach(() => {
     window.history.pushState({}, "", "/?world=emberfall");
   });
@@ -1076,5 +1116,38 @@ describe("App (?world= query param)", () => {
       socket.emitMessage({ type: "campaign_state", sequence: 0, snapshot: sceneSnapshot() });
     });
     expect(await screen.findByPlaceholderText(he.freeText.placeholder)).toBeInTheDocument();
+  });
+
+  it("fetches the catalogue and renders the board when a bracket opens mid-scene", async () => {
+    await start();
+
+    act(() => {
+      socket.emitMessage({ type: "campaign_state", sequence: 0, snapshot: sceneSnapshot() });
+    });
+    expect(await screen.findByPlaceholderText(he.freeText.placeholder)).toBeInTheDocument();
+
+    // The bracket opens on the already-open socket — the case that was
+    // unreachable before §4.7 step 5 and is the whole point of it. `reduce`
+    // now folds this into a real board (Task 2), so the client needs the
+    // catalogue it never fetched at mount.
+    act(() => {
+      socket.emitMessage({
+        type: "campaign_state",
+        sequence: 1,
+        snapshot: { ...sceneSnapshot(), encounter: bracketOpen() },
+      });
+    });
+
+    await waitFor(() => {
+      expect(
+        fetchMock.mock.calls.some((call: unknown[]) =>
+          String(call[0]).includes("/encounters/goblin-ambush"),
+        ),
+      ).toBe(true);
+    });
+    // The board replaces the free-text bar once the catalogue lands.
+    await waitFor(() => {
+      expect(screen.queryByPlaceholderText(he.freeText.placeholder)).not.toBeInTheDocument();
+    });
   });
 });
