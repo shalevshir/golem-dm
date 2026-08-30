@@ -476,10 +476,13 @@ export async function loadCampaign(input: {
     state = reduce(state, event);
     if (event.type === "encounter_started") {
       // Step 5 and later logs carry the board and `reduce` has already
-      // filled the bracket. Only a payload persisted BEFORE step 5 leaves
-      // it null here, and that one still needs the catalogue — which is
-      // why this call, and the O(encounters) cold-load I/O it causes,
-      // survives for old logs and disappears for new ones.
+      // filled the bracket, so the SUBSTITUTION — patching a rebuilt board
+      // into `state.encounter` — disappears for those logs; only a payload
+      // persisted BEFORE step 5 leaves `state.encounter` null and still
+      // needs it. The catalogue LOOKUP itself does not disappear either
+      // way: `built` needs stat blocks, which the payload never carries, so
+      // `buildEncounterById` still runs once per `encounter_started` in
+      // both arms below.
       if (state.encounter === null) {
         const legacy = buildEncounterById(EncounterStartedPayload.parse(event.payload).encounterId);
         state = { ...state, encounter: initialEncounterState(legacy) };

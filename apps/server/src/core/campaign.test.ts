@@ -414,9 +414,10 @@ describe("loadCampaign", () => {
   });
 
   it("rebuilds the encounter's initial board from its own encounter_started", async () => {
-    // The load path's half of `initialEncounterState`: `reduce` cannot fill
-    // the bracket it opens, so this proves `loadCampaign` substitutes the
-    // rebuilt board rather than leaving a hole where the fold left one.
+    // `encounter_started` carries the board (§4.7 step 5), so `reduce` fills
+    // `state.encounter` on its own here — this proves the cold-load fold
+    // lands on the same board the live campaign has, with no substitution
+    // needed.
     const input = baseInput();
     const created = await startedCampaign(input);
     const loaded = await loadCampaign({ campaignId: "s1", store: input.store });
@@ -541,7 +542,8 @@ describe("loadCampaign", () => {
 
     const loaded = await loadCampaign({ campaignId: "s1", store: input.store });
     // `fold` is enough for a tail that opens no bracket — `created.state`
-    // already has the board `encounter_started` could not fold in.
+    // already has the board, since `startedCampaign`'s `encounter_started`
+    // carried it and `reduce` folded it in directly.
     const expected = fold(created.state, tail);
 
     expect(loaded?.state).toEqual(expected);
@@ -730,14 +732,15 @@ describe("a campaign that fights the same encounter twice", () => {
     //   production path ever produces a log with one.
     // - Without them, the log the load-path assertion (part 3) re-folds
     //   from scratch would carry no combat events at all, so nothing
-    //   between the brackets would exercise the substituted board's
-    //   contents, only its existence. The `state_delta_applied` below writes
-    //   real combatants, and the three `turn_advanced`s that follow actually
+    //   between the brackets would exercise the folded board's contents,
+    //   only its existence. The `state_delta_applied` below writes real
+    //   combatants, and the three `turn_advanced`s that follow actually
     //   walk `turnOrder` — not because the fold's correctness depends on
     //   their shape mid-bracket (`encounter_resolved` discards this board
-    //   outright, and the second `encounter_started` substitutes a fresh
-    //   one), but because, exactly as the opening comment above already
-    //   says, they are what makes a stale board detectable at all.
+    //   outright, and the second `encounter_started` fills a fresh one
+    //   straight from its own payload), but because, exactly as the opening
+    //   comment above already says, they are what makes a stale board
+    //   detectable at all.
     async function appendAndFold(event: GameEvent): Promise<void> {
       await input.store.append("s1", [event]);
       campaign.state = reduce(campaign.state, event);
@@ -826,8 +829,8 @@ describe("a campaign that fights the same encounter twice", () => {
     expect(restarted.state.world.appliedClientMessageIds).toEqual(["c1"]);
 
     // 3. Load path: folding the whole log from scratch exercises
-    // encounter_started -> substitute -> encounter_resolved -> clear, twice
-    // over in one log — now a genuinely contiguous log with the dirtying
+    // encounter_started -> fill -> encounter_resolved -> clear, twice over
+    // in one log — now a genuinely contiguous log with the dirtying
     // events for real (part 1's `appendAndFold` calls above), not a log with
     // a hole where they would have been — and must land on exactly what the
     // live campaign has.
