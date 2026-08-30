@@ -1,6 +1,8 @@
 // Which model answers for which agent role. This is CONFIG: a role maps to a
 // model id and its call parameters, never to a branch in code. Swapping the
 // tactical model after the step 7 benchmark must be a data edit, not a patch.
+import { EMBEDDING_DIMENSIONS } from "@ai-dm/schemas";
+import type { EmbeddingSpec } from "./embedding-port.js";
 
 /** JSON as providers accept it. Declared here so routing stays SDK-free. */
 export type JsonValue = null | string | number | boolean | JsonValue[] | { [key: string]: JsonValue };
@@ -86,3 +88,19 @@ export const DEFAULT_MODEL_ROUTING: ModelRouting = {
 export function resolveModelSpec(routing: ModelRouting, role: AgentRole): ModelSpec {
   return routing[role];
 }
+
+/**
+ * Embedding model selection, deliberately its own constant rather than a
+ * fourth `AgentRole`. A `ModelSpec` carries `temperature`,
+ * `maxOutputTokens` and `reasoningEffort`, all meaningless for an embedding
+ * call, and `resolveModelSpec` would start returning specs `EmbeddingPort`
+ * cannot accept.
+ *
+ * `openai` because it is already a wired `ProviderId` — no adapter-layer
+ * provider work is needed.
+ */
+export const DEFAULT_EMBEDDING_SPEC: EmbeddingSpec = {
+  provider: "openai",
+  modelId: "text-embedding-3-small",
+  dimensions: EMBEDDING_DIMENSIONS,
+};
