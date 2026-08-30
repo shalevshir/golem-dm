@@ -440,14 +440,15 @@ export async function loadCampaign(input: {
     sceneStatics = { authored, character: loadCharacter(characterId) };
   }
 
-  // Folded one event at a time rather than through `fold`, because a campaign
-  // log is not foldable by `reduce` alone: every `encounter_started` opens a
-  // bracket whose contents only the catalogue can rebuild. `reduce` still
-  // sees every event — it holds the bracket invariants — and this loop only
-  // supplies the one thing it cannot reach for a legacy payload (the board
-  // itself); the catalogue lookup for stat blocks (`built`) is resolved once,
-  // after the loop, from whatever `state.encounter` the fold actually lands
-  // on — see the comment below the loop for why.
+  // Folded one event at a time rather than through `fold`, because `built`
+  // is not something `reduce` can ever supply: a bracket's stat blocks come
+  // from the catalogue, never from the log, board-carrying payload or not
+  // (`reduce` fills `state.encounter` itself for those — see the loop's own
+  // comment for the one exception, a legacy payload with no board). `reduce`
+  // still sees every event and holds every bracket invariant; this loop only
+  // adds the catalogue lookup, resolved once, after the loop, from whatever
+  // `state.encounter` the fold actually lands on — see the comment below the
+  // loop for why.
   //
   // One real cost the legacy path (and a still-open bracket) still carries,
   // unavoidably: `buildEncounterById` re-reads and re-parses SRD files on

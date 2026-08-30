@@ -1019,8 +1019,7 @@ combat with a UI that can still send them.
    plan at
    [`docs/superpowers/plans/2026-08-28-intent-router.md`](docs/superpowers/plans/2026-08-28-intent-router.md).
 5. **The combat bridge:** `encounter_started` / `encounter_resolved`,
-   deterministic seed derivation. **Designed and planned** 2026-08-30, not
-   yet implemented.
+   deterministic seed derivation.
    [`docs/superpowers/specs/2026-08-30-combat-bridge-design.md`](docs/superpowers/specs/2026-08-30-combat-bridge-design.md),
    plan at
    [`docs/superpowers/plans/2026-08-30-combat-bridge.md`](docs/superpowers/plans/2026-08-30-combat-bridge.md).

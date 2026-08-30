@@ -1602,8 +1602,9 @@ describe("handleCommand — structured action", () => {
     const frames = await drain(handleCommand(campaign, dodge("hero"), portsWith(store)));
 
     // An existing code, not a new one. `not_your_turn` is already what a
-    // player gets for acting after a fight has ended (`state/conclusion.ts`)
-    // and the client already treats it as a stale click it must not
+    // player gets for acting after a fight has ended
+    // (`packages/schemas/src/conclusion.ts`) and the client already treats
+    // it as a stale click it must not
     // surface (`ErrorBanner.tsx`) — which is exactly right here, since a
     // campaign with no board pushes no affordances to click in the first
     // place.

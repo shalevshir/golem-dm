@@ -25,10 +25,15 @@
 //      therefore read from the server's own projection (`loadCampaign`)
 //      after every command, never inferred from a socket frame that would
 //      never arrive.
-//   3. `EncounterDefinition.maxRounds` is data nothing reads; there
-//      is no round cap anywhere in the pipeline. `MAX_HERO_COMMANDS` below
-//      is this test's own bound, with a diagnostic failure message if it is
-//      exceeded.
+//   3. For a combat-only campaign (this file's first test, below),
+//      `EncounterDefinition.maxRounds` is data nothing reads; there is no
+//      round cap anywhere in the pipeline for it. `playToConclusion`'s
+//      `MAX_HERO_COMMANDS` is this test's own bound in that case, with a
+//      diagnostic failure message if it is exceeded. §4.7 step 5's
+//      `resolveIfConcluded` DOES enforce `maxRounds` for a bridged (scene)
+//      campaign — `playToConclusion` is shared between both tests below, and
+//      `MAX_HERO_COMMANDS` is a backstop against a genuine hang either way,
+//      not proof that no cap exists.
 //   4. The join ack is awaited before the first action is sent —
 //      `transport/ws.ts` claims its `busy` flag synchronously per message,
 //      so a client that pipelines `join` and an action in the same tick
@@ -418,9 +423,14 @@ async function playToConclusion(
   campaignId: string,
   turnCommand: (turn: number, campaign: Campaign) => unknown,
 ): Promise<Campaign> {
-  // Nothing under apps/server/src or packages/rules-engine/src enforces
-  // EncounterDefinition.maxRounds — this constant is the ONLY bound on how
-  // many hero commands this helper will send before giving up.
+  // Shared by both tests below. For the combat-only one, nothing under
+  // apps/server/src or packages/rules-engine/src enforces
+  // EncounterDefinition.maxRounds, so this constant is the ONLY bound on how
+  // many hero commands this helper will send before giving up. For the scene
+  // walk, `resolveIfConcluded` (pipeline.ts) DOES enforce maxRounds — a
+  // stalemate there closes the bracket well before this loop would exhaust
+  // its own bound — but the bound stays here regardless, as a genuine-hang
+  // backstop shared by both callers rather than a round cap either relies on.
   const MAX_HERO_COMMANDS = 20;
   let tracked = await loadCampaign({ campaignId, store });
   if (tracked === null) throw new Error(`Campaign ${campaignId} not found right after creation`);
@@ -464,9 +474,11 @@ async function playToConclusion(
 
   throw new Error(
     `Combat did not conclude within ${String(MAX_HERO_COMMANDS)} hero commands. ` +
-      "EncounterDefinition.maxRounds is inert data — nothing in the pipeline " +
-      "enforces a round cap, so this bound is the only thing standing between a " +
-      "genuinely wedged pipeline and a test that hangs forever.",
+      "For a combat-only campaign, EncounterDefinition.maxRounds is inert data " +
+      "and nothing in the pipeline enforces a round cap; for a bridged (scene) " +
+      "campaign, resolveIfConcluded does, so reaching this throw there points at " +
+      "that enforcement itself, not just a slow fight. Either way, this bound is " +
+      "what stands between a genuinely wedged pipeline and a test that hangs forever.",
   );
 }
 

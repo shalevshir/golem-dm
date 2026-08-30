@@ -1605,8 +1605,8 @@ export async function* handleCommand(
         // covers — a click the affordance frame does not sanction, which the
         // client deliberately does not surface (`ErrorBanner.tsx`) — and it
         // is already the answer a player gets for acting after a fight has
-        // ended (`state/conclusion.ts`). A closed bracket is the same
-        // moment, one event later.
+        // ended (`packages/schemas/src/conclusion.ts`). A closed bracket is
+        // the same moment, one event later.
         //
         // Refused with a frame rather than `encounterOf`'s throw because this
         // is the one place a closed bracket is an ordinary client mistake
