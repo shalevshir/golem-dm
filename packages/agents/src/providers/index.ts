@@ -1,6 +1,7 @@
 // Single provider-agnostic adapter (Vercel AI SDK). Model choice per role is
 // CONFIG, not code — see `routing.ts` and PROJECT_PLAN.md section 3:
-//   intent:    gemini-3-flash                   (unbenchmarked — plan's pick)
+//   intent:    gpt-5.4-nano @ low effort        (google cannot express its union)
+//   summary:   gemini-3.1-flash-lite            (text only, no tool schema)
 //   tactical:  gpt-5.4-nano @ high effort       (set by the step 7b benchmark)
 //   narrative: claude-sonnet-5                  (streaming, prompt caching)
 //
