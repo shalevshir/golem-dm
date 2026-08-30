@@ -32,6 +32,11 @@
         "factionA": "alpha",
         "factionB": "alpha",
         "delta": 1
+      },
+      {
+        "kind": "shift_npc_affinity",
+        "npcId": "no-such-npc",
+        "delta": 1
       }
     ],
     "edges": [{ "to": "no-such-node", "labelEnglish": "Nowhere" }]
