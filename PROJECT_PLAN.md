@@ -984,7 +984,9 @@ combat with a UI that can still send them.
    [`docs/superpowers/specs/2026-08-27-scene-engine-design.md`](docs/superpowers/specs/2026-08-27-scene-engine-design.md),
    plan at
    [`docs/superpowers/plans/2026-08-27-scene-engine.md`](docs/superpowers/plans/2026-08-27-scene-engine.md).
-4. **Intent router, `free_text`, out-of-combat ability checks.**
+4. **Intent router, `free_text`, out-of-combat ability checks.** **Merged to
+   `main`** 2026-08-29 as `c9de726`, CI green with Postgres at 1580 passed /
+   0 skipped / 104 files.
    [`docs/superpowers/specs/2026-08-28-intent-router-design.md`](docs/superpowers/specs/2026-08-28-intent-router-design.md),
    plan at
    [`docs/superpowers/plans/2026-08-28-intent-router.md`](docs/superpowers/plans/2026-08-28-intent-router.md).
