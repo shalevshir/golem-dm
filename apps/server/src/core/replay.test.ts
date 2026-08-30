@@ -549,6 +549,25 @@ describe("seed determinism across a bracket", () => {
     // the comparison pass vacuously on two empty arrays.
     expect(seedsA.length).toBeGreaterThan(0);
     expect(seedsA).toEqual(seedsIn(b, 0, last(b)));
+
+    // The cross-run equality above only proves reproducibility — a
+    // hypothetical per-encounter-id-derived seed would reproduce identically
+    // across two independent stores too, as long as it were itself
+    // deterministic. What it does NOT prove is Decision 6's actual rule:
+    // that a bridge-opened bracket draws from the very same
+    // `rootSeed`-and-campaign-sequence derivation `portsWith`'s `seedFor`
+    // (this file, `(rootSeed, sequence) => rootSeed * 1000 + sequence`)
+    // gives a directly-started one. Pinned directly here: every
+    // `dice_rolled` seed must equal `rootSeed * 1000 + event.sequence`
+    // (`pipeline.ts` calls `seedFor` with `campaign.nextSequence`
+    // immediately before `emit` stamps the same value onto the event's own
+    // `sequence`), for the `rootSeed: 42` this test's campaign was started
+    // with.
+    for (const event of a) {
+      if (event.type === "dice_rolled") {
+        expect(event.payload["seed"]).toBe(42 * 1000 + event.sequence);
+      }
+    }
   });
 });
 

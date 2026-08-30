@@ -178,6 +178,7 @@ function walkingIntentAgent(): IntentAgent {
     "לשמוע את סוכנת הגילדה": { category: "exploration", targetNodeId: "guild-offer" },
     "ללכת אל הסכר": { category: "exploration", targetNodeId: "the-weir" },
     "לבדוק את מנגנון השער": { category: "exploration", targetNodeId: "saboteurs" },
+    "להביא את מה שמצאנו לפונדק": { category: "exploration", targetNodeId: "reckoning" },
   };
   return {
     classify: ({ text }) => {
@@ -805,8 +806,12 @@ describe("end to end", () => {
   //     broke.
   //   - `quest_node_completed` for `"saboteurs"` missing or duplicated:
   //     Task 6's end-of-combat detector regressed.
-  //   - the reload's `completedNodeIds`/`encounter` disagree with the live
-  //     projection: `loadCampaign`'s fold has forked from the live one.
+  //   - the walk onward to `reckoning` times out: the scene engine cannot
+  //     accept a traversal once a bracket has closed under it — the one
+  //     regression surface this whole feature actually introduces.
+  //   - `fold(clientState, eventFrames(log.frames))` disagrees with the
+  //     fresh `reloaded` projection: the client-visible event stream and
+  //     the server's own log have forked.
   it("walks a scene campaign into combat and back out to narration", async () => {
     const { app, url, store } = await startServer();
     const campaignId = await createWorldCampaignOver(app);
@@ -814,7 +819,11 @@ describe("end to end", () => {
     const socket = await connect(url);
     const log = new FrameLog(socket);
     const ack = await joinAndAck(socket, log, campaignId);
-    expect(ack.type).toBe("campaign_state");
+    // Narrows for `ack.snapshot` below (`expect(...).toBe(...)` does not
+    // narrow the type), the same idiom the reconnect test above this one
+    // uses for its own `clientState`.
+    if (ack.type !== "campaign_state") throw new Error(`Expected campaign_state, got ${ack.type}`);
+    const clientState: CampaignState = ack.snapshot;
 
     // Down the arc, one traversal at a time. Each is awaited before the next
     // is sent: `transport/ws.ts` holds one in-flight-command slot per
@@ -865,10 +874,32 @@ describe("end to end", () => {
       ),
     ).toHaveLength(1);
 
-    // The exit criterion's last clause: a cold load folds to the live state.
+    // "Back out to narration" (the exit criterion's own wording) is not just
+    // the bracket closing — the scene engine must still accept a further
+    // traversal past it. `saboteurs` is complete but stays the current node
+    // (`completeCurrentNode` marks completion without moving `currentNodeId`
+    // on its own), so reaching `reckoning` needs this one more `free_text`.
+    send(socket, { type: "free_text", clientMessageId: "w4", text: "להביא את מה שמצאנו לפונדק" });
+    await waitForProjection(
+      store,
+      campaignId,
+      (candidate) => candidate.state.world.scene?.currentNodeId === "reckoning",
+      "the walk onward to reckoning after the bracket closes",
+    );
+
+    // The exit criterion's last clause, proven against the LIVE server
+    // projection, not against another cold fold of the same log: the first
+    // client's own join snapshot, folded with every event frame this one
+    // continuous socket actually received, must reproduce a fresh
+    // `loadCampaign` exactly — board included, not merely "an
+    // `encounter_started` of some kind arrived" (the file-header idiom the
+    // reconnect test above this one already uses).
     const reloaded = await loadCampaign({ campaignId, store });
-    expect(reloaded?.state.world.scene?.completedNodeIds).toContain("saboteurs");
-    expect(reloaded?.state.encounter).toBeNull();
+    if (reloaded === null) throw new Error(`Campaign ${campaignId} disappeared from the store`);
+    expect(reloaded.state.world.scene?.completedNodeIds).toContain("saboteurs");
+    expect(reloaded.state.world.scene?.currentNodeId).toBe("reckoning");
+    expect(reloaded.state.encounter).toBeNull();
+    expect(fold(clientState, eventFrames(log.frames))).toEqual(reloaded.state);
 
     socket.close();
   }, 30_000);
