@@ -28,6 +28,7 @@ import {
   createFakePort,
   createHebrewNarrative,
   createTacticalAgent,
+  DEFAULT_EMBEDDING_SPEC,
   DEFAULT_MODEL_ROUTING,
   INTENT_PROMPT_VERSION,
   NARRATIVE_PROMPT_VERSION,
@@ -882,6 +883,15 @@ describe("handleCommand — free text", () => {
       relations: [{ factionA: "ashen-guild", factionB: "river-wardens", band: "hostile" }],
     });
 
+    // Task 7: closing the "quest_node" episode stamps a summary into the
+    // event that closed it, not a separate event — `portsWith`'s
+    // `createDeterministicSceneSummary()` guarantees a non-empty string here
+    // with no model in the loop.
+    expect(eventOfType("quest_node_completed")?.event.payload).toMatchObject({
+      nodeId: "guild-offer",
+      summaryEnglish: expect.any(String) as string,
+    });
+
     const { tokens, emitted } = narrativeOf(frames);
     expect(emitted.text).toBe(tokens.join(""));
     expect(emitted.source).toBe("deterministic");
@@ -1384,6 +1394,103 @@ describe("handleCommand — free text: narrate-only categories", () => {
 
     expect(eventTypesOf(frames)).toEqual(["player_input", "intent_classified", "narrative_emitted"]);
     expect(seen.map((each) => each.beat)).toEqual([{ kind: "reply", category: "combat" }]);
+  });
+});
+
+describe("handleCommand — episodic memory", () => {
+  // The design's headline cost claim (episodic-memory spec, Decision 7): a
+  // campaign that spends several turns talking at one node makes one
+  // embedding call, not one per turn. `ooc` routes straight to `sceneNarrate`
+  // with no node change, so two turns here must retrieve exactly once.
+  it("retrieves once per node transition, not once per turn", async () => {
+    const store = createInMemoryEventStore();
+    const campaign = await sceneCampaign(store);
+    const embedding = createFakeEmbeddingPort();
+    const ports: TurnPorts = {
+      ...portsWith(store),
+      intent: classifiedAs({ category: "ooc" }),
+      embedding,
+    };
+
+    await drain(
+      handleCommand(campaign, { type: "free_text", clientMessageId: "c1", text: "hello" }, ports),
+    );
+    expect(embedding.calls).toHaveLength(1);
+
+    await drain(
+      handleCommand(campaign, { type: "free_text", clientMessageId: "c2", text: "hello again" }, ports),
+    );
+    // Still 1: same node, so `campaign.memoriesForNodeId` already matches
+    // and `sceneNarrate` must not retrieve a second time.
+    expect(embedding.calls).toHaveLength(1);
+  });
+
+  it("renders authored NPC standing and facts into the narration input's memoryEnglish", async () => {
+    const store = createInMemoryEventStore();
+    const campaign = await sceneCampaign(store, {
+      npcAffinities: [{ npcId: "old-tobin", band: "friendly", facts: ["You mended his weir."] }],
+    });
+    const seen: SceneNarrationInput[] = [];
+    const ports: TurnPorts = {
+      ...portsWith(store),
+      intent: classifiedAs({ category: "ooc" }),
+      sceneNarrative: recordingSceneNarrative(seen),
+    };
+
+    await drain(
+      handleCommand(campaign, { type: "free_text", clientMessageId: "c1", text: "hi there" }, ports),
+    );
+
+    expect(seen[0]?.memoryEnglish).toContain(
+      "Old Tobin regards you as friendly. You mended his weir.",
+    );
+  });
+
+  it("memoryEnglish carries retrieved episodes alongside authored NPC facts", async () => {
+    const store = createInMemoryEventStore();
+    const campaign = await sceneCampaign(store);
+    const embedding = createFakeEmbeddingPort();
+    const episodic = createInMemoryEpisodicStore();
+    // Seed the episodic store directly — `retrieveMemories` embeds the query
+    // and searches by vector, so a fixture written under the same fake
+    // port's deterministic hash is exactly what a real prior turn's
+    // `indexEpisode` would have produced. The query text mirrors what
+    // `sceneNarrate` actually builds: `[card.sceneEnglish, ...card.npcIds].join(" ")`
+    // for `arrival` (`sceneCampaign`'s default starting node).
+    const queryEnglish = [
+      "The road drops out of the pines and Emberfall is below you: a weir throwing white water on the left, a hillside of smoking kilns on the right, and a town wedged between them that has clearly not been sleeping well. Two people are waiting at the bridge, and they are not standing together.",
+      "maren-vess",
+      "old-tobin",
+      "sela-the-innkeeper",
+    ].join(" ");
+    const embedded = await embedding.embed(DEFAULT_EMBEDDING_SPEC, [queryEnglish]);
+    if (!embedded.ok) throw new Error("fixture: fake embedding port does not fail");
+    await episodic.write(
+      {
+        campaignId: "s1",
+        sequence: 0,
+        kind: "quest_node",
+        refId: "arrival",
+        summaryEnglish: "Goblins were driven off at the weir.",
+        day: 1,
+      },
+      embedded.value.vectors[0] ?? [],
+    );
+
+    const seen: SceneNarrationInput[] = [];
+    const ports: TurnPorts = {
+      ...portsWith(store),
+      intent: classifiedAs({ category: "ooc" }),
+      sceneNarrative: recordingSceneNarrative(seen),
+      embedding,
+      episodic,
+    };
+
+    await drain(
+      handleCommand(campaign, { type: "free_text", clientMessageId: "c1", text: "hi there" }, ports),
+    );
+
+    expect(seen[0]?.memoryEnglish).toContain("Goblins were driven off at the weir.");
   });
 });
 
@@ -2861,10 +2968,15 @@ describe("handleCommand — end of combat", () => {
       .filter((each): each is Extract<ServerFrame, { type: "event" }> => each.type === "event")
       .map((each) => each.event)
       .find((each) => each.type === "encounter_resolved");
+    // Task 7: closing the "encounter" episode stamps a summary into
+    // `encounter_resolved`'s own payload — `portsWith`'s
+    // `createDeterministicSceneSummary()` guarantees a non-empty string
+    // here with no model in the loop.
     expect(resolved?.payload).toMatchObject({
       encounterId: "goblin-ambush",
       outcome: "victory",
       survivorIds: ["hero"],
+      summaryEnglish: expect.any(String) as string,
     });
     expect(campaign.state.encounter).toBeNull();
     expect(campaign.built).toBeNull();
