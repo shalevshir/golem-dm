@@ -10,6 +10,7 @@ import type {
   Tile,
   TurnAffordances,
 } from "@ai-dm/schemas";
+import { conclusionOf } from "@ai-dm/schemas";
 import { connect } from "./net/connection.js";
 import type { Connection, ConnectionStatus, WebSocketLike } from "./net/connection.js";
 import { createCampaign, fetchCatalogue } from "./net/api.js";
@@ -20,7 +21,6 @@ import {
   restoreClientState,
   storeClientState,
 } from "./state/persistence.js";
-import { conclusionOf } from "./state/conclusion.js";
 import { buildTurn } from "./turn/build-turn.js";
 import { ActionBar } from "./components/ActionBar.js";
 import { CombatLog } from "./components/CombatLog.js";
