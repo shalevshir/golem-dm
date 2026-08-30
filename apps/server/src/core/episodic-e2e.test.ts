@@ -35,6 +35,7 @@ import {
   EncounterResolvedPayload,
   EpisodicMemory,
   QuestNodeCompletedPayload,
+  WorldDeltaAppliedPayload,
 } from "@ai-dm/schemas";
 import type {
   Combatant,
@@ -358,9 +359,19 @@ describe("episodic memory end to end", () => {
 
     const summariesInLog = summariesInLogOf(events);
 
-    // Three quest_node closures (arrival, guild-offer, the-weir) plus one
-    // encounter closure (the defeat) — every one of them summarized.
-    expect(summariesInLog.length).toBeGreaterThanOrEqual(2);
+    // Exactly one summarized closure per episode this fixture closes: three
+    // quest_node completions (arrival, guild-offer, the-weir) plus one
+    // encounter closure (the defeat). A fixed count, not a lower bound.
+    expect(summariesInLog).toHaveLength(4);
+
+    // ONE row per closed episode, not "at least one somewhere findable" —
+    // `toContain` below on its own would still pass a bug that wrote two
+    // rows per episode. Any fixed query vector returns every row up to
+    // `limit` here: the in-memory store applies no similarity threshold, so
+    // a limit comfortably above the known count returns the campaign's
+    // whole row set regardless of which vector is asked.
+    const allMemories = await store.search(CAMPAIGN_ID, PROBE_VECTOR, summariesInLog.length + 10);
+    expect(allMemories).toHaveLength(summariesInLog.length);
 
     // Every summary the log recorded is retrievable, with identical text —
     // proven with a FRESH embedding port: `createFakeEmbeddingPort` is a
@@ -400,10 +411,24 @@ describe("episodic memory end to end", () => {
     const { store, events } = await runCampaignThroughAnEpisodeAndAFight();
     const live = await store.search(CAMPAIGN_ID, PROBE_VECTOR, 5);
 
-    // Rebuild into a fresh store from nothing but the event log.
+    // Rebuild into a fresh store from nothing but the event log. `day` is
+    // folded from `world_delta_applied.day` (`WorldDeltaAppliedPayload`,
+    // `packages/schemas/src/events.ts`) in sequence order, not read off a
+    // constant — `quest_node_completed`/`encounter_resolved` carry no `day`
+    // field of their own, but every day advance the log ever recorded does
+    // land in a `world_delta_applied` payload, so this is genuinely
+    // reconstructible from the log alone. A hardcoded `day` would silently
+    // pass this fixture (which never crosses a day boundary) while getting
+    // a real campaign wrong the moment one did.
     const rebuilt = createInMemoryEpisodicStore();
     const embedding = createFakeEmbeddingPort();
+    let day = DAY_AT_CLOSE;
     for (const event of events) {
+      if (event.type === "world_delta_applied") {
+        const delta = WorldDeltaAppliedPayload.parse(event.payload);
+        if (delta.day !== undefined) day = delta.day;
+      }
+
       const summaryEnglish =
         event.type === "quest_node_completed"
           ? QuestNodeCompletedPayload.parse(event.payload).summaryEnglish
@@ -425,7 +450,7 @@ describe("episodic memory end to end", () => {
               ? EncounterResolvedPayload.parse(event.payload).encounterId
               : QuestNodeCompletedPayload.parse(event.payload).nodeId,
           summaryEnglish,
-          day: DAY_AT_CLOSE,
+          day,
         }),
         deadline: Date.now() + 10_000,
       });
