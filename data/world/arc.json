@@ -40,7 +40,16 @@
     "sceneEnglish": "The weir up close is older than either quarrel. The gate mechanism has been forced, recently and badly, and the ash on the stonework is weeks deep. Both stories are true, which is the one answer nobody in town has offered you.",
     "locationId": "emberfall",
     "preconditions": [{ "kind": "node_completed", "nodeId": "arrival" }],
-    "edges": [{ "to": "reckoning", "labelEnglish": "Put both parties in one room" }]
+    "edges": [{ "to": "saboteurs", "labelEnglish": "Search the forced gate mechanism" }]
+  },
+  {
+    "nodeId": "saboteurs",
+    "titleEnglish": "Caught at the Gate",
+    "sceneEnglish": "You are still crouched over the forced gate mechanism when the scree above you shifts. They have been waiting for whoever came back to look twice, and they are not from Emberfall at all — which is the second answer nobody in town has offered you.",
+    "locationId": "emberfall",
+    "encounterId": "goblin-ambush",
+    "preconditions": [{ "kind": "node_completed", "nodeId": "the-weir" }],
+    "edges": [{ "to": "reckoning", "labelEnglish": "Bring what you found to the inn" }]
   },
   {
     "nodeId": "reckoning",

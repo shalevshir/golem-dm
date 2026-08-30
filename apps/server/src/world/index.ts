@@ -27,6 +27,7 @@ import {
 import type { FactionBand, WorldEffect, WorldPredicate } from "@ai-dm/schemas";
 import { pairKey, startScene } from "@ai-dm/rules-engine";
 import type { AuthoredWorld } from "@ai-dm/rules-engine";
+import { hasEncounter } from "../encounters/index.js";
 import { dataDir } from "../encounters/srd.js";
 
 const WORLD_DIR_RELATIVE = join("data", "world");
@@ -231,6 +232,13 @@ export function loadWorld(dir: string = dataDir(WORLD_DIR_RELATIVE)): AuthoredWo
   for (const node of questNodes.values()) {
     const where = `quest node ${node.nodeId}`;
     checkRef({ kind: "location", id: node.locationId }, where);
+    // Not routed through `checkRef`: `collections` indexes the three
+    // collections THIS directory's files define, and the encounter catalogue
+    // is neither loaded from `dir` nor one of them. The message shape matches
+    // `checkRef`'s so an author reading `problems` sees one vocabulary.
+    if (node.encounterId !== undefined && !hasEncounter(node.encounterId)) {
+      problems.push(`${where} references unknown encounter "${node.encounterId}"`);
+    }
     for (const edge of node.edges) {
       checkRef({ kind: "quest node", id: edge.to }, `${where} edge`);
     }

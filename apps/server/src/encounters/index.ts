@@ -68,6 +68,17 @@ export function encounterById(encounterId: string): EncounterDefinition {
   return definition;
 }
 
+/**
+ * Whether the catalogue knows this id, without building the encounter or
+ * throwing. `loadWorld` needs the question answered for every node in a world
+ * file, and `buildEncounterById` would be both far more expensive and the
+ * wrong shape — a dangling reference is a problem to collect, not an
+ * exception to catch.
+ */
+export function hasEncounter(encounterId: string): boolean {
+  return CATALOGUE.has(encounterId);
+}
+
 export function buildEncounterById(encounterId: string): BuiltEncounter {
   const definition = encounterById(encounterId);
   const statBlocks = new Map<string, MonsterStatBlock>();

@@ -64,6 +64,8 @@ describe("the Emberfall arc", () => {
 
   // Guild branch: guild-offer shifts the pair -1 from cold to hostile, and
   // nothing on this branch advances the calendar before reckoning.
+  // `the-weir`'s one edge leads to `saboteurs` (§4.7 step 5), not directly to
+  // `reckoning` — the arc runs arrival/guild-offer/the-weir/saboteurs/reckoning.
   it("plays the guild branch to day 3 and neutral", () => {
     const world = loadWorld();
     let state = stateOf(traverseEdge(world, stateOf(startScene(world)), "guild-offer"));
@@ -71,6 +73,7 @@ describe("the Emberfall arc", () => {
     expect(state.day).toBe(1);
     expect(relationBetween(world, state, "ashen-guild", "river-wardens")).toBe("hostile");
 
+    state = stateOf(traverseEdge(world, state, "saboteurs"));
     state = stateOf(traverseEdge(world, state, "reckoning"));
     expect(state.currentNodeId).toBe("reckoning");
     state = stateOf(completeCurrentNode(world, state));
@@ -88,6 +91,7 @@ describe("the Emberfall arc", () => {
     expect(state.day).toBe(2);
     expect(relationBetween(world, state, "ashen-guild", "river-wardens")).toBe("cold");
 
+    state = stateOf(traverseEdge(world, state, "saboteurs"));
     state = stateOf(traverseEdge(world, state, "reckoning"));
     state = stateOf(completeCurrentNode(world, state));
     // reckoning: +2 bands from cold, +2 days from 2.
@@ -102,6 +106,7 @@ describe("the Emberfall arc", () => {
     const play = (second: string): SceneState => {
       let state = stateOf(traverseEdge(world, stateOf(startScene(world)), second));
       state = stateOf(traverseEdge(world, state, "the-weir"));
+      state = stateOf(traverseEdge(world, state, "saboteurs"));
       state = stateOf(traverseEdge(world, state, "reckoning"));
       return stateOf(completeCurrentNode(world, state));
     };
@@ -123,6 +128,7 @@ describe("the Emberfall arc", () => {
     for (const second of ["guild-offer", "warden-warning"]) {
       let state = stateOf(traverseEdge(world, stateOf(startScene(world)), second));
       state = stateOf(traverseEdge(world, state, "the-weir"));
+      state = stateOf(traverseEdge(world, state, "saboteurs"));
       const options = edgesOf(availableEdges(world, state));
       expect(options).toHaveLength(1);
       expect(options[0]?.open).toBe(true);

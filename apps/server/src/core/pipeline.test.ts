@@ -938,12 +938,15 @@ describe("handleCommand — free text", () => {
   // (f) A closed edge: `reckoning` requires the faction relation to be no
   // worse than `hostile`, and this fixture starts it at `war`. Refusal is
   // narration only — no quest/delta event, and `world.scene` is untouched.
+  // Reached from `saboteurs`, §4.7 step 5's node — the one edge to
+  // `reckoning` in the shipped arc — rather than from `the-weir` directly,
+  // since `the-weir` no longer has an edge to `reckoning` at all.
   it("refuses a closed edge with narration only, leaving the scene untouched", async () => {
     const store = createInMemoryEventStore();
     const before: SceneSnapshot = {
       worldId: "emberfall",
-      currentNodeId: "the-weir",
-      completedNodeIds: ["arrival", "guild-offer"],
+      currentNodeId: "saboteurs",
+      completedNodeIds: ["arrival", "guild-offer", "the-weir"],
       relations: [{ factionA: "ashen-guild", factionB: "river-wardens", band: "war" }],
       day: 1,
     };

@@ -28,15 +28,15 @@ describe("the authored world", () => {
   });
 
   // Doubles as the scope guard, which is why it asserts exact counts rather
-  // than `toBeGreaterThan`. §4.7 sizes this world at one town, two factions,
-  // three NPCs and a five-node arc — "enough to prove the pipeline, not to be
-  // good". Growing it should be a deliberate act that edits these numbers,
-  // not something that happens while adding colour.
+  // than `toBeGreaterThan`. §4.7 sizes this world at one town, two factions
+  // and three NPCs; the arc was five nodes until §4.7 step 5 added the one
+  // that declares an encounter, which is the whole point of the combat
+  // bridge — moved deliberately, not drifted past.
   it("parses every collection, and is still deliberately tiny", () => {
     expect(LocationDefinition.array().parse(readJson("locations.json"))).toHaveLength(1);
     expect(FactionDefinition.array().parse(readJson("factions.json"))).toHaveLength(2);
     expect(NpcDefinition.array().parse(readJson("npcs.json"))).toHaveLength(3);
-    expect(QuestNode.array().parse(readJson("arc.json"))).toHaveLength(5);
+    expect(QuestNode.array().parse(readJson("arc.json"))).toHaveLength(6);
   });
 
   // Exercised by real content rather than only by a unit fixture: an NPC who
