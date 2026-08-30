@@ -11,7 +11,13 @@
 // adjudicates an LLM's proposed turn, and this adjudicates an LLM's proposed
 // world move one level up. Same shape, same refusal-as-data contract.
 import { FACTION_BANDS } from "@ai-dm/schemas";
-import type { FactionBand, QuestEdge, QuestNode, WorldEffect, WorldPredicate } from "@ai-dm/schemas";
+import type {
+  FactionBand,
+  QuestEdge,
+  QuestNode,
+  WorldEffect,
+  WorldPredicate,
+} from "@ai-dm/schemas";
 import { pairKey } from "./authored-world.js";
 import type { AuthoredWorld } from "./authored-world.js";
 
@@ -33,6 +39,11 @@ export interface SceneState {
   readonly completedNodeIds: ReadonlySet<string>;
   /** Keyed by `pairKey`. */
   readonly relations: ReadonlyMap<string, FactionBand>;
+  /** Keyed by bare npcId — no pairKey needed, this is not a pairwise relation. */
+  readonly npcAffinities: ReadonlyMap<
+    string,
+    { readonly band: FactionBand; readonly facts: readonly string[] }
+  >;
   /** A bare counter. Advanced only by a declared `advance_calendar` effect. */
   readonly day: number;
 }
@@ -88,6 +99,21 @@ export function relationBetween(
 }
 
 /**
+ * An NPC's standing and remembered facts, read from the overlay with a
+ * hardcoded default for any NPC nobody has interacted with yet. Unlike
+ * `relationBetween`, there is no authored baseline to fall back to second —
+ * a single sensible default covers every NPC, so declaring one per NPC in
+ * `content.ts` would be authoring surface with no consumer (character-
+ * profiles spec Decision 5).
+ */
+export function affinityOf(
+  state: SceneState,
+  npcId: string,
+): { band: FactionBand; facts: readonly string[] } {
+  return state.npcAffinities.get(npcId) ?? { band: "neutral", facts: [] };
+}
+
+/**
  * Is this gate open, given what the campaign has done so far?
  *
  * Written as a `return` from each branch with no `default`, so adding a
@@ -135,8 +161,7 @@ export interface SceneRejection {
  * same argument `WorldContentError` makes about defects.
  */
 export type SceneTransition =
-  | { valid: true; state: SceneState }
-  | { valid: false; rejections: readonly SceneRejection[] };
+  { valid: true; state: SceneState } | { valid: false; rejections: readonly SceneRejection[] };
 
 export interface EdgeOption {
   edge: QuestEdge;
@@ -182,9 +207,7 @@ function entryRejections(
 ): SceneRejection[] {
   const node = world.questNodes.get(nodeId);
   if (node === undefined) {
-    return [
-      { reason: "no_such_node", message: `no quest node "${nodeId}"`, subjectId: nodeId },
-    ];
+    return [{ reason: "no_such_node", message: `no quest node "${nodeId}"`, subjectId: nodeId }];
   }
   return node.preconditions
     .filter((precondition) => !evaluatePredicate(world, state, precondition))
@@ -219,11 +242,7 @@ function describePredicate(predicate: WorldPredicate): string {
  * reports, which is the authored relation overlaid by the state rather than
  * the state alone.
  */
-function applyEffect(
-  world: AuthoredWorld,
-  effect: WorldEffect,
-  state: SceneState,
-): SceneState {
+function applyEffect(world: AuthoredWorld, effect: WorldEffect, state: SceneState): SceneState {
   switch (effect.kind) {
     case "shift_faction_relation": {
       const current = relationBetween(world, state, effect.factionA, effect.factionB);
@@ -240,6 +259,22 @@ function applyEffect(
     }
     case "advance_calendar":
       return { ...state, day: state.day + effect.days };
+    case "shift_npc_affinity": {
+      // No "unknown pair" bail-out like the faction case: `affinityOf`'s
+      // fallback always resolves, since a single hardcoded default (neutral,
+      // no facts) covers every npc rather than an authored baseline to
+      // consult (character-profiles spec Decision 4).
+      const current = affinityOf(state, effect.npcId);
+      const npcAffinities = new Map(state.npcAffinities);
+      npcAffinities.set(effect.npcId, { ...current, band: shiftBand(current.band, effect.delta) });
+      return { ...state, npcAffinities };
+    }
+    case "add_npc_fact": {
+      const current = affinityOf(state, effect.npcId);
+      const npcAffinities = new Map(state.npcAffinities);
+      npcAffinities.set(effect.npcId, { ...current, facts: [...current.facts, effect.fact] });
+      return { ...state, npcAffinities };
+    }
   }
 }
 
@@ -252,10 +287,10 @@ function completed(world: AuthoredWorld, node: QuestNode, state: SceneState): Sc
   if (state.completedNodeIds.has(node.nodeId)) return state;
   const completedNodeIds = new Set(state.completedNodeIds);
   completedNodeIds.add(node.nodeId);
-  return node.effects.reduce<SceneState>(
-    (each, effect) => applyEffect(world, effect, each),
-    { ...state, completedNodeIds },
-  );
+  return node.effects.reduce<SceneState>((each, effect) => applyEffect(world, effect, each), {
+    ...state,
+    completedNodeIds,
+  });
 }
 
 /**
@@ -270,6 +305,7 @@ export function startScene(world: AuthoredWorld): SceneTransition {
     currentNodeId: world.startingNodeId,
     completedNodeIds: new Set<string>(),
     relations: world.relations,
+    npcAffinities: new Map(),
     day: world.startingDay,
   };
   const rejections = entryRejections(world, state, world.startingNodeId);
@@ -316,11 +352,7 @@ export function availableEdges(world: AuthoredWorld, state: SceneState): SceneOp
  * Nothing is committed when the target refuses: the returned rejections
  * describe a move that did not happen.
  */
-export function traverseEdge(
-  world: AuthoredWorld,
-  state: SceneState,
-  to: string,
-): SceneTransition {
+export function traverseEdge(world: AuthoredWorld, state: SceneState, to: string): SceneTransition {
   const current = world.questNodes.get(state.currentNodeId);
   if (current === undefined) {
     return { valid: false, rejections: [missingCurrentNode(state)] };
@@ -356,10 +388,7 @@ export function traverseEdge(
  *
  * Idempotent, through the same first-completion guard as traversal.
  */
-export function completeCurrentNode(
-  world: AuthoredWorld,
-  state: SceneState,
-): SceneTransition {
+export function completeCurrentNode(world: AuthoredWorld, state: SceneState): SceneTransition {
   const current = world.questNodes.get(state.currentNodeId);
   if (current === undefined) {
     return { valid: false, rejections: [missingCurrentNode(state)] };

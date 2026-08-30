@@ -39,6 +39,7 @@ const sceneGenesis: CampaignState = {
       currentNodeId: "market-square",
       completedNodeIds: [],
       relations: [],
+      npcAffinities: [],
       day: 1,
     },
   },

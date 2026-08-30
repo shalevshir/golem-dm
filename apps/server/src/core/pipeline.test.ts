@@ -292,6 +292,7 @@ function sortedSnapshot(snapshot: SceneSnapshot): SceneSnapshot {
     relations: [...snapshot.relations].sort(
       (a, b) => a.factionA.localeCompare(b.factionA) || a.factionB.localeCompare(b.factionB),
     ),
+    npcAffinities: [...snapshot.npcAffinities].sort((a, b) => a.npcId.localeCompare(b.npcId)),
   };
 }
 
@@ -818,6 +819,7 @@ describe("handleCommand — free text", () => {
       currentNodeId: "guild-offer",
       completedNodeIds: ["arrival"],
       relations: [],
+      npcAffinities: [],
       day: 1,
     };
     const campaign = await sceneCampaign(store, before);
@@ -908,6 +910,7 @@ describe("handleCommand — free text", () => {
       currentNodeId: "guild-offer",
       completedNodeIds: ["arrival"],
       relations: [],
+      npcAffinities: [],
       day: 1,
     };
     const campaign = await sceneCampaign(store, before);
@@ -949,6 +952,7 @@ describe("handleCommand — free text", () => {
       currentNodeId: "saboteurs",
       completedNodeIds: ["arrival", "guild-offer", "the-weir"],
       relations: [{ factionA: "ashen-guild", factionB: "river-wardens", band: "war" }],
+      npcAffinities: [],
       day: 1,
     };
     const campaign = await sceneCampaign(store, before);
@@ -986,6 +990,7 @@ describe("handleCommand — free text", () => {
       currentNodeId: "guild-offer",
       completedNodeIds: ["arrival"],
       relations: [],
+      npcAffinities: [],
       day: 1,
     };
     const campaign = await sceneCampaign(store, before);
@@ -1015,6 +1020,7 @@ describe("handleCommand — free text", () => {
       currentNodeId: "reckoning",
       completedNodeIds: ["arrival", "guild-offer", "the-weir"],
       relations: [{ factionA: "ashen-guild", factionB: "river-wardens", band: "hostile" }],
+      npcAffinities: [],
       day: 1,
     };
     const campaign = await sceneCampaign(store, before);
@@ -1040,6 +1046,56 @@ describe("handleCommand — free text", () => {
     ]);
   });
 
+  it("shifts an npc's affinity and records a fact when reckoning completes, and the delta event alone rebuilds it on reload", async () => {
+    const store = createInMemoryEventStore();
+    const before: SceneSnapshot = {
+      worldId: "emberfall",
+      currentNodeId: "reckoning",
+      completedNodeIds: ["arrival", "guild-offer", "the-weir"],
+      relations: [{ factionA: "ashen-guild", factionB: "river-wardens", band: "hostile" }],
+      npcAffinities: [],
+      day: 1,
+    };
+    const campaign = await sceneCampaign(store, before);
+    const ports: TurnPorts = {
+      ...portsWith(store),
+      intent: classifiedAs({ category: "exploration", targetNodeId: null }),
+    };
+
+    const frames = await drain(
+      handleCommand(
+        campaign,
+        { type: "free_text", clientMessageId: "c1", text: "let's settle this" },
+        ports,
+      ),
+    );
+
+    expect(eventTypesOf(frames)).toEqual([
+      "player_input",
+      "intent_classified",
+      "quest_node_completed",
+      "world_delta_applied",
+      "narrative_emitted",
+    ]);
+    expect(campaign.state.world.scene?.npcAffinities).toEqual([
+      {
+        npcId: "sela-the-innkeeper",
+        band: "cordial",
+        facts: ["hosted and helped broker the reckoning between the Guild and the Wardens"],
+      },
+    ]);
+
+    // Folds from genesis, not from `before`: `sceneCampaign`'s override is
+    // in-memory-only and never reaches the event log. This still proves the
+    // `world_delta_applied` event alone carries enough to reconstruct the
+    // affinity change — full-state reload parity is covered elsewhere
+    // (replay.test.ts, e2e.test.ts).
+    const reloaded = await loadCampaign({ campaignId: campaign.state.world.campaignId, store });
+    expect(reloaded?.state.world.scene?.npcAffinities).toEqual(
+      campaign.state.world.scene?.npcAffinities,
+    );
+  });
+
   // Whole-branch review finding 2: `completeCurrentNode` with no traversal
   // is not an arrival — the player never moved. Narrating it as `arrived`
   // would tell the player they just reached a place they were already
@@ -1052,6 +1108,7 @@ describe("handleCommand — free text", () => {
       currentNodeId: "reckoning",
       completedNodeIds: ["arrival", "guild-offer", "the-weir"],
       relations: [{ factionA: "ashen-guild", factionB: "river-wardens", band: "hostile" }],
+      npcAffinities: [],
       day: 1,
     };
     const campaign = await sceneCampaign(store, before);
@@ -1080,6 +1137,7 @@ describe("handleCommand — free text", () => {
       currentNodeId: "reckoning",
       completedNodeIds: ["arrival", "guild-offer", "the-weir"],
       relations: [{ factionA: "ashen-guild", factionB: "river-wardens", band: "hostile" }],
+      npcAffinities: [],
       day: 1,
     };
     const campaign = await sceneCampaign(store, before);
@@ -2804,15 +2862,28 @@ describe("handleCommand — end of combat", () => {
     expect(campaign.state.encounter).toBeNull();
     expect(campaign.built).toBeNull();
     expect(campaign.state.world.scene?.completedNodeIds).toContain("saboteurs");
-    // `saboteurs` declares an `advance_calendar` effect (days: 1), so victory
-    // must also record the day it actually advanced — the exit criterion's
-    // "and its effects apply" clause, exercised end to end.
+    // `saboteurs` declares an `advance_calendar` effect (days: 1) and a
+    // `shift_npc_affinity` effect (old-tobin, +1), so victory must also
+    // record both — the exit criterion's "and its effects apply" clause,
+    // exercised end to end. The npc-affinity half specifically proves the
+    // victory branch's payload construction is correct: this branch and the
+    // exploration branch's equivalent are separate, copy-pasted blocks in
+    // pipeline.ts, so exercising one does not exercise the other, and a
+    // copy-paste slip here (e.g. `npcAffinities: delta.relations`) would
+    // otherwise pass every existing test untouched.
     const deltaEvent = frames
       .filter((each): each is Extract<ServerFrame, { type: "event" }> => each.type === "event")
       .map((each) => each.event)
       .find((each) => each.type === "world_delta_applied");
-    expect(deltaEvent?.payload).toEqual({ relations: [], day: 2 });
+    expect(deltaEvent?.payload).toEqual({
+      relations: [],
+      npcAffinities: [{ npcId: "old-tobin", band: "cordial", facts: [] }],
+      day: 2,
+    });
     expect(campaign.state.world.scene?.day).toBe(2);
+    expect(campaign.state.world.scene?.npcAffinities).toEqual([
+      { npcId: "old-tobin", band: "cordial", facts: [] },
+    ]);
   });
 
   it("resolves with defeat and leaves the node uncompleted", async () => {

@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { ExecuteTurn } from "./actions.js";
 import { AbilityKey, Skill } from "./character.js";
-import { ContentId, FactionRelationEntry } from "./content.js";
+import { ContentId, FactionRelationEntry, NpcAffinityEntry } from "./content.js";
 import { CheckDifficulty, IntentClassification } from "./intent.js";
 import { Combatant, EntityStatus, GridMap } from "./world.js";
 import { DiceNotation } from "./primitives.js";
@@ -300,15 +300,18 @@ export const QuestNodeCompletedPayload = z.object({ nodeId: ContentId });
 export type QuestNodeCompletedPayload = z.infer<typeof QuestNodeCompletedPayload>;
 
 /**
- * Payload for `world_delta_applied`. Both fields carry the engine's already-
- * computed, already-clamped RESULT, never a delta to compute (Decision 4 of
- * the design spec) — `reduce` only merges what is here onto `scene`.
+ * Payload for `world_delta_applied`. All three fields carry the engine's
+ * already-computed, already-clamped RESULT, never a delta to compute (Decision
+ * 4 of the combat-bridge spec, extended by Decision 6 of the character-
+ * profiles spec) — `reduce` only merges what is here onto `scene`.
  */
 export const WorldDeltaAppliedPayload = z.object({
   /** Absolute resulting bands, post-clamp — the fold merges, never computes. */
   relations: z.array(FactionRelationEntry).default([]),
   /** The new absolute day, when the calendar moved. */
   day: z.number().int().min(1).optional(),
+  /** Absolute resulting affinity, post-clamp, whole entries. Same contract as `relations`. */
+  npcAffinities: z.array(NpcAffinityEntry).default([]),
 });
 export type WorldDeltaAppliedPayload = z.infer<typeof WorldDeltaAppliedPayload>;
 

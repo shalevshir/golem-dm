@@ -301,6 +301,7 @@ describe("WorldState.scene", () => {
       currentNodeId: "goblin-camp",
       completedNodeIds: ["find-the-trail"],
       relations: [{ factionA: "town-guard", factionB: "goblin-warband", band: "hostile" }],
+      npcAffinities: [],
       day: 3,
     };
     const parsed = WorldState.parse({ ...legacy, scene });
@@ -326,6 +327,7 @@ describe("sceneFromGenesis", () => {
       currentNodeId: "find-the-trail",
       completedNodeIds: [],
       relations: [],
+      npcAffinities: [],
       day: 1,
     });
   });

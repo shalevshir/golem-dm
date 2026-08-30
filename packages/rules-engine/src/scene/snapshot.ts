@@ -6,7 +6,12 @@
 // Lives beside `pairKey`/`splitPairKey` per the design spec's Decision 2: a
 // converter written anywhere else would re-derive the `|` key format, the
 // invariant-4 duplicate `authored-world.ts` already warns about.
-import type { ContentId, FactionRelationEntry, SceneSnapshot } from "@ai-dm/schemas";
+import type {
+  ContentId,
+  FactionRelationEntry,
+  NpcAffinityEntry,
+  SceneSnapshot,
+} from "@ai-dm/schemas";
 import { pairKey, splitPairKey } from "./authored-world.js";
 import type { SceneState } from "./index.js";
 
@@ -26,6 +31,12 @@ export function sceneStateFrom(snapshot: SceneSnapshot): SceneState {
     relations: new Map(
       snapshot.relations.map((entry) => [pairKey(entry.factionA, entry.factionB), entry.band]),
     ),
+    npcAffinities: new Map(
+      snapshot.npcAffinities.map((entry) => [
+        entry.npcId,
+        { band: entry.band, facts: entry.facts },
+      ]),
+    ),
     day: snapshot.day,
   };
 }
@@ -40,11 +51,16 @@ export function snapshotOf(state: SceneState, worldId: ContentId): SceneSnapshot
     const [factionA, factionB] = splitPairKey(key);
     return { factionA, factionB, band };
   }).sort((a, b) => a.factionA.localeCompare(b.factionA) || a.factionB.localeCompare(b.factionB));
+  const npcAffinities: NpcAffinityEntry[] = Array.from(
+    state.npcAffinities,
+    ([npcId, { band, facts }]) => ({ npcId, band, facts: [...facts] }),
+  ).sort((a, b) => a.npcId.localeCompare(b.npcId));
   return {
     worldId,
     currentNodeId: state.currentNodeId,
     completedNodeIds: Array.from(state.completedNodeIds).sort(),
     relations,
+    npcAffinities,
     day: state.day,
   };
 }
@@ -56,6 +72,7 @@ export function snapshotOf(state: SceneState, worldId: ContentId): SceneSnapshot
  */
 export interface SceneDelta {
   relations: FactionRelationEntry[];
+  npcAffinities: NpcAffinityEntry[];
   day?: number;
 }
 
@@ -73,7 +90,17 @@ export function diffScene(before: SceneState, after: SceneState): SceneDelta {
       relations.push({ factionA, factionB, band });
     }
   }
-  const delta: SceneDelta = { relations };
+  const npcAffinities: NpcAffinityEntry[] = [];
+  for (const [npcId, entry] of after.npcAffinities) {
+    const beforeEntry = before.npcAffinities.get(npcId);
+    const changed =
+      beforeEntry === undefined ||
+      beforeEntry.band !== entry.band ||
+      beforeEntry.facts.length !== entry.facts.length ||
+      beforeEntry.facts.some((fact, i) => fact !== entry.facts[i]);
+    if (changed) npcAffinities.push({ npcId, band: entry.band, facts: [...entry.facts] });
+  }
+  const delta: SceneDelta = { relations, npcAffinities };
   if (after.day !== before.day) delta.day = after.day;
   return delta;
 }
