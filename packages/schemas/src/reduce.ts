@@ -4,44 +4,24 @@
 //
 // It lives in `@ai-dm/schemas` so that `apps/web` — which may depend on this
 // package and only this package (invariant 5) — has a fold to run at all.
-// Since the campaign/encounter split, though, this function alone is no
-// longer the whole projection: the server's is `reduce` PLUS a catalogue
-// substitution (`apps/server/src/core/campaign.ts`'s `loadCampaign`, the
-// `encounter_started` branch of its loop, which rebuilds the board `reduce`
-// cannot fill — see the comment on that case below), while the client
-// (`apps/web/src/state/store.ts`'s `applyFrame`) runs `reduce` alone, with no
-// catalogue to substitute from. `fold` therefore can no longer project a
-// campaign log across a bracket by itself; `loadCampaign` is the only
-// complete projector today.
 //
-// The gap this opens is silent, not a throw: a client that folds
-// `encounter_started` onto `encounter: null` gets `state` back unchanged —
-// no error — so its `snapshot.encounter` stays null while the server's own
-// projection has a board. `apps/web/src/App.tsx` then renders its "not ready
-// yet" placeholder branch (`state.snapshot === null || encounter === null ||
-// catalogue === null`) indefinitely, on a live socket that is otherwise
-// working fine.
+// `fold` alone projects a whole campaign log, brackets included. That was not
+// true between §4.7 steps 1 and 5: `encounter_started` named an encounter and
+// nothing more, so only `apps/server/src/core/campaign.ts`'s `loadCampaign`
+// could rebuild a board out of the encounter catalogue, and a client folding
+// that event onto `encounter: null` got `state` back unchanged with no error
+// — a silent gap, not a throw. Step 5 closed it by putting the initial board
+// in the payload (see the `encounter_started` case below), which is the same
+// rule genesis already followed: an event names what it declares, completely,
+// and the fold reads it without consulting anything else.
 //
-// §4.7 step 4 has landed the half of this that was actually load-bearing: a
-// campaign no longer has to bundle a fight with its creation at all — a
-// `worldId` campaign never does, and its client joins with `state.encounter`
-// null from the start. That breaks the OLD justification for calling this
-// gap unreachable, which leaned on "campaign creation always bundles a
-// fight" as a blanket fact rather than a property of one HTTP route.
-//
-// It is not yet exercised, though: `POST /campaigns`'s `encounterId` branch
-// still awaits `startEncounter` before it hands back a `campaignId`, so a
-// combat campaign's very first snapshot a client can ever see already has
-// its board — every current path remains as unreachable as this comment used
-// to claim. What changed is WHICH step owns closing it. §4.7 step 5 (the
-// combat bridge) is what starts a fight on a running campaign a client has
-// already joined — the "combat" `free_text` category is explicitly a
-// non-goal of this step (see `pipeline.ts`'s narrate-only categories) — and
-// the moment that lands, its `encounter_started` streams to an already-open
-// socket as a live `event` frame, hitting exactly this gap. This plan does
-// not add the fix; `apps/web` still needs one (a catalogue fetch alongside
-// `reduce`, or giving up on `fold` projecting a bracket at all) before step 5
-// can safely ship.
+// One residue remains, and it is bounded: a payload persisted BEFORE step 5
+// carries no board, and this function cannot invent one. `loadCampaign` keeps
+// a catalogue substitution reached only for those. No client can be affected
+// by it — the only logs lacking a board are combat-only campaigns, and
+// `POST /campaigns`'s `encounterId` branch still awaits `startEncounter`
+// before returning a `campaignId`, so their client always joins after
+// `encounter_started` and can never receive it as a live frame.
 //
 // Nothing here may import a Node built-in, or `apps/web`'s bundle breaks — and
 // nothing here may import `@ai-dm/rules-engine`, which would invert the
@@ -164,29 +144,37 @@ export function reduce(state: CampaignState, event: GameEvent): CampaignState {
       return { ...state, encounter: { ...encounter, currentActorIndex, round, combatants } };
     }
 
-    // Opens the bracket — but only by refusing to open a second one. What
-    // the bracket CONTAINS cannot be folded: an encounter's initial board is
-    // rebuilt from its `encounterId` through the encounter catalogue, which
-    // lives downstream in `apps/server` and can never be imported here
-    // (invariant 5). So `apps/server/src/core/campaign.ts` runs this guard,
-    // then substitutes the rebuilt board — exactly as it already rebuilds
-    // genesis rather than reading a persisted `state` field. The check still
-    // belongs here, because `state.encounter` is this function's field and a
-    // strictly non-overlapping bracket is what makes it a nullable field
-    // rather than a map. The payload is parsed here too, so the file's own
-    // rule above ("every payload this cares about is parsed here rather than
-    // cast") holds for both bracket events, not just the one that closes —
-    // `encounterId` is reported in the already-open error below for the same
-    // reason `encounter_resolved`'s mismatch error names both ids.
+    // Opens the bracket AND fills it. The payload carries the whole initial
+    // board (spec Decision 2), so this is a complete fold with no catalogue
+    // substitution — `apps/server/src/core/campaign.ts` no longer patches a
+    // board in behind this branch for a log written from §4.7 step 5 onward.
+    //
+    // `currentActorIndex: 0` and `round: 1` are derived here rather than
+    // carried: they are the same two constants `initialEncounterState` always
+    // derived, and a payload that could disagree with them would be a second
+    // way to express one fact.
+    //
+    // A legacy payload — one persisted before step 5, carrying no board —
+    // still returns `state` unchanged, exactly as this branch always did.
+    // `loadCampaign` keeps its `buildEncounterById` substitution for that
+    // case alone, so an old campaign stays loadable.
     case "encounter_started": {
-      const { encounterId } = EncounterStartedPayload.parse(event.payload);
+      const { encounterId, grid, combatants, turnOrder } = EncounterStartedPayload.parse(
+        event.payload,
+      );
       if (state.encounter !== null) {
         throw new Error(
           `encounter_started at sequence ${String(event.sequence)} names encounter ` +
             `${encounterId}, but encounter ${state.encounter.encounterId} is already open`,
         );
       }
-      return state;
+      if (grid === undefined || combatants === undefined || turnOrder === undefined) {
+        return state;
+      }
+      return {
+        ...state,
+        encounter: { encounterId, grid, combatants, turnOrder, currentActorIndex: 0, round: 1 },
+      };
     }
 
     // Closes it, and keeps the world: `appliedClientMessageIds` outlives the

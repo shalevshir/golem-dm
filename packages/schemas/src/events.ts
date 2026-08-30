@@ -3,7 +3,7 @@ import { ExecuteTurn } from "./actions.js";
 import { AbilityKey, Skill } from "./character.js";
 import { ContentId, FactionRelationEntry } from "./content.js";
 import { CheckDifficulty, IntentClassification } from "./intent.js";
-import { EntityStatus } from "./world.js";
+import { Combatant, EntityStatus, GridMap } from "./world.js";
 import { DiceNotation } from "./primitives.js";
 
 /**
@@ -67,7 +67,38 @@ export const CampaignStartedPayload = z
   );
 export type CampaignStartedPayload = z.infer<typeof CampaignStartedPayload>;
 
-export const EncounterStartedPayload = z.object({ encounterId: z.string() });
+/**
+ * `encounter_started` carries the whole initial board, not just a name, so
+ * `reduce` can project a bracket with no catalogue substitution — the fold
+ * gap `reduce.ts`'s header used to document (spec Decision 2).
+ *
+ * The three board fields are optional as a group, and only as a group: a
+ * persisted pre-step-5 payload has none of them and must still parse and
+ * fold (append-only compatibility), while a payload with some but not all is
+ * a corrupt producer, not a legacy one. That is the same all-or-nothing
+ * `.refine` shape `CampaignStartedPayload`'s genesis quartet uses.
+ *
+ * Stat blocks are deliberately absent, for the reason `EncounterState` omits
+ * them: they are static per encounter and re-derived server-side from ids. So
+ * is `maxRounds` — only the server enforces it, and `builtOf` already reaches
+ * it.
+ */
+export const EncounterStartedPayload = z
+  .object({
+    encounterId: z.string(),
+    grid: GridMap.optional(),
+    combatants: z.array(Combatant).optional(),
+    turnOrder: z.array(z.string()).optional(),
+  })
+  .refine(
+    (payload) => {
+      const present = [payload.grid, payload.combatants, payload.turnOrder].filter(
+        (each) => each !== undefined,
+      ).length;
+      return present === 0 || present === 3;
+    },
+    { message: "encounter_started must declare all three board fields or none of them" },
+  );
 export type EncounterStartedPayload = z.infer<typeof EncounterStartedPayload>;
 
 export const EncounterResolvedPayload = z.object({
