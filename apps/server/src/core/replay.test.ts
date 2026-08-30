@@ -492,6 +492,64 @@ describe("seed determinism across a bracket", () => {
     expect(aSpanA).toHaveLength(bSpanA.length);
     expect(bSpanA).not.toEqual(aSpanA);
   });
+
+  it("keeps a bridge-opened bracket on the campaign's own seed sequence", async () => {
+    // Decision 6: step 5 adds no per-encounter seed, because there is no
+    // second seed to add — a fight the BRIDGE starts draws from exactly the
+    // same campaign rootSeed and campaign sequence a directly-started one
+    // does. The sibling test above proves that for `startEncounter`; this
+    // proves the pipeline's own path did not quietly grow a second scheme.
+    async function playBridged(store: EventStore): Promise<GameEvent[]> {
+      const campaign = await startedSceneCampaign(store, { rootSeed: 42 });
+      // `startedSceneCampaign` starts at "arrival", and "arrival" has no
+      // direct edge to "saboteurs" (data/world/arc.json) — walk it one edge
+      // at a time: arrival -> guild-offer -> the-weir -> saboteurs, which is
+      // what opens the bracket.
+      await drain(
+        handleCommand(
+          campaign,
+          { type: "free_text", clientMessageId: "walk-1", text: "hear out the guild agent" },
+          {
+            ...portsWith(store),
+            intent: classifiedAs({ category: "exploration", targetNodeId: "guild-offer" }),
+          },
+        ),
+      );
+      await drain(
+        handleCommand(
+          campaign,
+          { type: "free_text", clientMessageId: "walk-2", text: "go look at the weir" },
+          {
+            ...portsWith(store),
+            intent: classifiedAs({ category: "exploration", targetNodeId: "the-weir" }),
+          },
+        ),
+      );
+      await drain(
+        handleCommand(
+          campaign,
+          { type: "free_text", clientMessageId: "walk-3", text: "search the forced gate" },
+          {
+            ...portsWith(store),
+            intent: classifiedAs({ category: "exploration", targetNodeId: "saboteurs" }),
+          },
+        ),
+      );
+      await drain(handleCommand(campaign, dodgeCommand("hero", "t1"), portsWith(store)));
+      return store.readSince("s1", -1);
+    }
+
+    const a = await playBridged(createInMemoryEventStore());
+    const b = await playBridged(createInMemoryEventStore());
+
+    const last = (events: readonly GameEvent[]): number => (events.at(-1)?.sequence ?? -1) + 1;
+    const seedsA = seedsIn(a, 0, last(a));
+    // Guarded non-empty for the reason the sibling test spells out: without
+    // it, a regression that stopped `dice_rolled` firing at all would make
+    // the comparison pass vacuously on two empty arrays.
+    expect(seedsA.length).toBeGreaterThan(0);
+    expect(seedsA).toEqual(seedsIn(b, 0, last(b)));
+  });
 });
 
 // Step 4's own named backstop (this task's brief, and the design spec): a

@@ -923,6 +923,13 @@ file by file.
   needs its own answer before then — fetch the catalogue alongside `reduce`,
   or stop expecting `fold` to project a bracket at all and resnapshot across
   one instead.
+  **Closed by step 5.** `encounter_started`'s payload now carries the board
+  itself (`grid`, `combatants`, `turnOrder`), so `reduce` fills
+  `state.encounter` straight from the event and a plain `fold` no longer
+  returns `state` unchanged on it; `apps/web` also fetches the encounter
+  catalogue reactively the moment a bracket opens mid-scene, so the
+  "not ready yet" placeholder is no longer the only thing a live
+  `encounter_started` frame can produce.
 - **`loadCampaign` is O(encounters) blocking file I/O on every cold load, and
   couples load success to the catalogue's entire history**
   (`campaign.ts:331-350`). `buildEncounterById` re-reads and re-parses SRD
@@ -933,6 +940,16 @@ file by file.
   the first matter; a growing world makes the second. Memoizing the
   catalogue lookup handles the first outright; the second needs a decision,
   not a fix.
+  **Narrower after step 5, not closed.** `loadCampaign`'s per-event loop
+  only substitutes a rebuilt `state.encounter` for an `encounter_started`
+  payload written *before* this step — a payload written since already
+  carries its own board, and `reduce` has already folded it. The catalogue
+  LOOKUP itself does not go away either way: `built` still needs stat
+  blocks, which no payload carries, so `buildEncounterById` still runs once
+  per `encounter_started` regardless of which side of step 5 it was
+  written on — the blocking I/O cost and the retired-id unloadability risk
+  this bullet names are both still live for new logs, only the state-fold
+  substitution is now legacy-only.
 - **`pipeline.ts`'s `emit` is a fourth writer of the bracket, and does not
   know it** (`campaign.ts`'s doc comment on `Campaign.built`). It sets
   `campaign.state = reduce(...)` for every event it appends and never
@@ -941,6 +958,11 @@ file by file.
   event that will. `builtOf`'s guard catches the desync the next time
   anything reads the board, which is the design working as intended; it
   just means the failure surfaces one call after the bug, not at it.
+  **Closed by step 5.** Both call sites that now append a bracket event —
+  the scene-entry branch that opens one and `resolveIfConcluded`, which
+  closes one — set `campaign.built` themselves in the same place, right
+  after their `emitAll` call, so `builtOf`'s guard has nothing left to
+  catch.
 - **`campaign_started` is the one bracket-adjacent event with no corrupt-log
   guard.** A second `encounter_started`, an `encounter_resolved` with no
   bracket open, and an id-mismatched `encounter_resolved` all throw in
