@@ -2649,3 +2649,99 @@ describe("handleCommand — turn_affordances", () => {
     expect(frames.findIndex((each) => each.type === "turn_affordances")).toBe(frames.length - 1);
   });
 });
+
+describe("handleCommand — free text: the combat bridge", () => {
+  const atTheWeir = {
+    currentNodeId: "the-weir",
+    completedNodeIds: ["arrival"],
+    relations: [],
+    day: 1,
+  };
+
+  it("opens a bracket when the entered node declares an encounter", async () => {
+    const store = createInMemoryEventStore();
+    const campaign = await sceneCampaign(store, atTheWeir);
+    const ports: TurnPorts = {
+      ...portsWith(store),
+      intent: classifiedAs({ category: "exploration", targetNodeId: "saboteurs" }),
+      sceneNarrative: scriptedSceneNarrative([]),
+    };
+
+    const frames = await drain(
+      handleCommand(
+        campaign,
+        { type: "free_text", clientMessageId: "c1", text: "search the forced gate" },
+        ports,
+      ),
+    );
+
+    expect(eventTypesOf(frames)).toContain("encounter_started");
+    expect(campaign.state.world.scene?.currentNodeId).toBe("saboteurs");
+    expect(campaign.state.encounter?.encounterId).toBe("goblin-ambush");
+    expect(campaign.state.encounter?.turnOrder).toEqual(["hero", "goblin-a", "goblin-b"]);
+    expect(campaign.state.encounter?.round).toBe(1);
+    // `emitAll` never touches `built`; the bridge must set it alongside the
+    // bracket or `builtOf` throws at the first tactical turn.
+    expect(campaign.built?.encounterId).toBe("goblin-ambush");
+  });
+
+  it("appends the entry group and the bracket together, in one store append", async () => {
+    const inner = createInMemoryEventStore();
+    const appendSizes: number[] = [];
+    const store: EventStore = {
+      ...inner,
+      append(campaignId, events) {
+        appendSizes.push(events.length);
+        return inner.append(campaignId, events);
+      },
+    };
+    const campaign = await sceneCampaign(store, atTheWeir);
+    const ports: TurnPorts = {
+      ...portsWith(store),
+      intent: classifiedAs({ category: "exploration", targetNodeId: "saboteurs" }),
+      sceneNarrative: scriptedSceneNarrative([]),
+    };
+
+    await drain(
+      handleCommand(
+        campaign,
+        { type: "free_text", clientMessageId: "c1", text: "search the forced gate" },
+        ports,
+      ),
+    );
+
+    // `quest_node_completed` + `quest_node_entered` + `encounter_started` land
+    // as one group. `player_input` and `intent_classified` precede them as
+    // their own single-event appends, exactly as they already do — so the
+    // group of three is what proves the bracket did not get an append of its
+    // own.
+    expect(appendSizes).toContain(3);
+  });
+
+  it("does not open a bracket for a node that declares no encounter", async () => {
+    const store = createInMemoryEventStore();
+    const campaign = await sceneCampaign(store, {
+      currentNodeId: "arrival",
+      completedNodeIds: [],
+      relations: [],
+      day: 1,
+    });
+    const ports: TurnPorts = {
+      ...portsWith(store),
+      intent: classifiedAs({ category: "exploration", targetNodeId: "guild-offer" }),
+      sceneNarrative: scriptedSceneNarrative([]),
+    };
+
+    const frames = await drain(
+      handleCommand(
+        campaign,
+        { type: "free_text", clientMessageId: "c1", text: "hear out the factor" },
+        ports,
+      ),
+    );
+
+    expect(eventTypesOf(frames)).not.toContain("encounter_started");
+    expect(campaign.state.encounter).toBeNull();
+    expect(campaign.built).toBeNull();
+  });
+});

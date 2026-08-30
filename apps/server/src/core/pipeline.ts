@@ -71,6 +71,7 @@ import type {
 } from "@ai-dm/schemas";
 import { builtOf, encounterOf, NARRATION_WINDOW, sceneStaticsOf, worldFor } from "./campaign.js";
 import type { Campaign } from "./campaign.js";
+import { buildEncounterById } from "../encounters/index.js";
 
 /** `apps/server/CLAUDE.md`: snapshot every 50 events. */
 export const SNAPSHOT_EVERY = 50;
@@ -1340,7 +1341,43 @@ export async function* handleCommand(
             if (targetNodeId !== null) {
               sceneEvents.push({ type: "quest_node_entered", payload: { nodeId: targetNodeId } });
             }
+
+            // The bridge (spec Decision 1). Entering a node that declares an
+            // encounter opens a bracket, and it joins THIS group rather than
+            // taking an `emit` of its own: it is part of the same engine
+            // transition, and splitting it off would reopen exactly the
+            // window `emitAll` exists to close — a durable
+            // `quest_node_entered` whose fight never started, on a node the
+            // scene engine's `completed()` short-circuit can never re-enter.
+            //
+            // Read off the node actually entered, which for a traversal is
+            // the target and for a `completeCurrentNode` is the node already
+            // current — the same node `sceneNarrate` below narrates.
+            const enteredNodeId = targetNodeId ?? before.currentNodeId;
+            const enteredNode = statics.authored.questNodes.get(enteredNodeId);
+            const bridged =
+              enteredNode?.encounterId === undefined
+                ? null
+                : buildEncounterById(enteredNode.encounterId);
+            if (bridged !== null) {
+              sceneEvents.push({
+                type: "encounter_started",
+                payload: {
+                  encounterId: bridged.encounterId,
+                  grid: bridged.world.grid,
+                  combatants: bridged.world.combatants,
+                  turnOrder: bridged.turnOrder,
+                },
+              });
+            }
+
             yield* emitAll(sceneEvents);
+
+            // `emitAll` moves `campaign.state` but never `built` — the
+            // fourth-writer hazard `Campaign.built`'s doc comment names. Set
+            // it here, in the same place the bracket was opened, so
+            // `builtOf`'s guard has nothing to catch.
+            if (bridged !== null) campaign.built = bridged;
 
             // Reads `currentScene()` fresh, post-emit: for a traversal this
             // is the new node; for a `completeCurrentNode` it is the same
