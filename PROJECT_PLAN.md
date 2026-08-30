@@ -991,7 +991,22 @@ combat with a UI that can still send them.
    plan at
    [`docs/superpowers/plans/2026-08-28-intent-router.md`](docs/superpowers/plans/2026-08-28-intent-router.md).
 5. **The combat bridge:** `encounter_started` / `encounter_resolved`,
-   deterministic seed derivation.
+   deterministic seed derivation. **Designed and planned** 2026-08-30, not
+   yet implemented.
+   [`docs/superpowers/specs/2026-08-30-combat-bridge-design.md`](docs/superpowers/specs/2026-08-30-combat-bridge-design.md),
+   plan at
+   [`docs/superpowers/plans/2026-08-30-combat-bridge.md`](docs/superpowers/plans/2026-08-30-combat-bridge.md).
+   Two findings from reading the code widened the step beyond what this
+   section anticipated, and both are load-bearing for anyone picking it up:
+   **`resolveEncounter` has no production caller**, so no fight has ever
+   ended and the end-of-combat detector has to be built rather than wired;
+   and **the only victory rule lives in `apps/web`**
+   (`state/conclusion.ts`), which the server cannot import, so it moves to
+   `@ai-dm/schemas` for the same reason `reduce` lives there. The spec also
+   records that this step needs **no per-encounter seed** — every roll
+   already derives from the campaign `rootSeed` and the campaign sequence,
+   so the rule this section states is already true by construction and
+   `replay.test.ts` already pins it.
 6. **Character profiles and NPC affinity projection.**
 7. **Episodic memory (step 10 spec #2)** — now with a real consumer. §4.6
    left it undesignable for want of a corpus, a consumer and a producer.
