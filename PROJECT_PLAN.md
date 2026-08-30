@@ -1039,10 +1039,10 @@ combat with a UI that can still send them.
    `WorldEffect` kinds (`shift_npc_affinity`, `add_npc_fact`) reusing
    `FactionBand`, applied by the scene engine on quest-node completion —
    authored-only, no dynamic/LLM-proposed path. No new player-character
-   schema: `DerivedCharacter` already serves that role. Implemented; PR
-   [#12](https://github.com/shalevshir/golem-dm/pull/12) open against
-   `main`, CI green at 1596 passed / 30 skipped (1626 / 0 skipped with
-   Postgres).
+   schema: `DerivedCharacter` already serves that role. **Merged to
+   `main`** 2026-08-30 as `c42b56d` (PR
+   [#12](https://github.com/shalevshir/golem-dm/pull/12)), CI green at
+   1596 passed / 30 skipped (1626 passed / 0 skipped with Postgres).
    [`docs/superpowers/specs/2026-08-30-character-profiles-design.md`](docs/superpowers/specs/2026-08-30-character-profiles-design.md),
    plan at
    [`docs/superpowers/plans/2026-08-30-character-profiles.md`](docs/superpowers/plans/2026-08-30-character-profiles.md).
