@@ -859,12 +859,16 @@ describe("end to end", () => {
     );
 
     // Entering `saboteurs` is what opens the bracket (pipeline.ts's bridge,
-    // atomically with the scene-entry events).
+    // atomically with the scene-entry events). Waited on the frame log
+    // itself, not `waitForProjection` on the store: `emitAll` (ws.ts,
+    // ~line 161-162) appends to the store before it yields frames to the
+    // socket, so the store already showing `state.encounter !== null` does
+    // not mean this socket has received the `encounter_started` frame yet —
+    // the same race the later `reckoning` wait below documents and closes
+    // for its own anchor.
     send(socket, { type: "free_text", clientMessageId: "w3", text: "לבדוק את מנגנון השער" });
-    await waitForProjection(
-      store,
-      campaignId,
-      (candidate) => candidate.state.encounter !== null,
+    await log.waitFor(
+      (frames) => eventFrames(frames).some((each) => each.type === "encounter_started"),
       "the bracket to open on entering saboteurs",
     );
     expect(eventFrames(log.frames).map((each) => each.type)).toContain("encounter_started");
