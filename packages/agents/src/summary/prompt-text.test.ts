@@ -2,21 +2,36 @@
 // it actually changes when the prompt changes — mirrors
 // `narrative/scene-prompt-text.test.ts`.
 //
-// Hashes the WHOLE cached `static` tier `buildSummaryPrompt` sends to the
-// model. Unlike the scene prompt, that tier is just `SUMMARY_SYSTEM_PROMPT`
-// — a summary call shares no cacheable prefix with the next one, so there is
-// no glossary to fold in here.
+// Hashes every fixed string `buildSummaryPrompt` sends to the model, not just
+// `SUMMARY_SYSTEM_PROMPT`'s `static` tier: `SUMMARY_TASK_HEADING`,
+// `SUMMARY_FACTS_HEADING` and `SUMMARY_NARRATION_HEADING` all land in the
+// `dynamic` tier on every call. Pinning only the system prompt would let a
+// heading edit change what the model sees while `SUMMARY_PROMPT_VERSION`
+// stayed stale — the exact failure mode `scene-prompt-text.test.ts` warns
+// about for `HEBREW_GLOSSARY`. Order is declaration order, i.e. the order
+// `buildSummaryPrompt` itself appends them in.
 import { createHash } from "node:crypto";
 import { describe, expect, it } from "vitest";
-import { SUMMARY_PROMPT_VERSION, SUMMARY_SYSTEM_PROMPT } from "./prompt-text.js";
+import {
+  SUMMARY_FACTS_HEADING,
+  SUMMARY_NARRATION_HEADING,
+  SUMMARY_PROMPT_VERSION,
+  SUMMARY_SYSTEM_PROMPT,
+  SUMMARY_TASK_HEADING,
+} from "./prompt-text.js";
 
-/** Every string `buildSummaryPrompt` puts in the cached `static` tier. */
-const PROMPT_SURFACE = SUMMARY_SYSTEM_PROMPT;
+/** Every fixed string `buildSummaryPrompt` sends to the model. */
+const PROMPT_SURFACE = [
+  SUMMARY_SYSTEM_PROMPT,
+  SUMMARY_TASK_HEADING,
+  SUMMARY_FACTS_HEADING,
+  SUMMARY_NARRATION_HEADING,
+].join("\n");
 
 /** Bump `SUMMARY_PROMPT_VERSION` and re-pin this together, never separately. */
 const PINNED = {
   version: "summary-v1",
-  sha256: "4c730a164115492e3a026466988b1efd1c5a2f9d679081d3b9e599cc60855e3b",
+  sha256: "ce52fe85176c1577ea755bd6d38ad567d542c175e115c9212411ad4b7cfa9e02",
 };
 
 describe("summary prompt version guard", () => {
