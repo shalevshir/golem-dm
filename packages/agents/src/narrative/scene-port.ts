@@ -22,6 +22,17 @@ export interface SceneNarrationInput {
   npcNamesHebrew: readonly string[];
   /** The previous narrations, Hebrew, oldest first. */
   recentNarrations: readonly string[];
+  /**
+   * What the DM remembers about this place and these people: step 6's
+   * authored NPC facts and standing, plus episodes retrieved from episodic
+   * memory. English — translated at generation time like every other piece
+   * of game state (invariant 2), never a third sanctioned Hebrew field.
+   *
+   * Both sources render into one list on purpose. From the narrator's side
+   * they are the same thing — things known that did not happen this turn —
+   * and a provenance split would be a distinction the prompt has no use for.
+   */
+  memoryEnglish: readonly string[];
 }
 
 export interface SceneNarrativePort {

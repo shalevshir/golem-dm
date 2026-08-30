@@ -5,7 +5,7 @@ import { createFakePort } from "../providers/testing/fake-port.js";
 import type { StreamChunk } from "../providers/port.js";
 import type { NarrativeFinish } from "./hebrew.js";
 import { buildScenePrompt, createHebrewSceneNarrative } from "./scene.js";
-import { SCENE_PROMPT_VERSION, SCENE_SYSTEM_PROMPT } from "./scene-prompt-text.js";
+import { SCENE_MEMORY_HEADING, SCENE_PROMPT_VERSION, SCENE_SYSTEM_PROMPT } from "./scene-prompt-text.js";
 import { HEBREW_GLOSSARY } from "./prompt-text.js";
 import type { SceneNarrationInput } from "./scene-port.js";
 
@@ -16,6 +16,7 @@ const INPUT: SceneNarrationInput = {
   playerGender: "masculine",
   npcNamesHebrew: ["רעות"],
   recentNarrations: [],
+  memoryEnglish: [],
 };
 
 const USAGE = { promptTokens: 700, completionTokens: 30, totalTokens: 730 };
@@ -109,6 +110,22 @@ describe("buildScenePrompt", () => {
     expect(prompt.dynamic?.some((segment) => segment.includes("concluded"))).toBe(true);
     expect(prompt.dynamic?.some((segment) => segment.includes("הכיכר"))).toBe(true);
     expect(prompt.dynamic?.some((segment) => segment.includes("arrived"))).toBe(false);
+  });
+
+  it("puts the memory block in semiStatic so it rides the cached prefix", () => {
+    const prompt = buildScenePrompt({
+      ...INPUT,
+      memoryEnglish: ["Tobin regards you warmly.", "You broke the weir gate here."],
+    });
+    const semiStatic = (prompt.semiStatic ?? []).join("\n");
+    expect(semiStatic).toContain("Tobin regards you warmly.");
+    expect(semiStatic).toContain("You broke the weir gate here.");
+    expect((prompt.dynamic ?? []).join("\n")).not.toContain("Tobin regards you warmly.");
+  });
+
+  it("omits the memory section entirely when there is nothing remembered", () => {
+    const prompt = buildScenePrompt({ ...INPUT, memoryEnglish: [] });
+    expect((prompt.semiStatic ?? []).join("\n")).not.toContain(SCENE_MEMORY_HEADING);
   });
 });
 

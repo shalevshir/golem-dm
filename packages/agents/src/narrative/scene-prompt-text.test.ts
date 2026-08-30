@@ -21,8 +21,8 @@ const PROMPT_SURFACE = `${SCENE_SYSTEM_PROMPT}\n${HEBREW_GLOSSARY}`;
 
 /** Bump `SCENE_PROMPT_VERSION` and re-pin this together, never separately. */
 const PINNED = {
-  version: "scene-v1",
-  sha256: "15968546114cb7e3fabc5554048cc8db1f81b3b72c8b31b3424eea6485dca0b6",
+  version: "scene-v2",
+  sha256: "df81137b7fce285cb9de24dba68c58f0559dd7cf16692b6f458fc78dc675986b",
 };
 
 describe("scene prompt version guard", () => {

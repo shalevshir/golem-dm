@@ -18,6 +18,7 @@ function input(
     playerGender: actor.playerGender,
     npcNamesHebrew: [],
     recentNarrations: [],
+    memoryEnglish: [],
   };
 }
 

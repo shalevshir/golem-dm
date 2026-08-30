@@ -809,6 +809,8 @@ export async function* handleCommand(
       playerGender: statics.character.grammaticalGender,
       npcNamesHebrew: card.npcNamesHebrew,
       recentNarrations: campaign.recentNarrations,
+      // Task 7 fills this from authored NPC facts + retrieved episodic memory.
+      memoryEnglish: [],
     };
 
     const streamId = ports.uuid();
