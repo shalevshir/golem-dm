@@ -2862,15 +2862,28 @@ describe("handleCommand — end of combat", () => {
     expect(campaign.state.encounter).toBeNull();
     expect(campaign.built).toBeNull();
     expect(campaign.state.world.scene?.completedNodeIds).toContain("saboteurs");
-    // `saboteurs` declares an `advance_calendar` effect (days: 1), so victory
-    // must also record the day it actually advanced — the exit criterion's
-    // "and its effects apply" clause, exercised end to end.
+    // `saboteurs` declares an `advance_calendar` effect (days: 1) and a
+    // `shift_npc_affinity` effect (old-tobin, +1), so victory must also
+    // record both — the exit criterion's "and its effects apply" clause,
+    // exercised end to end. The npc-affinity half specifically proves the
+    // victory branch's payload construction is correct: this branch and the
+    // exploration branch's equivalent are separate, copy-pasted blocks in
+    // pipeline.ts, so exercising one does not exercise the other, and a
+    // copy-paste slip here (e.g. `npcAffinities: delta.relations`) would
+    // otherwise pass every existing test untouched.
     const deltaEvent = frames
       .filter((each): each is Extract<ServerFrame, { type: "event" }> => each.type === "event")
       .map((each) => each.event)
       .find((each) => each.type === "world_delta_applied");
-    expect(deltaEvent?.payload).toEqual({ relations: [], npcAffinities: [], day: 2 });
+    expect(deltaEvent?.payload).toEqual({
+      relations: [],
+      npcAffinities: [{ npcId: "old-tobin", band: "cordial", facts: [] }],
+      day: 2,
+    });
     expect(campaign.state.world.scene?.day).toBe(2);
+    expect(campaign.state.world.scene?.npcAffinities).toEqual([
+      { npcId: "old-tobin", band: "cordial", facts: [] },
+    ]);
   });
 
   it("resolves with defeat and leaves the node uncompleted", async () => {

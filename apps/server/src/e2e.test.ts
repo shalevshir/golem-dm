@@ -934,6 +934,9 @@ describe("end to end", () => {
     expect(reloaded.state.world.scene?.relations).toEqual([
       { factionA: "ashen-guild", factionB: "river-wardens", band: "hostile" },
     ]);
+    expect(reloaded.state.world.scene?.npcAffinities).toEqual([
+      { npcId: "old-tobin", band: "cordial", facts: [] },
+    ]);
     expect(reloaded.state.encounter).toBeNull();
     expect(fold(clientState, eventFrames(log.frames))).toEqual(reloaded.state);
 
