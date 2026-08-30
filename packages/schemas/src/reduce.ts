@@ -240,11 +240,14 @@ export function reduce(state: CampaignState, event: GameEvent): CampaignState {
     // `scene` — never computes one. `relations` replaces the entry for the
     // same unordered faction pair (checked both ways, as a plain two-field
     // comparison — no `pairKey`, which lives in `authored-world.ts` and stays
-    // there per invariant 4) or appends a new pair; `day`, when present,
-    // replaces `scene.day` outright. Neither field present is a true no-op.
+    // there per invariant 4) or appends a new pair; `npcAffinities` replaces
+    // the whole entry for the same `npcId` or appends a new one — simpler
+    // than the relations merge since there is no pair to check both ways;
+    // `day`, when present, replaces `scene.day` outright. None of the three
+    // present is a true no-op (character-profiles spec Decision 6).
     case "world_delta_applied": {
       const scene = sceneOrThrow(state, event);
-      const { relations, day } = WorldDeltaAppliedPayload.parse(event.payload);
+      const { relations, day, npcAffinities } = WorldDeltaAppliedPayload.parse(event.payload);
       const nextRelations = relations.reduce((acc, entry) => {
         const index = acc.findIndex(
           (existing) =>
@@ -255,11 +258,22 @@ export function reduce(state: CampaignState, event: GameEvent): CampaignState {
           ? [...acc, entry]
           : acc.map((existing, i) => (i === index ? entry : existing));
       }, scene.relations);
+      const nextNpcAffinities = npcAffinities.reduce((acc, entry) => {
+        const index = acc.findIndex((existing) => existing.npcId === entry.npcId);
+        return index === -1
+          ? [...acc, entry]
+          : acc.map((existing, i) => (i === index ? entry : existing));
+      }, scene.npcAffinities);
       return {
         ...state,
         world: {
           ...state.world,
-          scene: { ...scene, relations: nextRelations, day: day ?? scene.day },
+          scene: {
+            ...scene,
+            relations: nextRelations,
+            npcAffinities: nextNpcAffinities,
+            day: day ?? scene.day,
+          },
         },
       };
     }

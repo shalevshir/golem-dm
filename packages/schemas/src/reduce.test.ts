@@ -27,6 +27,7 @@ const baseScene: SceneSnapshot = {
   currentNodeId: "find-the-trail",
   completedNodeIds: [],
   relations: [{ factionA: "millers", factionB: "raiders", band: "neutral" }],
+  npcAffinities: [],
   day: 1,
 };
 
@@ -446,6 +447,65 @@ describe("reduce", () => {
     ]);
   });
 
+  it("(d) appends an npcAffinities entry for an npc not already present", () => {
+    const state = withScene({ npcAffinities: [] });
+    const next = reduce(
+      state,
+      event(28, "world_delta_applied", {
+        npcAffinities: [{ npcId: "sela-the-innkeeper", band: "cordial", facts: [] }],
+      }),
+    );
+    expect(next.world.scene?.npcAffinities).toEqual([
+      { npcId: "sela-the-innkeeper", band: "cordial", facts: [] },
+    ]);
+  });
+
+  it("(d) replaces an existing npcAffinities entry for the same npcId", () => {
+    const state = withScene({
+      npcAffinities: [{ npcId: "sela-the-innkeeper", band: "neutral", facts: [] }],
+    });
+    const next = reduce(
+      state,
+      event(29, "world_delta_applied", {
+        npcAffinities: [
+          { npcId: "sela-the-innkeeper", band: "cordial", facts: ["helped broker the reckoning"] },
+        ],
+      }),
+    );
+    expect(next.world.scene?.npcAffinities).toEqual([
+      { npcId: "sela-the-innkeeper", band: "cordial", facts: ["helped broker the reckoning"] },
+    ]);
+  });
+
+  it("(d) leaves other npcAffinities entries untouched", () => {
+    const state = withScene({
+      npcAffinities: [
+        { npcId: "old-tobin", band: "friendly", facts: [] },
+        { npcId: "sela-the-innkeeper", band: "neutral", facts: [] },
+      ],
+    });
+    const next = reduce(
+      state,
+      event(30, "world_delta_applied", {
+        npcAffinities: [{ npcId: "sela-the-innkeeper", band: "cordial", facts: [] }],
+      }),
+    );
+    expect(next.world.scene?.npcAffinities).toEqual([
+      { npcId: "old-tobin", band: "friendly", facts: [] },
+      { npcId: "sela-the-innkeeper", band: "cordial", facts: [] },
+    ]);
+  });
+
+  it("(d) leaves npcAffinities untouched when the payload carries none", () => {
+    const state = withScene({
+      npcAffinities: [{ npcId: "old-tobin", band: "friendly", facts: [] }],
+    });
+    const next = reduce(state, event(31, "world_delta_applied", { relations: [] }));
+    expect(next.world.scene?.npcAffinities).toEqual([
+      { npcId: "old-tobin", band: "friendly", facts: [] },
+    ]);
+  });
+
   it("(d) replaces scene.day on world_delta_applied", () => {
     const state = withScene({ day: 1 });
     const next = reduce(state, event(28, "world_delta_applied", { day: 5 }));
@@ -537,6 +597,7 @@ describe("fold", () => {
       currentNodeId: "cross-the-bridge",
       completedNodeIds: ["find-the-trail"],
       relations: [{ factionA: "raiders", factionB: "millers", band: "hostile" }],
+      npcAffinities: [],
       day: 2,
     });
   });
