@@ -923,6 +923,13 @@ file by file.
   needs its own answer before then — fetch the catalogue alongside `reduce`,
   or stop expecting `fold` to project a bracket at all and resnapshot across
   one instead.
+  **Closed by step 5.** `encounter_started`'s payload now carries the board
+  itself (`grid`, `combatants`, `turnOrder`), so `reduce` fills
+  `state.encounter` straight from the event and a plain `fold` no longer
+  returns `state` unchanged on it; `apps/web` also fetches the encounter
+  catalogue reactively the moment a bracket opens mid-scene, so the
+  "not ready yet" placeholder is no longer the only thing a live
+  `encounter_started` frame can produce.
 - **`loadCampaign` is O(encounters) blocking file I/O on every cold load, and
   couples load success to the catalogue's entire history**
   (`campaign.ts:331-350`). `buildEncounterById` re-reads and re-parses SRD
@@ -933,6 +940,22 @@ file by file.
   the first matter; a growing world makes the second. Memoizing the
   catalogue lookup handles the first outright; the second needs a decision,
   not a fix.
+  **Closed for modern logs, by step 5's own fix wave.** `loadCampaign`'s
+  per-event loop only substitutes a rebuilt `state.encounter` for an
+  `encounter_started` payload written *before* this step — a payload
+  written since already carries its own board, and `reduce` has already
+  folded it. The catalogue LOOKUP was initially left running once per
+  `encounter_started` regardless of which side of step 5 it was written
+  on, which delivered neither of Decision 2's two promised wins for a
+  modern log with more than one historical fight; the fix wave defers that
+  lookup to after the loop, resolved once for whichever encounter the fold
+  leaves open (or not at all, between fights) — one blocking build per cold
+  load, not one per historical fight, and a retired/renamed id used only by
+  an already-resolved fight no longer breaks loading either, since its
+  build is never attempted. Both costs remain live for a legacy (pre-step-5)
+  payload, unavoidably: its build cannot be deferred, since
+  `initialEncounterState` is what seeds the fold for that bracket's own
+  events.
 - **`pipeline.ts`'s `emit` is a fourth writer of the bracket, and does not
   know it** (`campaign.ts`'s doc comment on `Campaign.built`). It sets
   `campaign.state = reduce(...)` for every event it appends and never
@@ -941,6 +964,11 @@ file by file.
   event that will. `builtOf`'s guard catches the desync the next time
   anything reads the board, which is the design working as intended; it
   just means the failure surfaces one call after the bug, not at it.
+  **Closed by step 5.** Both call sites that now append a bracket event —
+  the scene-entry branch that opens one and `resolveIfConcluded`, which
+  closes one — set `campaign.built` themselves in the same place, right
+  after their `emitAll` call, so `builtOf`'s guard has nothing left to
+  catch.
 - **`campaign_started` is the one bracket-adjacent event with no corrupt-log
   guard.** A second `encounter_started`, an `encounter_resolved` with no
   bracket open, and an id-mismatched `encounter_resolved` all throw in
@@ -992,6 +1020,20 @@ combat with a UI that can still send them.
    [`docs/superpowers/plans/2026-08-28-intent-router.md`](docs/superpowers/plans/2026-08-28-intent-router.md).
 5. **The combat bridge:** `encounter_started` / `encounter_resolved`,
    deterministic seed derivation.
+   [`docs/superpowers/specs/2026-08-30-combat-bridge-design.md`](docs/superpowers/specs/2026-08-30-combat-bridge-design.md),
+   plan at
+   [`docs/superpowers/plans/2026-08-30-combat-bridge.md`](docs/superpowers/plans/2026-08-30-combat-bridge.md).
+   Two findings from reading the code widened the step beyond what this
+   section anticipated, and both are load-bearing for anyone picking it up:
+   **`resolveEncounter` has no production caller**, so no fight has ever
+   ended and the end-of-combat detector has to be built rather than wired;
+   and **the only victory rule lives in `apps/web`**
+   (`state/conclusion.ts`), which the server cannot import, so it moves to
+   `@ai-dm/schemas` for the same reason `reduce` lives there. The spec also
+   records that this step needs **no per-encounter seed** — every roll
+   already derives from the campaign `rootSeed` and the campaign sequence,
+   so the rule this section states is already true by construction and
+   `replay.test.ts` already pins it.
 6. **Character profiles and NPC affinity projection.**
 7. **Episodic memory (step 10 spec #2)** — now with a real consumer. §4.6
    left it undesignable for want of a corpus, a consumer and a producer.

@@ -62,37 +62,46 @@ describe("the Emberfall arc", () => {
     expect(options.every((each) => each.open)).toBe(true);
   });
 
-  // Guild branch: guild-offer shifts the pair -1 from cold to hostile, and
-  // nothing on this branch advances the calendar before reckoning.
-  it("plays the guild branch to day 3 and neutral", () => {
+  // Guild branch: guild-offer shifts the pair -1 from cold to hostile.
+  // `the-weir`'s one edge leads to `saboteurs` (§4.7 step 5), not directly to
+  // `reckoning` — the arc runs arrival/guild-offer/the-weir/saboteurs/reckoning,
+  // and `saboteurs` itself advances the calendar a day (the exit criterion's
+  // combat-effects clause) on the way through to reckoning.
+  it("plays the guild branch to day 4 and neutral", () => {
     const world = loadWorld();
     let state = stateOf(traverseEdge(world, stateOf(startScene(world)), "guild-offer"));
     state = stateOf(traverseEdge(world, state, "the-weir"));
     expect(state.day).toBe(1);
     expect(relationBetween(world, state, "ashen-guild", "river-wardens")).toBe("hostile");
 
+    state = stateOf(traverseEdge(world, state, "saboteurs"));
     state = stateOf(traverseEdge(world, state, "reckoning"));
     expect(state.currentNodeId).toBe("reckoning");
+    // saboteurs: +1 day from 1, applied by leaving it for reckoning.
+    expect(state.day).toBe(2);
     state = stateOf(completeCurrentNode(world, state));
-    // reckoning: +2 bands from hostile, +2 days from 1.
+    // reckoning: +2 bands from hostile, +2 days from 2.
     expect(relationBetween(world, state, "ashen-guild", "river-wardens")).toBe("neutral");
-    expect(state.day).toBe(3);
+    expect(state.day).toBe(4);
     expect(edgesOf(availableEdges(world, state))).toEqual([]);
   });
 
   // Warden branch: warden-warning advances a day and shifts nothing.
-  it("plays the warden branch to day 4 and cordial", () => {
+  it("plays the warden branch to day 5 and cordial", () => {
     const world = loadWorld();
     let state = stateOf(traverseEdge(world, stateOf(startScene(world)), "warden-warning"));
     state = stateOf(traverseEdge(world, state, "the-weir"));
     expect(state.day).toBe(2);
     expect(relationBetween(world, state, "ashen-guild", "river-wardens")).toBe("cold");
 
+    state = stateOf(traverseEdge(world, state, "saboteurs"));
     state = stateOf(traverseEdge(world, state, "reckoning"));
+    // saboteurs: +1 day from 2.
+    expect(state.day).toBe(3);
     state = stateOf(completeCurrentNode(world, state));
-    // reckoning: +2 bands from cold, +2 days from 2.
+    // reckoning: +2 bands from cold, +2 days from 3.
     expect(relationBetween(world, state, "ashen-guild", "river-wardens")).toBe("cordial");
-    expect(state.day).toBe(4);
+    expect(state.day).toBe(5);
   });
 
   // Two branches that end in the same place would make every assertion above
@@ -102,6 +111,7 @@ describe("the Emberfall arc", () => {
     const play = (second: string): SceneState => {
       let state = stateOf(traverseEdge(world, stateOf(startScene(world)), second));
       state = stateOf(traverseEdge(world, state, "the-weir"));
+      state = stateOf(traverseEdge(world, state, "saboteurs"));
       state = stateOf(traverseEdge(world, state, "reckoning"));
       return stateOf(completeCurrentNode(world, state));
     };
@@ -123,6 +133,7 @@ describe("the Emberfall arc", () => {
     for (const second of ["guild-offer", "warden-warning"]) {
       let state = stateOf(traverseEdge(world, stateOf(startScene(world)), second));
       state = stateOf(traverseEdge(world, state, "the-weir"));
+      state = stateOf(traverseEdge(world, state, "saboteurs"));
       const options = edgesOf(availableEdges(world, state));
       expect(options).toHaveLength(1);
       expect(options[0]?.open).toBe(true);

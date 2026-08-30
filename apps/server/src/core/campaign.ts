@@ -191,11 +191,10 @@ function initialWorldState(input: {
  * the catalogue — the three fields `reduce` never writes (`encounterId`,
  * `grid`, `turnOrder`) plus the starting combatants, round and turn index.
  *
- * `reduce` cannot do this itself: the catalogue lives downstream in
- * `apps/server` and `@ai-dm/schemas` may never import it (invariant 5). So
- * `encounter_started` is a guard-only no-op in the fold, and the two callers
- * that own a catalogue — `startEncounter` and `loadCampaign` — substitute
- * this value straight after running that guard.
+ * `reduce` fills this from `encounter_started`'s payload itself since §4.7
+ * step 5 (spec Decision 2). What remains here is the legacy path: a payload
+ * persisted before that step names an encounter and carries no board, so
+ * `loadCampaign` rebuilds one through the catalogue for those logs alone.
  */
 function initialEncounterState(built: BuiltEncounter): EncounterState {
   return {
@@ -243,9 +242,17 @@ function envelope(input: {
  * itself: nothing reads a persisted `state` field (`loadCampaign` rebuilds it
  * via `initialWorldState`, on purpose), and including it would alias the
  * exact object returned as `campaign.state` into the store's own event, which
- * the in-memory store then holds by reference. `encounter_started` follows
- * the same rule with `encounterId` — a bracket event names a thing and never
- * snapshots it. The quartet is no exception: `worldId`/`startingNodeId`/
+ * the in-memory store then holds by reference.
+ *
+ * `encounter_started` is the one deliberate exception, taken in §4.7 step 5:
+ * it carries its initial board. That is not mutable state leaking into the
+ * log — it is a deterministic starting condition, the same class of thing
+ * this payload's own `startingNodeId` records, and for the same replay
+ * reason: editing an encounter's spawns in the catalogue must not
+ * retroactively move where an existing campaign's fight began. Evolving
+ * combatant state still travels only in `state_delta_applied`.
+ *
+ * The quartet is no exception: `worldId`/`startingNodeId`/
  * `startingDay` come from `input.scene.authored`, `characterId` from
  * `input.scene.character.characterId` — never a `SceneSnapshot` itself.
  */
@@ -308,17 +315,22 @@ export async function startEncounter(input: StartEncounterInput): Promise<Campai
     campaignId,
     sequence: campaign.nextSequence,
     type: "encounter_started",
-    payload: EncounterStartedPayload.parse({ encounterId: input.encounterId }),
+    payload: EncounterStartedPayload.parse({
+      encounterId: input.encounterId,
+      grid: built.world.grid,
+      combatants: built.world.combatants,
+      turnOrder: built.turnOrder,
+    }),
   });
 
-  // `reduce` owns the non-overlap invariant and throws if a bracket is
-  // already open; it returns the state otherwise, unable to fill the bracket
-  // it just opened (see `initialEncounterState`). So run it for the guard,
-  // then substitute the rebuilt board.
-  const guarded = reduce(campaign.state, event);
+  // `reduce` now both guards the non-overlap invariant AND fills the bracket
+  // from the payload written above (spec Decision 2), so there is no
+  // substitution step left here — the fold's own answer is used as-is, the
+  // way `resolveEncounter`'s already is.
+  const next = reduce(campaign.state, event);
   await input.store.append(campaignId, [event]);
 
-  campaign.state = { ...guarded, encounter: initialEncounterState(built) };
+  campaign.state = next;
   campaign.built = built;
   campaign.nextSequence += 1;
   return campaign;
@@ -428,48 +440,69 @@ export async function loadCampaign(input: {
     sceneStatics = { authored, character: loadCharacter(characterId) };
   }
 
-  // Folded one event at a time rather than through `fold`, because a campaign
-  // log is not foldable by `reduce` alone: every `encounter_started` opens a
-  // bracket whose contents only the catalogue can rebuild. `reduce` still
-  // sees every event — it holds the bracket invariants — and this loop only
-  // supplies the two things it cannot reach.
+  // Folded one event at a time rather than through `fold`, because `built`
+  // is not something `reduce` can ever supply: a bracket's stat blocks come
+  // from the catalogue, never from the log, board-carrying payload or not
+  // (`reduce` fills `state.encounter` itself for those — see the loop's own
+  // comment for the one exception, a legacy payload with no board). `reduce`
+  // still sees every event and holds every bracket invariant; this loop only
+  // adds the catalogue lookup, resolved once, after the loop, from whatever
+  // `state.encounter` the fold actually lands on — see the comment below the
+  // loop for why.
   //
-  // Two real costs this carries that the split does not otherwise name:
-  //
-  // - `buildEncounterById` re-reads and re-parses SRD files on every call,
-  //   with no memoization (`encounters/index.ts`). A campaign with N
-  //   resolved fights therefore does N blocking `readFileSync` + zod passes
-  //   on the event loop for every cold `registry.get`, even though only the
-  //   final `built` survives past this loop. That is NOT N-1 wasted builds,
-  //   though: each intermediate one is still needed while it runs, because
-  //   its `initialEncounterState` is what seeds the fold for that
-  //   encounter's own events: `scene_changed` reads `turnOrder`,
-  //   `currentActorIndex` and `round` straight off the seed on the first
-  //   `turn_advanced` of a bracket, and maps over `combatants` to reset the
-  //   up-next actor's economy. `state_delta_applied` replaces `combatants`
-  //   wholesale from its own payload, so once one has been folded the seed's
-  //   combatants no longer matter — but the pipeline can emit a bare
-  //   `turn_advanced` with no delta before it, and this fold is for an
-  //   arbitrary log, so do not read that as "never" — before the next
-  //   `encounter_resolved` discards it. Memoizing the catalogue lookup would
-  //   still be a legitimate follow-up; it is out of scope for this commit.
-  // - Load success is coupled to the catalogue's entire history, not just
-  //   its current contents: retiring or renaming an encounter id makes every
-  //   campaign that ever fought it permanently unloadable, because
-  //   `UnknownEncounterError` propagates straight out of `buildEncounterById`
-  //   here with nothing to catch it. A catalogue that only ever grows never
-  //   hits this; one that prunes or renames needs an answer this loop does
-  //   not have.
+  // One real cost the legacy path (and a still-open bracket) still carries,
+  // unavoidably: `buildEncounterById` re-reads and re-parses SRD files on
+  // every call, with no memoization (`encounters/index.ts`). Load success is
+  // therefore coupled to the catalogue's contents at that one id: retiring
+  // or renaming it makes that one campaign unloadable, because
+  // `UnknownEncounterError` propagates straight out of `buildEncounterById`
+  // here with nothing to catch it. A HISTORICAL (already-resolved) fight in
+  // a modern log carries no such risk at all — its build, deferred below, is
+  // never attempted, so retiring or renaming an id no longer touches a
+  // campaign whose only fight against it is already over. A catalogue that
+  // only ever grows never hits this; one that prunes or renames needs an
+  // answer this loop does not have for a legacy payload or an open bracket.
   for (const event of events.slice(1)) {
     state = reduce(state, event);
     if (event.type === "encounter_started") {
-      built = buildEncounterById(EncounterStartedPayload.parse(event.payload).encounterId);
-      state = { ...state, encounter: initialEncounterState(built) };
+      // Step 5 and later logs carry the board and `reduce` has already
+      // filled the bracket, so the SUBSTITUTION — patching a rebuilt board
+      // into `state.encounter` — disappears for those logs; only a payload
+      // persisted BEFORE step 5 leaves `state.encounter` null and still
+      // needs it immediately: `initialEncounterState(legacy)` is what seeds
+      // the fold for that encounter's own events (`scene_changed` reads
+      // `turnOrder`/`currentActorIndex`/`round` straight off the seed on the
+      // first `turn_advanced` of a bracket), so this build cannot be
+      // deferred the way the modern arm's can.
+      if (state.encounter === null) {
+        const legacy = buildEncounterById(EncounterStartedPayload.parse(event.payload).encounterId);
+        state = { ...state, encounter: initialEncounterState(legacy) };
+        built = legacy;
+      } else {
+        // Deferred rather than built here: `state.encounter` already has its
+        // board (the fold supplied it), so nothing downstream in this loop
+        // reads `built` before the next `encounter_started`/
+        // `encounter_resolved` overwrites or clears it again — only its
+        // FINAL value, once the whole log has been folded, ever escapes.
+        // Building on every iteration was one `buildEncounterById` call per
+        // historical fight for a result every call but the last one
+        // immediately discarded; null here and a single build after the
+        // loop (once, only if a bracket is still open) is the same
+        // observable result for one catalogue lookup instead of N.
+        built = null;
+      }
     } else if (event.type === "encounter_resolved") {
       // `reduce` already cleared `state.encounter`; the static half goes with
       // it, so a campaign between fights reloads with both halves null.
       built = null;
     }
+  }
+
+  // The modern-payload build deferred above: resolved exactly once, for
+  // whichever encounter the fold leaves open once the whole log has been
+  // read — never for one a later event has already closed or replaced.
+  if (built === null && state.encounter !== null) {
+    built = buildEncounterById(state.encounter.encounterId);
   }
 
   // A projection of the `narrative_emitted` events in the log, not something

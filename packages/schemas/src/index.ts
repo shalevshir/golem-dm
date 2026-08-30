@@ -10,3 +10,4 @@ export * from "./derived.js";
 export * from "./gear.js";
 export * from "./protocol.js";
 export * from "./reduce.js";
+export * from "./conclusion.js";

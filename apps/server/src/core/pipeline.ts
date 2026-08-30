@@ -56,7 +56,7 @@ import {
   CampaignMismatchError,
 } from "@ai-dm/memory";
 import type { EventStore } from "@ai-dm/memory";
-import { CheckRolledPayload, IntentClassifiedPayload, reduce } from "@ai-dm/schemas";
+import { CheckRolledPayload, conclusionOf, IntentClassifiedPayload, reduce } from "@ai-dm/schemas";
 import type {
   AbilityKey,
   CampaignState,
@@ -71,6 +71,7 @@ import type {
 } from "@ai-dm/schemas";
 import { builtOf, encounterOf, NARRATION_WINDOW, sceneStaticsOf, worldFor } from "./campaign.js";
 import type { Campaign } from "./campaign.js";
+import { buildEncounterById } from "../encounters/index.js";
 
 /** `apps/server/CLAUDE.md`: snapshot every 50 events. */
 export const SNAPSHOT_EVERY = 50;
@@ -973,12 +974,9 @@ export async function* handleCommand(
         continue;
       }
 
-      const livingFactions = new Set(
-        encounterOf(campaign)
-          .combatants.filter((each) => each.status === "alive")
-          .map((each) => each.faction),
-      );
-      if (livingFactions.size < 2) return;
+      // The same rule `conclusionOf` states, read from the one definition
+      // rather than spelled a second way here (spec Decision 3).
+      if (conclusionOf(encounterOf(campaign)) !== "ongoing") return;
 
       yield* enemyTurn(actorId);
     }
@@ -1031,6 +1029,104 @@ export async function* handleCommand(
       type: "turn_affordances",
       forSequence: campaign.nextSequence - 1,
     };
+  }
+
+  /**
+   * Ends the fight if it is over, and turns a won one back into scene
+   * progress (spec Decisions 4, 5 and 7).
+   *
+   * Two terminators. `conclusionOf` answers "one faction left standing", the
+   * rule the client has always read the board with. `maxRounds` answers the
+   * one the bridge itself creates: before step 5 an unresolvable fight was a
+   * stuck board on a combat-only campaign, visible and recoverable by
+   * reload; now the same stalemate strands a campaign outside its own
+   * narrative permanently, because `free_text`'s Guard 2 refuses input for as
+   * long as the bracket stays open. The number is already authored and
+   * already built — only the comparison was missing.
+   *
+   * Silent when the campaign has no scene to return to. For a combat-only
+   * campaign the fight IS the campaign, and closing its bracket would null
+   * `state.encounter` with `scene` already null — a projection in neither
+   * combat nor a scene, which `apps/web` can only render as its "not ready"
+   * placeholder. Winning would blank the screen. So those campaigns end
+   * exactly as they do today: no event, board still projected, and the client
+   * reads victory or defeat off `conclusionOf` itself.
+   */
+  async function* resolveIfConcluded(): AsyncIterable<ServerFrame> {
+    const encounter = campaign.state.encounter;
+    if (encounter === null) return;
+    if (campaign.sceneStatics === null) return;
+
+    const conclusion = conclusionOf(encounter);
+    const outcome =
+      conclusion !== "ongoing"
+        ? conclusion
+        : encounter.round > builtOf(campaign).maxRounds
+          ? "stalemate"
+          : null;
+    if (outcome === null) return;
+
+    const events: { type: GameEvent["type"]; payload: Record<string, unknown> }[] = [
+      {
+        type: "encounter_resolved",
+        payload: {
+          encounterId: encounter.encounterId,
+          outcome,
+          survivorIds: encounter.combatants
+            .filter((each) => each.status === "alive")
+            .map((each) => each.combatantId),
+        },
+      },
+    ];
+
+    // Only a won fight advances the arc. Defeat and stalemate close the
+    // bracket and change nothing else, so the player lands back in the scene
+    // at the same node and can re-enter — which rebuilds a fresh board from
+    // the catalogue. Known ceiling, recorded in the spec: a defeated solo PC
+    // narratively walking it off is wrong, and permadeath wants its own
+    // decision rather than a subsystem smuggled into this step.
+    if (outcome === "victory") {
+      const statics = sceneStaticsOf(campaign);
+      const before = sceneStateFrom(currentScene());
+      const transition = completeCurrentNode(statics.authored, before);
+      // Invalid means the node's own entry gate no longer holds, which cannot
+      // happen for a node already entered — `completeCurrentNode` short-
+      // circuits on an already-completed node and this one is not yet
+      // completed. Throw rather than silently skip: a false here means the
+      // authored world and the log disagree, the same corrupt-content posture
+      // `currentScene` and `sceneStaticsOf` take.
+      if (!transition.valid) {
+        throw new Error(
+          `Campaign ${campaign.state.world.campaignId} cannot complete encounter node ` +
+            `${before.currentNodeId}: ${transition.rejections.map((each) => each.message).join("; ")}`,
+        );
+      }
+      events.push({
+        type: "quest_node_completed",
+        payload: { nodeId: before.currentNodeId },
+      });
+      // Diffed off the engine's own pre/post states, never re-read from the
+      // node's declared effects — the same rule the exploration branch
+      // follows, so the payload records what the engine actually did,
+      // post-clamp, and cannot disagree with it.
+      const delta = diffScene(before, transition.state);
+      if (delta.relations.length > 0 || delta.day !== undefined) {
+        events.push({
+          type: "world_delta_applied",
+          payload: {
+            relations: delta.relations,
+            ...(delta.day === undefined ? {} : { day: delta.day }),
+          },
+        });
+      }
+    }
+
+    yield* emitAll(events);
+    // `emitAll` moves `campaign.state` and never `built`. Clearing it here
+    // keeps both halves of the bracket written in one place, which is what
+    // `Campaign.built`'s doc comment actually asks for — rather than leaving
+    // `builtOf`'s guard to catch the desync one read later.
+    campaign.built = null;
   }
 
   try {
@@ -1340,7 +1436,43 @@ export async function* handleCommand(
             if (targetNodeId !== null) {
               sceneEvents.push({ type: "quest_node_entered", payload: { nodeId: targetNodeId } });
             }
+
+            // The bridge (spec Decision 1). Entering a node that declares an
+            // encounter opens a bracket, and it joins THIS group rather than
+            // taking an `emit` of its own: it is part of the same engine
+            // transition, and splitting it off would reopen exactly the
+            // window `emitAll` exists to close — a durable
+            // `quest_node_entered` whose fight never started, on a node the
+            // scene engine's `completed()` short-circuit can never re-enter.
+            //
+            // Read off the node actually entered, which for a traversal is
+            // the target and for a `completeCurrentNode` is the node already
+            // current — the same node `sceneNarrate` below narrates.
+            const enteredNodeId = targetNodeId ?? before.currentNodeId;
+            const enteredNode = statics.authored.questNodes.get(enteredNodeId);
+            const bridged =
+              enteredNode?.encounterId === undefined
+                ? null
+                : buildEncounterById(enteredNode.encounterId);
+            if (bridged !== null) {
+              sceneEvents.push({
+                type: "encounter_started",
+                payload: {
+                  encounterId: bridged.encounterId,
+                  grid: bridged.world.grid,
+                  combatants: bridged.world.combatants,
+                  turnOrder: bridged.turnOrder,
+                },
+              });
+            }
+
             yield* emitAll(sceneEvents);
+
+            // `emitAll` moves `campaign.state` but never `built` — the
+            // fourth-writer hazard `Campaign.built`'s doc comment names. Set
+            // it here, in the same place the bracket was opened, so
+            // `builtOf`'s guard has nothing to catch.
+            if (bridged !== null) campaign.built = bridged;
 
             // Reads `currentScene()` fresh, post-emit: for a traversal this
             // is the new node; for a `completeCurrentNode` it is the same
@@ -1473,8 +1605,8 @@ export async function* handleCommand(
         // covers — a click the affordance frame does not sanction, which the
         // client deliberately does not surface (`ErrorBanner.tsx`) — and it
         // is already the answer a player gets for acting after a fight has
-        // ended (`state/conclusion.ts`). A closed bracket is the same
-        // moment, one event later.
+        // ended (`packages/schemas/src/conclusion.ts`). A closed bracket is
+        // the same moment, one event later.
         //
         // Refused with a frame rather than `encounterOf`'s throw because this
         // is the one place a closed bracket is an ordinary client mistake
@@ -1591,6 +1723,7 @@ export async function* handleCommand(
         yield* narrate(command.actorId, effect, Date.now() + ports.turnTimeoutMs);
         yield* emit("scene_changed", { kind: "turn_advanced" });
         yield* runEnemyTurns();
+        yield* resolveIfConcluded();
         yield* playerAffordances();
         return;
       }

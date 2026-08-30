@@ -1,9 +1,9 @@
-// Shared test fixture for building a `Combatant`, used by both
-// `conclusion.test.ts` (faction/status combinations) and `store.test.ts`
-// (fold-parity logs that need full, valid `Combatant` objects for a
-// `state_delta_applied` event). Not itself a test file — vitest's include
-// glob (`**/*.test.ts`) does not pick it up — so it carries no assertions of
-// its own.
+// Shared test fixture for building a `Combatant`, used by `App.test.tsx`
+// (faction/status combinations for conclusion and end-of-fight rendering),
+// `store.test.ts` (fold-parity logs that need full, valid `Combatant`
+// objects for a `state_delta_applied` event), and `Grid.test.tsx` (board
+// rendering). Not itself a test file — vitest's include glob (`**/*.test.ts`)
+// does not pick it up — so it carries no assertions of its own.
 import { ActionEconomy } from "@ai-dm/schemas";
 import type { Combatant } from "@ai-dm/schemas";
 

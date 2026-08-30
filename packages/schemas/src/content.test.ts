@@ -81,17 +81,23 @@ describe("QuestNode", () => {
     const parsed = QuestNode.parse(base);
     expect(parsed.preconditions).toEqual([]);
     expect(parsed.effects).toEqual([]);
-    // Empty rather than min(1): node five of a five-node arc ends it.
+    // Empty rather than min(1): node six of a six-node arc ends it.
     expect(parsed.edges).toEqual([]);
   });
 
   it("carries no Hebrew scene card — the narrator translates (invariant 2)", () => {
     expect(Object.keys(QuestNode.shape)).not.toContain("sceneHebrew");
   });
+
+  it("accepts a node that declares an encounter, and one that does not", () => {
+    const withFight = QuestNode.parse({ ...base, encounterId: "goblin-ambush" });
+    expect(withFight.encounterId).toBe("goblin-ambush");
+    expect(QuestNode.parse(base).encounterId).toBeUndefined();
+  });
 });
 
 describe("WorldPredicate and WorldEffect", () => {
-  it("accepts the two predicate kinds a five-node arc needs", () => {
+  it("accepts the two predicate kinds a six-node arc needs", () => {
     expect(
       WorldPredicate.safeParse({ kind: "node_completed", nodeId: "arrival" }).success,
     ).toBe(true);

@@ -1,7 +1,7 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { createInMemoryEventStore, EventStoreUnavailableError } from "@ai-dm/memory";
 import type { EventStore } from "@ai-dm/memory";
-import { fold, reduce, sceneFromGenesis } from "@ai-dm/schemas";
+import { EncounterStartedPayload, fold, reduce, sceneFromGenesis } from "@ai-dm/schemas";
 import type { GameEvent } from "@ai-dm/schemas";
 import {
   builtOf,
@@ -15,6 +15,11 @@ import {
 } from "./campaign.js";
 import type { Campaign, CreateCampaignInput, SceneStatics } from "./campaign.js";
 import { buildEncounterById, loadCharacter, UnknownEncounterError } from "../encounters/index.js";
+// A namespace import purely so `buildEncounterById` can be spied on below —
+// `campaign.ts` imports the same named binding from the same module
+// specifier, and Vitest's module transform routes both through one mutable
+// namespace object, so a spy set up here is visible to calls made there too.
+import * as encountersModule from "../encounters/index.js";
 import { loadWorld, UnknownWorldError } from "../world/index.js";
 
 const clock = (): string => "2026-08-19T10:00:00.000Z";
@@ -159,13 +164,13 @@ describe("startEncounter", () => {
     expect(encounterOf(campaign).currentActorIndex).toBe(0);
   });
 
-  it("writes an encounter_started event carrying only the encounter id", async () => {
+  it("writes an encounter_started event carrying the encounter id", async () => {
     const input = baseInput();
     await startedCampaign(input);
     const events = await input.store.readSince("s1", -1);
     expect(events).toHaveLength(2);
     expect(events[1]).toMatchObject({ sequence: 1, type: "encounter_started" });
-    expect(events[1]?.payload).toEqual({ encounterId: ENCOUNTER_ID });
+    expect(events[1]?.payload).toMatchObject({ encounterId: ENCOUNTER_ID });
   });
 
   it("seeds encounterId, grid and turnOrder — the three reduce never writes", async () => {
@@ -262,6 +267,28 @@ describe("startEncounter", () => {
     expect(campaign.state).toBe(stateBefore);
     expect(campaign.built).toBe(builtBefore);
     expect(campaign.nextSequence).toBe(nextSequenceBefore);
+  });
+});
+
+describe("startEncounter — the board travels in the payload", () => {
+  it("writes grid, combatants and turnOrder into encounter_started", async () => {
+    const input = { ...baseInput(), campaignId: "c-board" };
+    await startedCampaign(input);
+
+    const events = await input.store.readSince("c-board", -1);
+    const started = events.find((each) => each.type === "encounter_started");
+    const payload = EncounterStartedPayload.parse(started?.payload);
+    expect(payload.turnOrder).toEqual(["hero", "goblin-a", "goblin-b"]);
+    expect(payload.combatants).toHaveLength(3);
+    expect(payload.grid?.width).toBe(12);
+  });
+
+  it("projects the same board on a cold load, with no substitution needed", async () => {
+    const input = { ...baseInput(), campaignId: "c-parity" };
+    const campaign = await startedCampaign(input);
+
+    const reloaded = await loadCampaign({ campaignId: "c-parity", store: input.store });
+    expect(reloaded?.state.encounter).toEqual(campaign.state.encounter);
   });
 });
 
@@ -392,15 +419,50 @@ describe("loadCampaign", () => {
   });
 
   it("rebuilds the encounter's initial board from its own encounter_started", async () => {
-    // The load path's half of `initialEncounterState`: `reduce` cannot fill
-    // the bracket it opens, so this proves `loadCampaign` substitutes the
-    // rebuilt board rather than leaving a hole where the fold left one.
+    // `encounter_started` carries the board (§4.7 step 5), so `reduce` fills
+    // `state.encounter` on its own here — this proves the cold-load fold
+    // lands on the same board the live campaign has, with no substitution
+    // needed.
     const input = baseInput();
     const created = await startedCampaign(input);
     const loaded = await loadCampaign({ campaignId: "s1", store: input.store });
     expect(loaded?.state).toEqual(created.state);
     expect(loaded?.built?.encounterId).toBe(ENCOUNTER_ID);
     expect(loaded?.nextSequence).toBe(created.nextSequence);
+  });
+
+  it("calls buildEncounterById once, not once per historical fight, for a modern log", async () => {
+    // Fix for the whole-branch review's performance finding: the loop used
+    // to call `buildEncounterById` inside the modern (board-carrying) arm on
+    // every `encounter_started`, even though only the LAST one's result ever
+    // survives the loop. Two fights (one resolved, one still open) is enough
+    // to distinguish "once per historical fight" (2 calls) from "once per
+    // cold load" (1 call, deferred to after the loop).
+    const input = baseInput();
+    const firstFight = await startedCampaign(input);
+    const betweenFights = await resolveEncounter({
+      campaign: firstFight,
+      outcome: "victory",
+      survivorIds: ["hero"],
+      store: input.store,
+      clock: input.clock,
+      uuid: input.uuid,
+    });
+    await startEncounter({
+      campaign: betweenFights,
+      encounterId: ENCOUNTER_ID,
+      store: input.store,
+      clock: input.clock,
+      uuid: input.uuid,
+    });
+
+    const spy = vi.spyOn(encountersModule, "buildEncounterById");
+    spy.mockClear();
+    const loaded = await loadCampaign({ campaignId: "s1", store: input.store });
+    expect(loaded?.built?.encounterId).toBe(ENCOUNTER_ID);
+    expect(loaded?.state.encounter).not.toBeNull();
+    expect(spy).toHaveBeenCalledTimes(1);
+    spy.mockRestore();
   });
 
   it("rebuilds a scene campaign's state.world.scene and sceneStatics from its genesis", async () => {
@@ -519,7 +581,8 @@ describe("loadCampaign", () => {
 
     const loaded = await loadCampaign({ campaignId: "s1", store: input.store });
     // `fold` is enough for a tail that opens no bracket — `created.state`
-    // already has the board `encounter_started` could not fold in.
+    // already has the board, since `startedCampaign`'s `encounter_started`
+    // carried it and `reduce` folded it in directly.
     const expected = fold(created.state, tail);
 
     expect(loaded?.state).toEqual(expected);
@@ -708,14 +771,15 @@ describe("a campaign that fights the same encounter twice", () => {
     //   production path ever produces a log with one.
     // - Without them, the log the load-path assertion (part 3) re-folds
     //   from scratch would carry no combat events at all, so nothing
-    //   between the brackets would exercise the substituted board's
-    //   contents, only its existence. The `state_delta_applied` below writes
-    //   real combatants, and the three `turn_advanced`s that follow actually
+    //   between the brackets would exercise the folded board's contents,
+    //   only its existence. The `state_delta_applied` below writes real
+    //   combatants, and the three `turn_advanced`s that follow actually
     //   walk `turnOrder` — not because the fold's correctness depends on
     //   their shape mid-bracket (`encounter_resolved` discards this board
-    //   outright, and the second `encounter_started` substitutes a fresh
-    //   one), but because, exactly as the opening comment above already
-    //   says, they are what makes a stale board detectable at all.
+    //   outright, and the second `encounter_started` fills a fresh one
+    //   straight from its own payload), but because, exactly as the opening
+    //   comment above already says, they are what makes a stale board
+    //   detectable at all.
     async function appendAndFold(event: GameEvent): Promise<void> {
       await input.store.append("s1", [event]);
       campaign.state = reduce(campaign.state, event);
@@ -804,8 +868,8 @@ describe("a campaign that fights the same encounter twice", () => {
     expect(restarted.state.world.appliedClientMessageIds).toEqual(["c1"]);
 
     // 3. Load path: folding the whole log from scratch exercises
-    // encounter_started -> substitute -> encounter_resolved -> clear, twice
-    // over in one log — now a genuinely contiguous log with the dirtying
+    // encounter_started -> fill -> encounter_resolved -> clear, twice over
+    // in one log — now a genuinely contiguous log with the dirtying
     // events for real (part 1's `appendAndFold` calls above), not a log with
     // a hole where they would have been — and must land on exactly what the
     // live campaign has.

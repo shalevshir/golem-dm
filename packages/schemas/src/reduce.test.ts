@@ -541,3 +541,65 @@ describe("fold", () => {
     });
   });
 });
+
+describe("reduce — encounter_started with a board", () => {
+  const noEncounterOpen: CampaignState = {
+    world: { ...base.world, scene: null },
+    encounter: null,
+  };
+
+  const boardPayload = {
+    encounterId: "goblin-ambush",
+    grid: { width: 2, height: 1, tiles: [["normal", "normal"]] },
+    combatants: [
+      rawCombatant({ combatantId: "hero", faction: "party", position: [0, 0] }),
+      rawCombatant({ combatantId: "goblin", faction: "hostile", position: [1, 0] }),
+    ],
+    turnOrder: ["hero", "goblin"],
+  };
+
+  function startedEvent(payload: Record<string, unknown>): GameEvent {
+    return {
+      eventId: "e-start",
+      campaignId: "s1",
+      sequence: 3,
+      timestamp: "2026-08-30T00:00:00.000Z",
+      type: "encounter_started",
+      payload,
+    };
+  }
+
+  it("projects the whole bracket without a catalogue", () => {
+    const next = reduce(noEncounterOpen, startedEvent(boardPayload));
+    expect(next.encounter).toEqual({
+      encounterId: "goblin-ambush",
+      grid: boardPayload.grid,
+      combatants: Combatant.array().parse(boardPayload.combatants),
+      turnOrder: ["hero", "goblin"],
+      currentActorIndex: 0,
+      round: 1,
+    });
+  });
+
+  it("leaves the bracket unfilled for a legacy payload with no board", () => {
+    const next = reduce(noEncounterOpen, startedEvent({ encounterId: "goblin-ambush" }));
+    expect(next.encounter).toBeNull();
+  });
+
+  it("still refuses a second open bracket", () => {
+    expect(() => reduce(base, startedEvent(boardPayload))).toThrow(/already open/);
+  });
+
+  it("folds combat events that follow it, with no substitution step", () => {
+    const opened = reduce(noEncounterOpen, startedEvent(boardPayload));
+    const advanced = reduce(opened, {
+      eventId: "e-turn",
+      campaignId: "s1",
+      sequence: 4,
+      timestamp: "2026-08-30T00:00:01.000Z",
+      type: "scene_changed",
+      payload: { kind: "turn_advanced" },
+    });
+    expect(advanced.encounter?.currentActorIndex).toBe(1);
+  });
+});

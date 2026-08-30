@@ -209,3 +209,21 @@ describe("the scene event payloads (§4.7 step 4)", () => {
     ).toThrow();
   });
 });
+
+describe("EncounterStartedPayload", () => {
+  it("accepts a legacy payload carrying only encounterId", () => {
+    const parsed = EncounterStartedPayload.parse({ encounterId: "goblin-ambush" });
+    expect(parsed.grid).toBeUndefined();
+    expect(parsed.combatants).toBeUndefined();
+    expect(parsed.turnOrder).toBeUndefined();
+  });
+
+  it("refuses a half-declared board", () => {
+    expect(() =>
+      EncounterStartedPayload.parse({
+        encounterId: "goblin-ambush",
+        grid: { width: 1, height: 1, tiles: [["normal"]] },
+      }),
+    ).toThrow();
+  });
+});

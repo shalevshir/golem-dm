@@ -4,6 +4,7 @@
     "titleEnglish": "Start",
     "sceneEnglish": "A fixture node whose every outbound reference is wrong.",
     "locationId": "nowhere-at-all",
+    "encounterId": "no-such-encounter",
     "preconditions": [
       { "kind": "node_completed", "nodeId": "no-such-node" },
       {

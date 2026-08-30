@@ -90,7 +90,7 @@ export const NpcDefinition = z.object({
 
 /**
  * A gate over world state, checked when entering a quest node. Two kinds,
- * because two is what a five-node arc needs; a third is a one-line addition
+ * because two is what a six-node arc needs; a third is a one-line addition
  * when a node needs a gate the arc's own history cannot express.
  */
 export const WorldPredicate = z.discriminatedUnion("kind", [
@@ -143,8 +143,21 @@ export const QuestNode = z.object({
   preconditions: z.array(WorldPredicate).default([]),
   /** Applied on completion, by the step 3 engine. */
   effects: z.array(WorldEffect).default([]),
-  /** Empty for a terminal node — node five of a five-node arc ends it. */
+  /** Empty for a terminal node — node six of a six-node arc ends it. */
   edges: z.array(QuestEdge).default([]),
+  /**
+   * Entering this node opens a bracket on the named catalogue encounter, and
+   * the node completes on victory (§4.7 step 5). A bare id and nothing else:
+   * spawns, map, positions and turn order are already `EncounterDefinition`
+   * fields, so a parameterization layer here would be an override mechanism
+   * for a catalogue of one, with no second caller to shape it.
+   *
+   * Nothing in `@ai-dm/schemas` can check that this id resolves — the
+   * encounter catalogue lives in `apps/server` and this package may never
+   * import it (invariant 5). `loadWorld` does the cross-reference, where both
+   * catalogues are in scope.
+   */
+  encounterId: ContentId.optional(),
 });
 
 export const FactionRelationEntry = z.object({

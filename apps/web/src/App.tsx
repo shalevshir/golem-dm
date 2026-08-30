@@ -10,6 +10,7 @@ import type {
   Tile,
   TurnAffordances,
 } from "@ai-dm/schemas";
+import { conclusionOf } from "@ai-dm/schemas";
 import { connect } from "./net/connection.js";
 import type { Connection, ConnectionStatus, WebSocketLike } from "./net/connection.js";
 import { createCampaign, fetchCatalogue } from "./net/api.js";
@@ -20,7 +21,6 @@ import {
   restoreClientState,
   storeClientState,
 } from "./state/persistence.js";
-import { conclusionOf } from "./state/conclusion.js";
 import { buildTurn } from "./turn/build-turn.js";
 import { ActionBar } from "./components/ActionBar.js";
 import { CombatLog } from "./components/CombatLog.js";
@@ -170,19 +170,6 @@ export function App(props: AppProps): JSX.Element {
       if (runIdRef.current !== runId) return;
       if (stored === null) sessionStorage.setItem(CAMPAIGN_STORAGE_KEY, campaignId);
 
-      // A scene campaign has no encounter catalogue to fetch — its board is
-      // the `NarrativePane` + `FreeTextBar`, not `Grid`/`ActionBar`, so
-      // `catalogue` simply stays null for the campaign's whole lifetime. The
-      // render guard below only requires one when an encounter is actually
-      // open.
-      if (worldId === null) {
-        const fetched = await fetchCatalogue(ENCOUNTER_ID);
-        // The guard that matters: no state update, and no connection, reaches
-        // a run that has since been cancelled or superseded.
-        if (runIdRef.current !== runId) return;
-        setCatalogue(fetched);
-      }
-
       connectionRef.current = connect({
         campaignId,
         ...(props.wsUrl === undefined ? {} : { url: props.wsUrl }),
@@ -246,6 +233,50 @@ export function App(props: AppProps): JSX.Element {
       connectionRef.current = null;
     };
   }, [started, reconnectNonce, props.wsUrl, props.socketFactory]);
+
+  // The catalogue is display metadata — combatant labels and action
+  // descriptions — that no event carries and the fold never needed. Since
+  // §4.7 step 5 a bracket can open at any point in a campaign's life, not
+  // only before the first frame, so this follows the projection rather than
+  // firing once at mount. `encounter_started` now folds into a real board
+  // (`reduce` fills it from the payload), so `openEncounterId` becoming
+  // non-null is the exact moment a catalogue is needed.
+  const openEncounterId = state.snapshot?.encounter?.encounterId ?? null;
+  useEffect(() => {
+    if (openEncounterId === null) return;
+    if (catalogue?.encounterId === openEncounterId) return;
+    // A ref cell rather than a plain `let`: a `let` mutated only from the
+    // cleanup closure below narrows (wrongly) to its initial literal `false`
+    // at the read site under `no-unnecessary-condition`, since TS's flow
+    // analysis does not see the cross-closure write. Property access on a
+    // ref sidesteps that narrowing entirely.
+    const cancelled = { current: false };
+    void (async () => {
+      try {
+        const fetched = await fetchCatalogue(openEncounterId);
+        if (!cancelled.current) setCatalogue(fetched);
+      } catch (error) {
+        // Without this, a failed fetch leaves `catalogue` null forever: the
+        // board never renders (the `catalogue === null` branch below just
+        // repeats the "not ready" placeholder) and nothing tells the player
+        // why. Routed through the same `lastError`/`ErrorBanner` mechanism
+        // every other error in this file uses — that placeholder already
+        // renders `ErrorBanner`, so surfacing it here needs nothing new.
+        if (!cancelled.current) {
+          setState((previous) => ({
+            ...previous,
+            lastError: {
+              code: "catalogue_fetch_failed",
+              message: error instanceof Error ? error.message : String(error),
+            },
+          }));
+        }
+      }
+    })();
+    return () => {
+      cancelled.current = true;
+    };
+  }, [openEncounterId, catalogue?.encounterId]);
 
   // The one teardown that gets back to a clean start screen: drop the stored
   // campaign id, close whatever connection is live, and reset every piece of
@@ -312,10 +343,19 @@ export function App(props: AppProps): JSX.Element {
   // with no path back to the start screen short of clearing storage by
   // hand. The live view still shows the victory/defeat screen normally;
   // this only affects what a subsequent mount reads.
+  //
+  // Only for a genuinely combat-only campaign, though: since §4.7 step 5 a
+  // bridged fight can conclude (win OR lose) and return to narration at the
+  // same scene node, so "an encounter concluded" no longer implies "the
+  // campaign is over". `state.snapshot.world.scene !== null` is the client
+  // side of the same predicate `resolveIfConcluded` gates on server-side
+  // (`campaign.sceneStatics === null`) — a scene campaign always has
+  // somewhere to go back to, so its storage must survive here.
   useEffect(() => {
     const encounter = state.snapshot?.encounter ?? null;
     if (encounter === null) return;
     if (conclusionOf(encounter) === "ongoing") return;
+    if (state.snapshot?.world.scene !== null) return;
     sessionStorage.removeItem(CAMPAIGN_STORAGE_KEY);
     clearStoredClientState();
   }, [state.snapshot]);

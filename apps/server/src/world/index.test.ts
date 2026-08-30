@@ -26,7 +26,7 @@ describe("loadWorld", () => {
     expect(world.factions.size).toBe(2);
     expect(world.locations.size).toBe(1);
     expect(world.npcs.size).toBe(3);
-    expect(world.questNodes.size).toBe(5);
+    expect(world.questNodes.size).toBe(6);
   });
 
   // A relation is an unordered pair: `pairKey` sorts, so asking in either
@@ -119,6 +119,7 @@ describe("loadWorld refusing broken content", () => {
     'quest node start effect references unknown faction "no-such-faction"',
     "quest node start precondition alpha/alpha relates a faction to itself",
     "quest node start effect alpha/alpha relates a faction to itself",
+    'quest node start references unknown encounter "no-such-encounter"',
   ])("names: %s", (problem) => {
     expect(problemsFrom(BROKEN)).toContain(problem);
   });
@@ -163,7 +164,7 @@ describe("loadWorld refusing faction relations", () => {
 
   // The complete set, so a check that starts reporting something extra —
   // or stops reporting something — fails here rather than passing quietly.
-  it("reports exactly these seventeen problems and no others", () => {
+  it("reports exactly these eighteen problems and no others", () => {
     expect(new Set(problemsFrom(BROKEN))).toEqual(
       new Set([
         'duplicate npc id "twin"',
@@ -171,6 +172,7 @@ describe("loadWorld refusing faction relations", () => {
         'npc twin references unknown location "no-such-place"',
         'npc twin references unknown faction "no-such-faction"',
         'quest node start references unknown location "nowhere-at-all"',
+        'quest node start references unknown encounter "no-such-encounter"',
         'quest node start edge references unknown quest node "no-such-node"',
         'quest node start precondition references unknown quest node "no-such-node"',
         'quest node start precondition references unknown faction "no-such-faction"',
