@@ -891,6 +891,11 @@ export async function* handleCommand(
         campaignId: campaign.state.world.campaignId,
         queryEnglish: [card.sceneEnglish, ...card.npcIds].join(" "),
         limit: 3,
+        // `sceneNarrate`'s own parameter — the same shared deadline the
+        // narration ladder below runs under, per the spec's "retrieval
+        // happens on node transitions only, never inside a turn's
+        // narration path" (bounded, not literally excluded from the turn).
+        deadline,
         onUsage: (usage) => {
           ports.metrics?.recordEmbeddingCall?.({
             outcome: "ok",
@@ -1189,6 +1194,15 @@ export async function* handleCommand(
       .filter((each) => each.status === "alive")
       .map((each) => each.combatantId);
 
+    // A fresh budget, not a stale one: nothing upstream in this turn (the
+    // player's `narrate`, `runEnemyTurns`) left a deadline in scope here,
+    // and reusing an earlier stage's would already be spent by the time
+    // this stage starts — the same reasoning `enemyTurn` and `narrate`
+    // already follow, each striking its own `ports.turnTimeoutMs` budget
+    // for its own independent model call rather than sharing one across
+    // stages that run in sequence.
+    const deadline = Date.now() + ports.turnTimeoutMs;
+
     // Closes the "encounter" episode, unconditionally — win, loss or
     // stalemate all end the fight and are all worth remembering. Computed
     // before `events` is built so the summary can travel in
@@ -1205,6 +1219,7 @@ export async function* handleCommand(
         factsEnglish: [`Outcome: ${outcome}.`, `Survivors: ${survivorIds.join(", ")}.`],
         recentNarrations: campaign.recentNarrations,
       },
+      deadline,
     });
 
     const events: { type: GameEvent["type"]; payload: Record<string, unknown> }[] = [
@@ -1288,6 +1303,11 @@ export async function* handleCommand(
         summaryEnglish,
         day: currentScene().day,
       },
+      // The same budget `summaryEnglish` was computed under, above — one
+      // closing-stage deadline shared across both its calls, mirroring how
+      // `enemyTurn` shares one `deadline` between its tactical call and its
+      // own `narrate`.
+      deadline,
       onUsage: (usage) => {
         ports.metrics?.recordEmbeddingCall?.({
           outcome: "ok",
@@ -1615,6 +1635,9 @@ export async function* handleCommand(
                 ],
                 recentNarrations: campaign.recentNarrations,
               },
+              // This case's own shared budget — the same `deadline` the
+              // classify call above and `sceneNarrate` below both run under.
+              deadline,
             });
 
             const sceneEvents: { type: GameEvent["type"]; payload: Record<string, unknown> }[] = [
@@ -1696,6 +1719,7 @@ export async function* handleCommand(
                 summaryEnglish: nodeSummaryEnglish,
                 day: currentScene().day,
               },
+              deadline,
               onUsage: (usage) => {
                 ports.metrics?.recordEmbeddingCall?.({
                   outcome: "ok",

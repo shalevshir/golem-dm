@@ -3,6 +3,17 @@ import { createInMemoryEpisodicStore } from "@ai-dm/memory";
 import { DEFAULT_EMBEDDING_SPEC, createFakeEmbeddingPort } from "@ai-dm/agents";
 import { indexEpisode, memoryLines, retrieveMemories, summarizeEpisode } from "./episodic.js";
 
+/** Far enough out that no test below can plausibly hit it. */
+const FAR_FUTURE = Date.now() + 60_000;
+/** Already past — `raceDeadline`'s timer fires on the next tick either way. */
+const ALREADY_PAST = Date.now() - 1;
+/** A promise that never settles — the stand-in for a hung provider call. */
+function hangs<T>(): Promise<T> {
+  return new Promise<T>(() => {
+    // Deliberately never resolves or rejects.
+  });
+}
+
 describe("summarizeEpisode", () => {
   it("uses the model's summary when it returns one", async () => {
     const summary = await summarizeEpisode({
@@ -13,6 +24,7 @@ describe("summarizeEpisode", () => {
         factsEnglish: ["Node completed: quiet-word."],
         recentNarrations: [],
       },
+      deadline: FAR_FUTURE,
     });
 
     expect(summary).toBe("The gate opened.");
@@ -27,6 +39,7 @@ describe("summarizeEpisode", () => {
         factsEnglish: ["Node completed: quiet-word."],
         recentNarrations: [],
       },
+      deadline: FAR_FUTURE,
     });
 
     expect(summary).toBe("The weir. Node completed: quiet-word.");
@@ -41,6 +54,22 @@ describe("summarizeEpisode", () => {
         factsEnglish: ["Outcome: victory."],
         recentNarrations: [],
       },
+      deadline: FAR_FUTURE,
+    });
+
+    expect(summary).toBe("An ambush. Outcome: victory.");
+  });
+
+  it("falls back to the deterministic summary when the model call hangs past the deadline, rather than hanging the turn", async () => {
+    const summary = await summarizeEpisode({
+      summary: { summarize: () => hangs() },
+      input: {
+        kind: "encounter",
+        contextEnglish: "An ambush.",
+        factsEnglish: ["Outcome: victory."],
+        recentNarrations: [],
+      },
+      deadline: ALREADY_PAST,
     });
 
     expect(summary).toBe("An ambush. Outcome: victory.");
@@ -60,7 +89,7 @@ describe("indexEpisode", () => {
       day: 2,
     };
 
-    await indexEpisode({ store, embedding, spec: DEFAULT_EMBEDDING_SPEC, record });
+    await indexEpisode({ store, embedding, spec: DEFAULT_EMBEDDING_SPEC, record, deadline: FAR_FUTURE });
 
     // The fake port is deterministic, so embedding the same text again gets
     // back the exact vector the record was written under.
@@ -92,6 +121,7 @@ describe("indexEpisode", () => {
         summaryEnglish: "Tobin opened the gate.",
         day: 2,
       },
+      deadline: FAR_FUTURE,
       onUsage: (usage) => {
         reported = usage.totalTokens;
       },
@@ -119,6 +149,29 @@ describe("indexEpisode", () => {
         summaryEnglish: "Tobin opened the gate.",
         day: 2,
       },
+      deadline: FAR_FUTURE,
+    });
+
+    expect(await store.search("c1", [1, 0, 0], 3)).toEqual([]);
+  });
+
+  it("writes nothing and does not throw or hang when the embedding call hangs past the deadline", async () => {
+    const store = createInMemoryEpisodicStore();
+    const hanging = { embed: () => hangs<never>() };
+
+    await indexEpisode({
+      store,
+      embedding: hanging,
+      spec: DEFAULT_EMBEDDING_SPEC,
+      record: {
+        campaignId: "c1",
+        sequence: 4,
+        kind: "quest_node" as const,
+        refId: "weir",
+        summaryEnglish: "Tobin opened the gate.",
+        day: 2,
+      },
+      deadline: ALREADY_PAST,
     });
 
     expect(await store.search("c1", [1, 0, 0], 3)).toEqual([]);
@@ -142,6 +195,7 @@ describe("retrieveMemories", () => {
         summaryEnglish: "Goblins were driven off at the weir.",
         day: 2,
       },
+      deadline: FAR_FUTURE,
     });
 
     const lines = await retrieveMemories({
@@ -151,6 +205,7 @@ describe("retrieveMemories", () => {
       campaignId: "c1",
       queryEnglish: "Goblins were driven off at the weir.",
       limit: 3,
+      deadline: FAR_FUTURE,
     });
 
     expect(lines).toEqual(["Goblins were driven off at the weir."]);
@@ -170,6 +225,24 @@ describe("retrieveMemories", () => {
       campaignId: "c1",
       queryEnglish: "anything",
       limit: 3,
+      deadline: FAR_FUTURE,
+    });
+
+    expect(lines).toEqual([]);
+  });
+
+  it("returns an empty list, not a hang, when the embedding call hangs past the deadline", async () => {
+    const store = createInMemoryEpisodicStore();
+    const hanging = { embed: () => hangs<never>() };
+
+    const lines = await retrieveMemories({
+      store,
+      embedding: hanging,
+      spec: DEFAULT_EMBEDDING_SPEC,
+      campaignId: "c1",
+      queryEnglish: "anything",
+      limit: 3,
+      deadline: ALREADY_PAST,
     });
 
     expect(lines).toEqual([]);
