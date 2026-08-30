@@ -1056,7 +1056,8 @@ combat with a UI that can still send them.
    pgvector behind the same two-implementations-one-conformance-suite shape
    the event log uses, retrieved on scene entry, and delivered to the
    narrator through one English memory block that step 6's authored NPC
-   facts share. **Designed 2026-08-30; not yet implemented.**
+   facts share. **Designed 2026-08-30; implemented, not yet merged to
+   `main`.**
    [`docs/superpowers/specs/2026-08-30-episodic-memory-design.md`](docs/superpowers/specs/2026-08-30-episodic-memory-design.md),
    plan at
    [`docs/superpowers/plans/2026-08-30-episodic-memory.md`](docs/superpowers/plans/2026-08-30-episodic-memory.md).
