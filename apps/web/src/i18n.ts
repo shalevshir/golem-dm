@@ -38,6 +38,7 @@ export const he = {
     free_text_not_supported: "טקסט חופשי אינו נתמך עדיין.",
     not_your_turn: "זה לא תורך.",
     internal_error: "שגיאת שרת.",
+    catalogue_fetch_failed: "טעינת נתוני הקרב נכשלה.",
   },
   rejections: {
     actor_cannot_act: "הדמות אינה יכולה לפעול.",

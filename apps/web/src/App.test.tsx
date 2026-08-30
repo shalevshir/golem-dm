@@ -1214,4 +1214,52 @@ describe("App (?world= query param)", () => {
       expect(screen.queryByPlaceholderText(he.freeText.placeholder)).not.toBeInTheDocument();
     });
   });
+
+  it("keeps the stored campaign id when a bridged fight concludes, since there is a scene to return to", async () => {
+    // Regression for the critical whole-branch review finding: the old
+    // effect wiped storage on ANY encounter conclusion, which was correct
+    // back when every campaign was combat-only but is wrong here — a scene
+    // campaign's fight resolving (win OR lose) returns to narration, it does
+    // not end the campaign. Defeat is used below since it is the simpler
+    // bracket to construct from the existing fixtures; the guard does not
+    // distinguish win from loss, only whether a scene exists to return to.
+    await start();
+
+    act(() => {
+      socket.emitMessage({ type: "campaign_state", sequence: 0, snapshot: sceneSnapshot() });
+    });
+    expect(await screen.findByPlaceholderText(he.freeText.placeholder)).toBeInTheDocument();
+
+    act(() => {
+      socket.emitMessage({
+        type: "campaign_state",
+        sequence: 1,
+        snapshot: { ...sceneSnapshot(), encounter: bracketOpen() },
+      });
+    });
+    await waitFor(() => {
+      expect(screen.queryByPlaceholderText(he.freeText.placeholder)).not.toBeInTheDocument();
+    });
+
+    act(() => {
+      socket.emitMessage({
+        type: "campaign_state",
+        sequence: 2,
+        snapshot: {
+          ...sceneSnapshot(),
+          encounter: {
+            ...bracketOpen(),
+            combatants: [
+              combatant("hero", "party", "dead"),
+              combatant("goblin-a", "hostile", "alive"),
+            ],
+          },
+        },
+      });
+    });
+
+    expect(await screen.findByText(he.app.defeat)).toBeInTheDocument();
+    expect(sessionStorage.getItem(CAMPAIGN_STORAGE_KEY)).toBe("s1");
+    expect(sessionStorage.getItem(LOG_STORAGE_KEY)).not.toBeNull();
+  });
 });

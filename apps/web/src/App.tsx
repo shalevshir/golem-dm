@@ -249,8 +249,26 @@ export function App(props: AppProps): JSX.Element {
     // ref sidesteps that narrowing entirely.
     const cancelled = { current: false };
     void (async () => {
-      const fetched = await fetchCatalogue(openEncounterId);
-      if (!cancelled.current) setCatalogue(fetched);
+      try {
+        const fetched = await fetchCatalogue(openEncounterId);
+        if (!cancelled.current) setCatalogue(fetched);
+      } catch (error) {
+        // Without this, a failed fetch leaves `catalogue` null forever: the
+        // board never renders (the `catalogue === null` branch below just
+        // repeats the "not ready" placeholder) and nothing tells the player
+        // why. Routed through the same `lastError`/`ErrorBanner` mechanism
+        // every other error in this file uses — that placeholder already
+        // renders `ErrorBanner`, so surfacing it here needs nothing new.
+        if (!cancelled.current) {
+          setState((previous) => ({
+            ...previous,
+            lastError: {
+              code: "catalogue_fetch_failed",
+              message: error instanceof Error ? error.message : String(error),
+            },
+          }));
+        }
+      }
     })();
     return () => {
       cancelled.current = true;
@@ -322,10 +340,19 @@ export function App(props: AppProps): JSX.Element {
   // with no path back to the start screen short of clearing storage by
   // hand. The live view still shows the victory/defeat screen normally;
   // this only affects what a subsequent mount reads.
+  //
+  // Only for a genuinely combat-only campaign, though: since §4.7 step 5 a
+  // bridged fight can conclude (win OR lose) and return to narration at the
+  // same scene node, so "an encounter concluded" no longer implies "the
+  // campaign is over". `state.snapshot.world.scene !== null` is the client
+  // side of the same predicate `resolveIfConcluded` gates on server-side
+  // (`campaign.sceneStatics === null`) — a scene campaign always has
+  // somewhere to go back to, so its storage must survive here.
   useEffect(() => {
     const encounter = state.snapshot?.encounter ?? null;
     if (encounter === null) return;
     if (conclusionOf(encounter) === "ongoing") return;
+    if (state.snapshot?.world.scene !== null) return;
     sessionStorage.removeItem(CAMPAIGN_STORAGE_KEY);
     clearStoredClientState();
   }, [state.snapshot]);
