@@ -90,7 +90,7 @@ export const NpcDefinition = z.object({
 
 /**
  * A gate over world state, checked when entering a quest node. Two kinds,
- * because two is what a five-node arc needs; a third is a one-line addition
+ * because two is what a six-node arc needs; a third is a one-line addition
  * when a node needs a gate the arc's own history cannot express.
  */
 export const WorldPredicate = z.discriminatedUnion("kind", [

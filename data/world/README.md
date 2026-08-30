@@ -29,9 +29,10 @@ and a duplicated one, so there is no default to remember.
 
 ## The world is deliberately too small to be good
 
-One town, two factions, three NPCs, a five-node arc. §4.7: "enough to prove the
-pipeline, not to be good." `packages/schemas/src/world-content.test.ts` asserts
-those counts, so growing the world is a deliberate act that edits that test.
+One town, two factions, three NPCs, a six-node arc (five until §4.7 step 5 added
+`saboteurs`). §4.7: "enough to prove the pipeline, not to be good."
+`packages/schemas/src/world-content.test.ts` asserts those counts, so growing
+the world is a deliberate act that edits that test.
 
 ## `fixtures/` is broken on purpose
 

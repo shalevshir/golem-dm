@@ -2803,9 +2803,15 @@ describe("handleCommand — end of combat", () => {
     expect(campaign.state.encounter).toBeNull();
     expect(campaign.built).toBeNull();
     expect(campaign.state.world.scene?.completedNodeIds).toContain("saboteurs");
-    // `saboteurs` declares no effects, so there is no delta to record. A
-    // `world_delta_applied` here would mean the pipeline invented one.
-    expect(eventTypesOf(frames)).not.toContain("world_delta_applied");
+    // `saboteurs` declares an `advance_calendar` effect (days: 1), so victory
+    // must also record the day it actually advanced — the exit criterion's
+    // "and its effects apply" clause, exercised end to end.
+    const deltaEvent = frames
+      .filter((each): each is Extract<ServerFrame, { type: "event" }> => each.type === "event")
+      .map((each) => each.event)
+      .find((each) => each.type === "world_delta_applied");
+    expect(deltaEvent?.payload).toEqual({ relations: [], day: 2 });
+    expect(campaign.state.world.scene?.day).toBe(2);
   });
 
   it("resolves with defeat and leaves the node uncompleted", async () => {

@@ -97,7 +97,7 @@ describe("QuestNode", () => {
 });
 
 describe("WorldPredicate and WorldEffect", () => {
-  it("accepts the two predicate kinds a five-node arc needs", () => {
+  it("accepts the two predicate kinds a six-node arc needs", () => {
     expect(
       WorldPredicate.safeParse({ kind: "node_completed", nodeId: "arrival" }).success,
     ).toBe(true);

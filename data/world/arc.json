@@ -49,6 +49,7 @@
     "locationId": "emberfall",
     "encounterId": "goblin-ambush",
     "preconditions": [{ "kind": "node_completed", "nodeId": "the-weir" }],
+    "effects": [{ "kind": "advance_calendar", "days": 1 }],
     "edges": [{ "to": "reckoning", "labelEnglish": "Bring what you found to the inn" }]
   },
   {

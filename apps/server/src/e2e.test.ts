@@ -898,6 +898,10 @@ describe("end to end", () => {
     if (reloaded === null) throw new Error(`Campaign ${campaignId} disappeared from the store`);
     expect(reloaded.state.world.scene?.completedNodeIds).toContain("saboteurs");
     expect(reloaded.state.world.scene?.currentNodeId).toBe("reckoning");
+    expect(reloaded.state.world.scene?.day).toBe(2);
+    expect(reloaded.state.world.scene?.relations).toEqual([
+      { factionA: "ashen-guild", factionB: "river-wardens", band: "hostile" },
+    ]);
     expect(reloaded.state.encounter).toBeNull();
     expect(fold(clientState, eventFrames(log.frames))).toEqual(reloaded.state);
 
