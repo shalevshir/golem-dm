@@ -887,6 +887,22 @@ describe("end to end", () => {
       "the walk onward to reckoning after the bracket closes",
     );
 
+    // `emitAll` (ws.ts, ~line 161-162) appends to the store before it yields
+    // frames to the socket, so polling the store via `waitForProjection` (as
+    // every step of this walk does above) can race ahead of `log`'s own
+    // frame delivery — the store already reflecting `reckoning` does not
+    // mean this socket has received the frame that proves it yet. Waiting on
+    // the frame log itself for the anchor that closes the walk (the same
+    // `log.waitFor` idiom the reconnect test above this one uses) removes
+    // that race before the fold comparison below reads `log.frames`.
+    await log.waitFor(
+      (frames) =>
+        eventFrames(frames).some(
+          (event) => event.type === "quest_node_entered" && event.payload["nodeId"] === "reckoning",
+        ),
+      "the quest_node_entered frame for reckoning, closing the walk",
+    );
+
     // The exit criterion's last clause, proven against the LIVE server
     // projection, not against another cold fold of the same log: the first
     // client's own join snapshot, folded with every event frame this one
