@@ -37,6 +37,7 @@ import { CheckRolledPayload, DiceRolledPayload, NarrativeEmittedPayload } from "
 import type {
   AbilityKey,
   ClientMessage,
+  Combatant,
   ExecuteTurn,
   GameEvent,
   IntentClassification,
@@ -2743,5 +2744,137 @@ describe("handleCommand — free text: the combat bridge", () => {
     expect(eventTypesOf(frames)).not.toContain("encounter_started");
     expect(campaign.state.encounter).toBeNull();
     expect(campaign.built).toBeNull();
+  });
+});
+
+describe("handleCommand — end of combat", () => {
+  /** A campaign standing in `saboteurs` with its bracket open. */
+  async function bridgedCampaign(store: EventStore): Promise<Campaign> {
+    const campaign = await sceneCampaign(store, {
+      currentNodeId: "the-weir",
+      completedNodeIds: ["arrival"],
+      relations: [],
+      day: 1,
+    });
+    await drain(
+      handleCommand(
+        campaign,
+        { type: "free_text", clientMessageId: "open", text: "search the forced gate" },
+        {
+          ...portsWith(store),
+          intent: classifiedAs({ category: "exploration", targetNodeId: "saboteurs" }),
+          sceneNarrative: scriptedSceneNarrative([]),
+        },
+      ),
+    );
+    return campaign;
+  }
+
+  /** Rewrites the open board in place — the poser for each outcome below. */
+  function poseBoard(campaign: Campaign, patch: (each: Combatant) => Combatant, round = 1): void {
+    const encounter = campaign.state.encounter;
+    if (encounter === null) throw new Error("poseBoard: no bracket open");
+    campaign.state = {
+      ...campaign.state,
+      encounter: { ...encounter, combatants: encounter.combatants.map(patch), round },
+    };
+  }
+
+  const slain = (each: Combatant): Combatant =>
+    each.faction === "hostile" ? { ...each, status: "dead", currentHp: 0 } : each;
+
+  it("resolves with victory, completes the node and applies its effects", async () => {
+    const store = createInMemoryEventStore();
+    const campaign = await bridgedCampaign(store);
+    poseBoard(campaign, slain);
+
+    const frames = await drain(handleCommand(campaign, dodge("hero", "c-win"), portsWith(store)));
+
+    expect(eventTypesOf(frames)).toContain("encounter_resolved");
+    const resolved = frames
+      .filter((each): each is Extract<ServerFrame, { type: "event" }> => each.type === "event")
+      .map((each) => each.event)
+      .find((each) => each.type === "encounter_resolved");
+    expect(resolved?.payload).toMatchObject({
+      encounterId: "goblin-ambush",
+      outcome: "victory",
+      survivorIds: ["hero"],
+    });
+    expect(campaign.state.encounter).toBeNull();
+    expect(campaign.built).toBeNull();
+    expect(campaign.state.world.scene?.completedNodeIds).toContain("saboteurs");
+    // `saboteurs` declares no effects, so there is no delta to record. A
+    // `world_delta_applied` here would mean the pipeline invented one.
+    expect(eventTypesOf(frames)).not.toContain("world_delta_applied");
+  });
+
+  it("resolves with defeat and leaves the node uncompleted", async () => {
+    const store = createInMemoryEventStore();
+    const campaign = await bridgedCampaign(store);
+    // The hero is about to be killed on the goblins' turn: 1 HP behind AC 1,
+    // so any attack roll hits and any damage is lethal — no reliance on the
+    // seed. `agentProposing` supplies the attack; `defaultTactical` would
+    // only dodge.
+    poseBoard(campaign, (each) =>
+      each.faction === "party" ? { ...each, currentHp: 1, maxHp: 1, armorClass: 1 } : each,
+    );
+
+    const frames = await drain(
+      handleCommand(
+        campaign,
+        dodge("hero", "c-lose"),
+        portsWith(
+          store,
+          agentProposing([
+            {
+              actorId: "goblin-a",
+              mainAction: { actionType: "attack", actionId: "scimitar", targetIds: ["hero"] },
+              tacticalRationaleEnglish: "Test fixture: finish the hero.",
+            },
+          ]),
+        ),
+      ),
+    );
+
+    const resolved = frames
+      .filter((each): each is Extract<ServerFrame, { type: "event" }> => each.type === "event")
+      .map((each) => each.event)
+      .find((each) => each.type === "encounter_resolved");
+    expect(resolved?.payload).toMatchObject({ outcome: "defeat" });
+    expect(campaign.state.encounter).toBeNull();
+    expect(campaign.state.world.scene?.completedNodeIds).not.toContain("saboteurs");
+    expect(campaign.state.world.scene?.currentNodeId).toBe("saboteurs");
+    expect(eventTypesOf(frames)).not.toContain("quest_node_completed");
+  });
+
+  it("resolves a stalemate once the round passes maxRounds", async () => {
+    const store = createInMemoryEventStore();
+    const campaign = await bridgedCampaign(store);
+    // Everyone alive, so `conclusionOf` stays "ongoing"; only the round is
+    // past `goblin-ambush`'s maxRounds of 20.
+    poseBoard(campaign, (each) => each, 21);
+
+    const frames = await drain(handleCommand(campaign, dodge("hero", "c-draw"), portsWith(store)));
+
+    const resolved = frames
+      .filter((each): each is Extract<ServerFrame, { type: "event" }> => each.type === "event")
+      .map((each) => each.event)
+      .find((each) => each.type === "encounter_resolved");
+    expect(resolved?.payload).toMatchObject({ outcome: "stalemate" });
+    expect(campaign.state.world.scene?.completedNodeIds).not.toContain("saboteurs");
+  });
+
+  it("emits nothing for a combat-only campaign whose fight ends", async () => {
+    const store = createInMemoryEventStore();
+    const campaign = await freshCampaign(store);
+    poseBoard(campaign, slain);
+
+    const frames = await drain(handleCommand(campaign, dodge("hero", "c-solo"), portsWith(store)));
+
+    // Decision 7: the fight IS the campaign, so the bracket stays open and
+    // the client keeps reading victory off `conclusionOf` as it does today.
+    expect(eventTypesOf(frames)).not.toContain("encounter_resolved");
+    expect(campaign.state.encounter).not.toBeNull();
+    expect(campaign.built).not.toBeNull();
   });
 });

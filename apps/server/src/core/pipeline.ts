@@ -56,7 +56,7 @@ import {
   CampaignMismatchError,
 } from "@ai-dm/memory";
 import type { EventStore } from "@ai-dm/memory";
-import { CheckRolledPayload, IntentClassifiedPayload, reduce } from "@ai-dm/schemas";
+import { CheckRolledPayload, conclusionOf, IntentClassifiedPayload, reduce } from "@ai-dm/schemas";
 import type {
   AbilityKey,
   CampaignState,
@@ -974,12 +974,9 @@ export async function* handleCommand(
         continue;
       }
 
-      const livingFactions = new Set(
-        encounterOf(campaign)
-          .combatants.filter((each) => each.status === "alive")
-          .map((each) => each.faction),
-      );
-      if (livingFactions.size < 2) return;
+      // The same rule `conclusionOf` states, read from the one definition
+      // rather than spelled a second way here (spec Decision 3).
+      if (conclusionOf(encounterOf(campaign)) !== "ongoing") return;
 
       yield* enemyTurn(actorId);
     }
@@ -1032,6 +1029,104 @@ export async function* handleCommand(
       type: "turn_affordances",
       forSequence: campaign.nextSequence - 1,
     };
+  }
+
+  /**
+   * Ends the fight if it is over, and turns a won one back into scene
+   * progress (spec Decisions 4, 5 and 7).
+   *
+   * Two terminators. `conclusionOf` answers "one faction left standing", the
+   * rule the client has always read the board with. `maxRounds` answers the
+   * one the bridge itself creates: before step 5 an unresolvable fight was a
+   * stuck board on a combat-only campaign, visible and recoverable by
+   * reload; now the same stalemate strands a campaign outside its own
+   * narrative permanently, because `free_text`'s Guard 2 refuses input for as
+   * long as the bracket stays open. The number is already authored and
+   * already built — only the comparison was missing.
+   *
+   * Silent when the campaign has no scene to return to. For a combat-only
+   * campaign the fight IS the campaign, and closing its bracket would null
+   * `state.encounter` with `scene` already null — a projection in neither
+   * combat nor a scene, which `apps/web` can only render as its "not ready"
+   * placeholder. Winning would blank the screen. So those campaigns end
+   * exactly as they do today: no event, board still projected, and the client
+   * reads victory or defeat off `conclusionOf` itself.
+   */
+  async function* resolveIfConcluded(): AsyncIterable<ServerFrame> {
+    const encounter = campaign.state.encounter;
+    if (encounter === null) return;
+    if (campaign.sceneStatics === null) return;
+
+    const conclusion = conclusionOf(encounter);
+    const outcome =
+      conclusion !== "ongoing"
+        ? conclusion
+        : encounter.round > builtOf(campaign).maxRounds
+          ? "stalemate"
+          : null;
+    if (outcome === null) return;
+
+    const events: { type: GameEvent["type"]; payload: Record<string, unknown> }[] = [
+      {
+        type: "encounter_resolved",
+        payload: {
+          encounterId: encounter.encounterId,
+          outcome,
+          survivorIds: encounter.combatants
+            .filter((each) => each.status === "alive")
+            .map((each) => each.combatantId),
+        },
+      },
+    ];
+
+    // Only a won fight advances the arc. Defeat and stalemate close the
+    // bracket and change nothing else, so the player lands back in the scene
+    // at the same node and can re-enter — which rebuilds a fresh board from
+    // the catalogue. Known ceiling, recorded in the spec: a defeated solo PC
+    // narratively walking it off is wrong, and permadeath wants its own
+    // decision rather than a subsystem smuggled into this step.
+    if (outcome === "victory") {
+      const statics = sceneStaticsOf(campaign);
+      const before = sceneStateFrom(currentScene());
+      const transition = completeCurrentNode(statics.authored, before);
+      // Invalid means the node's own entry gate no longer holds, which cannot
+      // happen for a node already entered — `completeCurrentNode` short-
+      // circuits on an already-completed node and this one is not yet
+      // completed. Throw rather than silently skip: a false here means the
+      // authored world and the log disagree, the same corrupt-content posture
+      // `currentScene` and `sceneStaticsOf` take.
+      if (!transition.valid) {
+        throw new Error(
+          `Campaign ${campaign.state.world.campaignId} cannot complete encounter node ` +
+            `${before.currentNodeId}: ${transition.rejections.map((each) => each.message).join("; ")}`,
+        );
+      }
+      events.push({
+        type: "quest_node_completed",
+        payload: { nodeId: before.currentNodeId },
+      });
+      // Diffed off the engine's own pre/post states, never re-read from the
+      // node's declared effects — the same rule the exploration branch
+      // follows, so the payload records what the engine actually did,
+      // post-clamp, and cannot disagree with it.
+      const delta = diffScene(before, transition.state);
+      if (delta.relations.length > 0 || delta.day !== undefined) {
+        events.push({
+          type: "world_delta_applied",
+          payload: {
+            relations: delta.relations,
+            ...(delta.day === undefined ? {} : { day: delta.day }),
+          },
+        });
+      }
+    }
+
+    yield* emitAll(events);
+    // `emitAll` moves `campaign.state` and never `built`. Clearing it here
+    // keeps both halves of the bracket written in one place, which is what
+    // `Campaign.built`'s doc comment actually asks for — rather than leaving
+    // `builtOf`'s guard to catch the desync one read later.
+    campaign.built = null;
   }
 
   try {
@@ -1628,6 +1723,7 @@ export async function* handleCommand(
         yield* narrate(command.actorId, effect, Date.now() + ports.turnTimeoutMs);
         yield* emit("scene_changed", { kind: "turn_advanced" });
         yield* runEnemyTurns();
+        yield* resolveIfConcluded();
         yield* playerAffordances();
         return;
       }
