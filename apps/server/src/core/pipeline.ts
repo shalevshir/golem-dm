@@ -894,6 +894,15 @@ export async function* handleCommand(
     const nodeId = currentScene().currentNodeId;
     if (campaign.memoriesForNodeId !== nodeId) {
       const retrieveStartedAt = ports.clock();
+      // Latched only on success: a transient failure (a timeout, a
+      // rate-limited provider, a store hiccup) must not freeze an empty
+      // result in the cache for the rest of the node visit — the whole
+      // point of keying the cache to the node is to pay once, not to pay
+      // once and then never again try (code review finding). A property on
+      // a holder object, not a bare `let`, so the `if` below reads the
+      // real post-`onFailure` value rather than TypeScript's control-flow
+      // narrowing of a captured primitive back to its pre-call literal.
+      const retrieval = { failed: false };
       campaign.recentMemories = await retrieveMemories({
         store: ports.episodic,
         embedding: ports.embedding,
@@ -918,6 +927,7 @@ export async function* handleCommand(
           });
         },
         onFailure: (code) => {
+          retrieval.failed = true;
           ports.metrics?.recordEmbeddingCall?.({
             outcome: code,
             purpose: "retrieve",
@@ -928,7 +938,9 @@ export async function* handleCommand(
           });
         },
       });
-      campaign.memoriesForNodeId = nodeId;
+      if (!retrieval.failed) {
+        campaign.memoriesForNodeId = nodeId;
+      }
     }
 
     // `affinityOf` reads the engine's `SceneState`, not the wire
@@ -1261,6 +1273,14 @@ export async function* handleCommand(
     // the catalogue. Known ceiling, recorded in the spec: a defeated solo PC
     // narratively walking it off is wrong, and permadeath wants its own
     // decision rather than a subsystem smuggled into this step.
+    //
+    // Set only on a won fight, and read after `emitAll` below to index the
+    // node's own "quest_node" episode — a node completed by combat is
+    // otherwise never summarized or indexed at all, unlike one completed
+    // through exploration, and its combat-resolved history becomes silently
+    // unretrievable (code review finding).
+    let completedNode: { nodeId: string; summaryEnglish: string } | null = null;
+
     if (outcome === "victory") {
       const statics = sceneStaticsOf(campaign);
       const before = sceneStateFrom(currentScene());
@@ -1277,15 +1297,41 @@ export async function* handleCommand(
             `${before.currentNodeId}: ${transition.rejections.map((each) => each.message).join("; ")}`,
         );
       }
-      events.push({
-        type: "quest_node_completed",
-        payload: { nodeId: before.currentNodeId },
-      });
       // Diffed off the engine's own pre/post states, never re-read from the
       // node's declared effects — the same rule the exploration branch
       // follows, so the payload records what the engine actually did,
       // post-clamp, and cannot disagree with it.
       const delta = diffScene(before, transition.state);
+
+      // Closes the "quest_node" episode for the node this victory completed
+      // — the same summarize-and-index treatment the exploration path's own
+      // node completion gets, so a node finished by combat is exactly as
+      // retrievable later as one finished by talking.
+      const nodeSummaryEnglish = await summarizeEpisode({
+        summary: ports.summary,
+        input: {
+          kind: "quest_node",
+          contextEnglish: questNodeCard(statics.authored, before.currentNodeId).sceneEnglish,
+          factsEnglish: [
+            `Node completed: ${before.currentNodeId}.`,
+            ...delta.npcAffinities.map(
+              (entry) => `${entry.npcId} now regards the player as ${entry.band}.`,
+            ),
+            ...delta.relations.map(
+              (entry) => `${entry.factionA} and ${entry.factionB} now stand at ${entry.band}.`,
+            ),
+          ],
+          recentNarrations: campaign.recentNarrations,
+        },
+        // Same closing-stage budget the encounter's own `summaryEnglish`
+        // was computed under, above.
+        deadline,
+      });
+
+      events.push({
+        type: "quest_node_completed",
+        payload: { nodeId: before.currentNodeId, summaryEnglish: nodeSummaryEnglish },
+      });
       if (delta.relations.length > 0 || delta.npcAffinities.length > 0 || delta.day !== undefined) {
         events.push({
           type: "world_delta_applied",
@@ -1296,6 +1342,8 @@ export async function* handleCommand(
           },
         });
       }
+
+      completedNode = { nodeId: before.currentNodeId, summaryEnglish: nodeSummaryEnglish };
     }
 
     // `emitAll` (unlike `emit`) yields no return value either, and
@@ -1358,6 +1406,47 @@ export async function* handleCommand(
         });
       },
     });
+
+    // `quest_node_completed` is always `events[1]` in the victory branch —
+    // right after `encounter_resolved` — the same one-read-before-the-append
+    // rule `resolvedSequence` itself relies on.
+    if (completedNode !== null) {
+      const nodeIndexStartedAt = ports.clock();
+      void indexEpisode({
+        store: ports.episodic,
+        embedding: ports.embedding,
+        spec: DEFAULT_EMBEDDING_SPEC,
+        record: {
+          campaignId: campaign.state.world.campaignId,
+          sequence: resolvedSequence + 1,
+          kind: "quest_node",
+          refId: completedNode.nodeId,
+          summaryEnglish: completedNode.summaryEnglish,
+          day: currentScene().day,
+        },
+        deadline,
+        onUsage: (usage) => {
+          ports.metrics?.recordEmbeddingCall?.({
+            outcome: "ok",
+            purpose: "index",
+            latencyMs: Date.parse(ports.clock()) - Date.parse(nodeIndexStartedAt),
+            promptTokens: usage.promptTokens,
+            completionTokens: usage.completionTokens,
+            totalTokens: usage.totalTokens,
+          });
+        },
+        onFailure: (code) => {
+          ports.metrics?.recordEmbeddingCall?.({
+            outcome: code,
+            purpose: "index",
+            latencyMs: Date.parse(ports.clock()) - Date.parse(nodeIndexStartedAt),
+            promptTokens: 0,
+            completionTokens: 0,
+            totalTokens: 0,
+          });
+        },
+      });
+    }
   }
 
   try {
@@ -1762,14 +1851,18 @@ export async function* handleCommand(
               deadline,
             );
 
-            // Indexed AFTER narration, not before: `indexEpisode` needs
-            // nothing from `sceneNarrate` (the summary it writes is already
-            // durable in the event log via `emitAll` above) and is
-            // explicitly best-effort, so there is no reason to make the
-            // player wait on it before their narration starts streaming
-            // (whole-branch review finding 1).
+            // Fire-and-forget, not `await`ed: `indexEpisode` needs nothing
+            // from `sceneNarrate` (the summary it writes is already durable
+            // in the event log via `emitAll` above), and is explicitly
+            // best-effort. Narration has already streamed by this point, but
+            // `handleCommand`'s generator is drained under the campaign lock
+            // (`transport/ws.ts`) until it returns — an `await` here would
+            // still hold that lock, and therefore the player's NEXT command,
+            // for as long as the embed+write call takes. `void` releases it
+            // immediately, matching the encounter-resolution site's identical
+            // reasoning (whole-branch review finding 1, code review finding).
             const indexStartedAt = ports.clock();
-            await indexEpisode({
+            void indexEpisode({
               store: ports.episodic,
               embedding: ports.embedding,
               spec: DEFAULT_EMBEDDING_SPEC,

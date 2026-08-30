@@ -97,6 +97,12 @@ export async function indexEpisode(args: {
    */
   onFailure?: (code: string) => void;
 }): Promise<void> {
+  // Embedding and writing are two distinct failure sources, reported as two
+  // distinct codes: an operator reading `onFailure` needs to tell a broken
+  // embedding provider apart from a broken store, and a single `try` spanning
+  // both calls could only ever report the first (whole-branch review finding
+  // — a store failure was being mislabeled `"embed_failed"`).
+  let vector: number[];
   try {
     const result = await raceDeadline(
       args.embedding.embed(args.spec, [args.record.summaryEnglish]),
@@ -112,16 +118,22 @@ export async function indexEpisode(args: {
     }
     args.onUsage?.(result.value.usage);
 
-    const vector = result.value.vectors[0];
-    if (vector === undefined) {
+    const embedded = result.value.vectors[0];
+    if (embedded === undefined) {
       args.onFailure?.("no_vector");
       return;
     }
-
-    await args.store.write(args.record, vector);
+    vector = embedded;
   } catch {
     // Swallowed deliberately — see the doc comment above.
     args.onFailure?.("embed_failed");
+    return;
+  }
+
+  try {
+    await args.store.write(args.record, vector);
+  } catch {
+    args.onFailure?.("store_failed");
   }
 }
 
@@ -143,6 +155,9 @@ export async function retrieveMemories(args: {
   /** Same contract as `indexEpisode`'s `onFailure` — see its doc comment. */
   onFailure?: (code: string) => void;
 }): Promise<string[]> {
+  // See `indexEpisode`'s matching comment: embed and search are reported as
+  // distinct failure sources, not folded into one "embed_failed" for both.
+  let vector: number[];
   try {
     const result = await raceDeadline(args.embedding.embed(args.spec, [args.queryEnglish]), args.deadline);
     if (result === DEADLINE_TIMEOUT) {
@@ -155,16 +170,22 @@ export async function retrieveMemories(args: {
     }
     args.onUsage?.(result.value.usage);
 
-    const vector = result.value.vectors[0];
-    if (vector === undefined) {
+    const embedded = result.value.vectors[0];
+    if (embedded === undefined) {
       args.onFailure?.("no_vector");
       return [];
     }
+    vector = embedded;
+  } catch {
+    args.onFailure?.("embed_failed");
+    return [];
+  }
 
+  try {
     const hits = await args.store.search(args.campaignId, vector, args.limit);
     return hits.map((hit) => hit.memory.summaryEnglish);
   } catch {
-    args.onFailure?.("embed_failed");
+    args.onFailure?.("store_failed");
     return [];
   }
 }

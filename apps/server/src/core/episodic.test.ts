@@ -205,6 +205,39 @@ describe("indexEpisode", () => {
 
     expect(await store.search("c1", [1, 0, 0], 3)).toEqual([]);
   });
+
+  // Code review finding: a `store.write` throw used to be caught by the
+  // same generic handler as an embedding failure, reporting "embed_failed"
+  // regardless of which call actually failed — misdirecting anyone
+  // debugging a store outage toward the wrong subsystem.
+  it("reports a store write failure as \"store_failed\", distinct from an embedding failure", async () => {
+    const embedding = createFakeEmbeddingPort();
+    const failingStore = {
+      write: () => Promise.reject(new Error("connection refused")),
+      search: () => Promise.resolve([]),
+    };
+    let reported: string | undefined;
+
+    await indexEpisode({
+      store: failingStore,
+      embedding,
+      spec: DEFAULT_EMBEDDING_SPEC,
+      record: {
+        campaignId: "c1",
+        sequence: 4,
+        kind: "quest_node" as const,
+        refId: "weir",
+        summaryEnglish: "Tobin opened the gate.",
+        day: 2,
+      },
+      deadline: FAR_FUTURE,
+      onFailure: (code) => {
+        reported = code;
+      },
+    });
+
+    expect(reported).toBe("store_failed");
+  });
 });
 
 describe("retrieveMemories", () => {
@@ -297,6 +330,33 @@ describe("retrieveMemories", () => {
     });
 
     expect(lines).toEqual([]);
+  });
+
+  // Code review finding: same conflation as `indexEpisode`'s — a
+  // `store.search` throw used to be reported as "embed_failed".
+  it("reports a store search failure as \"store_failed\", distinct from an embedding failure", async () => {
+    const embedding = createFakeEmbeddingPort();
+    const failingStore = {
+      write: () => Promise.resolve(),
+      search: () => Promise.reject(new Error("connection refused")),
+    };
+    let reported: string | undefined;
+
+    const lines = await retrieveMemories({
+      store: failingStore,
+      embedding,
+      spec: DEFAULT_EMBEDDING_SPEC,
+      campaignId: "c1",
+      queryEnglish: "anything",
+      limit: 3,
+      deadline: FAR_FUTURE,
+      onFailure: (code) => {
+        reported = code;
+      },
+    });
+
+    expect(lines).toEqual([]);
+    expect(reported).toBe("store_failed");
   });
 });
 
