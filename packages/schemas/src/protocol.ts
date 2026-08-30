@@ -41,6 +41,12 @@ export const SceneSnapshot = z.object({
    *  a single hardcoded default covers every NPC nobody has touched yet. */
   npcAffinities: z.array(NpcAffinityEntry).default([]),
   day: z.number().int().min(1),
+  /**
+   * The hero's current HP. Never their maximum — that is re-derived from
+   * the loaded `CharacterSheet` every time it is needed, exactly like every
+   * other derived stat, and is never stored a second time here.
+   */
+  heroHp: z.number().int().min(0),
 });
 
 export type SceneSnapshot = z.infer<typeof SceneSnapshot>;
@@ -79,8 +85,19 @@ export type WorldState = z.infer<typeof WorldState>;
  * `.refine` guarantees the other three quartet fields are present whenever it
  * is not, but each is still narrowed here rather than asserted — a payload
  * this function is handed may not have gone through that parse.
+ *
+ * `heroMaxHp` cannot be derived here — this function stays pure and cannot
+ * load a `CharacterSheet` — so the caller (`apps/server`'s
+ * `initialWorldState`, the one place a starting `WorldState` is built)
+ * resolves the character once and passes its `maxHp` in. It is present
+ * exactly when the quartet is: `heroMaxHp ?? 0` only ever falls back to `0`
+ * for a caller that (incorrectly) omits it, never for a genuine
+ * combat-only campaign, which returns `null` above instead.
  */
-export function sceneFromGenesis(payload: CampaignStartedPayload): SceneSnapshot | null {
+export function sceneFromGenesis(
+  payload: CampaignStartedPayload,
+  heroMaxHp: number | undefined,
+): SceneSnapshot | null {
   const { worldId, startingNodeId, startingDay, characterId } = payload;
   if (
     worldId === undefined ||
@@ -97,6 +114,7 @@ export function sceneFromGenesis(payload: CampaignStartedPayload): SceneSnapshot
     relations: [],
     npcAffinities: [],
     day: startingDay,
+    heroHp: heroMaxHp ?? 0,
   };
 }
 

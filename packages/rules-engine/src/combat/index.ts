@@ -52,13 +52,9 @@ export interface DamageOptions {
   /**
    * SRD 5.2.1 (Instant Death): a monster dies the instant it drops to 0 Hit
    * Points, whereas a character falls Unconscious and rolls death saves. Pass
-   * true for monsters. A `Combatant` without a `characterId` is a monster.
-   *
-   * The sole production caller, `encounter/` `resolve.ts`, pins this `true`
-   * unconditionally instead — death saves are implemented (`rollDeathSave`)
-   * but nothing yet drives them from the encounter pipeline, so letting a
-   * player character fall Unconscious here would strand it with no way to
-   * resolve that state. Tracked as a known gap; see RULES_REFERENCE.md §8.
+   * true for monsters. A `Combatant` without a `characterId` is a monster —
+   * the sole production caller, `encounter/` `resolve.ts`, reads this off
+   * `characterId`'s presence rather than pinning it.
    */
   diesAtZeroHp?: boolean;
 }

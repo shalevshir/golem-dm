@@ -142,6 +142,8 @@ function effectRefs(effect: WorldEffect): readonly ContentRef[] {
       return [{ kind: "npc", id: effect.npcId }];
     case "add_npc_fact":
       return [{ kind: "npc", id: effect.npcId }];
+    case "long_rest":
+      return [];
   }
 }
 

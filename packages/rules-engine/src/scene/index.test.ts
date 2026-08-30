@@ -28,6 +28,7 @@ function stateWith(relations: readonly (readonly [string, string, FactionBand])[
     relations: new Map(relations.map(([a, b, band]) => [pairKey(a, b), band])),
     npcAffinities: new Map(),
     day: 1,
+    heroHp: 10,
   };
 }
 
@@ -203,6 +204,59 @@ describe("completeCurrentNode", () => {
     expect(state.day).toBe(4); // end's advance_calendar of 1
   });
 
+  // A long rest restores the hero's HP to the injected maximum — the one
+  // fact `SceneState` itself never carries — and nothing else changes.
+  it("restores heroHp to the injected max on a long_rest effect", () => {
+    const world: AuthoredWorld = {
+      ...linearWorld(),
+      startingNodeId: "resting",
+      questNodes: new Map([
+        [
+          "resting",
+          {
+            nodeId: "resting",
+            titleEnglish: "A Long Rest",
+            sceneEnglish: "A fixture node that rests the hero.",
+            locationId: "here",
+            preconditions: [],
+            effects: [{ kind: "long_rest" }],
+            edges: [],
+          },
+        ],
+      ]),
+    };
+    const before = { ...stateOf(startScene(world)), heroHp: 3 };
+    const after = stateOf(completeCurrentNode(world, before, 28));
+    expect(after.heroHp).toBe(28);
+  });
+
+  // With no `heroMaxHp` injected, `long_rest` is a no-op rather than
+  // inventing a target HP — the same posture every other effect kind takes
+  // for an unreachable-in-practice edge (e.g. an unknown faction pair).
+  it("leaves heroHp unchanged when no heroMaxHp is injected", () => {
+    const world: AuthoredWorld = {
+      ...linearWorld(),
+      startingNodeId: "resting",
+      questNodes: new Map([
+        [
+          "resting",
+          {
+            nodeId: "resting",
+            titleEnglish: "A Long Rest",
+            sceneEnglish: "A fixture node that rests the hero.",
+            locationId: "here",
+            preconditions: [],
+            effects: [{ kind: "long_rest" }],
+            edges: [],
+          },
+        ],
+      ]),
+    };
+    const before = { ...stateOf(startScene(world)), heroHp: 3 };
+    const after = stateOf(completeCurrentNode(world, before));
+    expect(after.heroHp).toBe(3);
+  });
+
   // A node re-entered by a cycle must not pump its faction shift a second
   // time. The graph has no cycle today; the guard is what makes adding one
   // safe rather than silently wrong.
@@ -281,6 +335,7 @@ describe("completeCurrentNode", () => {
       relations: new Map(),
       npcAffinities: new Map(),
       day: 1,
+      heroHp: 10,
     };
     expect(partial.relations.get(pairKey("alpha", "beta"))).toBeUndefined();
     const after = stateOf(completeCurrentNode(world, partial));
@@ -338,6 +393,7 @@ describe("completeCurrentNode", () => {
       relations: world.relations,
       npcAffinities: new Map(),
       day: 1,
+      heroHp: 10,
     };
     const transition = completeCurrentNode(world, stranded);
     expect(transition.valid).toBe(false);
@@ -521,6 +577,7 @@ describe("evaluatePredicate", () => {
     relations: new Map([[pairKey("alpha", "beta"), "hostile"]]),
     npcAffinities: new Map(),
     day: 1,
+    heroHp: 10,
   };
 
   // The state is an overlay on the authored baseline, not the other way
@@ -757,6 +814,7 @@ describe("acting from a state whose current node does not exist", () => {
       relations: new Map(),
       npcAffinities: new Map(),
       day: 1,
+      heroHp: 10,
     };
   }
 

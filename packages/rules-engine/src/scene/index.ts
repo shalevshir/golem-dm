@@ -46,6 +46,10 @@ export interface SceneState {
   >;
   /** A bare counter. Advanced only by a declared `advance_calendar` effect. */
   readonly day: number;
+  /** The hero's current HP. Restored to their maximum only by a declared
+   *  `long_rest` effect — this module never learns their maximum itself
+   *  (see `applyEffect`'s injected `heroMaxHp`). */
+  readonly heroHp: number;
 }
 
 /**
@@ -241,8 +245,20 @@ function describePredicate(predicate: WorldPredicate): string {
  * It takes `world` because a shift starts from the band `relationBetween`
  * reports, which is the authored relation overlaid by the state rather than
  * the state alone.
+ *
+ * `heroMaxHp` is injected, the same way `buildEncounter` takes stat blocks
+ * injected rather than loaded: this module is pure and knows nothing about a
+ * specific character, so `long_rest` — the only case that needs it — is
+ * handed the one fact it cannot derive. Absent (a caller with no hero to
+ * rest, or one that has not resolved it) makes `long_rest` a no-op rather
+ * than inventing a target HP.
  */
-function applyEffect(world: AuthoredWorld, effect: WorldEffect, state: SceneState): SceneState {
+function applyEffect(
+  world: AuthoredWorld,
+  effect: WorldEffect,
+  state: SceneState,
+  heroMaxHp?: number,
+): SceneState {
   switch (effect.kind) {
     case "shift_faction_relation": {
       const current = relationBetween(world, state, effect.factionA, effect.factionB);
@@ -275,6 +291,8 @@ function applyEffect(world: AuthoredWorld, effect: WorldEffect, state: SceneStat
       npcAffinities.set(effect.npcId, { ...current, facts: [...current.facts, effect.fact] });
       return { ...state, npcAffinities };
     }
+    case "long_rest":
+      return heroMaxHp === undefined ? state : { ...state, heroHp: heroMaxHp };
   }
 }
 
@@ -283,14 +301,19 @@ function applyEffect(world: AuthoredWorld, effect: WorldEffect, state: SceneStat
  * applied — but only the first time, so a cycle cannot pump a faction shift
  * twice.
  */
-function completed(world: AuthoredWorld, node: QuestNode, state: SceneState): SceneState {
+function completed(
+  world: AuthoredWorld,
+  node: QuestNode,
+  state: SceneState,
+  heroMaxHp?: number,
+): SceneState {
   if (state.completedNodeIds.has(node.nodeId)) return state;
   const completedNodeIds = new Set(state.completedNodeIds);
   completedNodeIds.add(node.nodeId);
-  return node.effects.reduce<SceneState>((each, effect) => applyEffect(world, effect, each), {
-    ...state,
-    completedNodeIds,
-  });
+  return node.effects.reduce<SceneState>(
+    (each, effect) => applyEffect(world, effect, each, heroMaxHp),
+    { ...state, completedNodeIds },
+  );
 }
 
 /**
@@ -299,6 +322,10 @@ function completed(world: AuthoredWorld, node: QuestNode, state: SceneState): Sc
  *
  * Total rather than throwing on a missing start node, so `loadWorld` can call
  * it as a check rather than as a thing to catch.
+ *
+ * `heroHp: 0` is inert here — this is `loadWorld`'s enterability self-check,
+ * never the live genesis path (`sceneFromGenesis` + `apps/server`'s
+ * `initialWorldState`), and the self-check never applies an effect.
  */
 export function startScene(world: AuthoredWorld): SceneTransition {
   const state: SceneState = {
@@ -307,6 +334,7 @@ export function startScene(world: AuthoredWorld): SceneTransition {
     relations: world.relations,
     npcAffinities: new Map(),
     day: world.startingDay,
+    heroHp: 0,
   };
   const rejections = entryRejections(world, state, world.startingNodeId);
   if (rejections.length > 0) return { valid: false, rejections };
@@ -330,6 +358,8 @@ export function availableEdges(world: AuthoredWorld, state: SceneState): SceneOp
   if (current === undefined) {
     return { valid: false, rejections: [missingCurrentNode(state)] };
   }
+  // No `heroMaxHp`: this previews what leaving would look like without
+  // applying anything, so a `long_rest` effect never restores HP here.
   const after = completed(world, current, state);
   return {
     valid: true,
@@ -352,7 +382,12 @@ export function availableEdges(world: AuthoredWorld, state: SceneState): SceneOp
  * Nothing is committed when the target refuses: the returned rejections
  * describe a move that did not happen.
  */
-export function traverseEdge(world: AuthoredWorld, state: SceneState, to: string): SceneTransition {
+export function traverseEdge(
+  world: AuthoredWorld,
+  state: SceneState,
+  to: string,
+  heroMaxHp?: number,
+): SceneTransition {
   const current = world.questNodes.get(state.currentNodeId);
   if (current === undefined) {
     return { valid: false, rejections: [missingCurrentNode(state)] };
@@ -369,7 +404,7 @@ export function traverseEdge(world: AuthoredWorld, state: SceneState, to: string
       ],
     };
   }
-  const after = completed(world, current, state);
+  const after = completed(world, current, state, heroMaxHp);
   const rejections = entryRejections(world, after, to);
   if (rejections.length > 0) return { valid: false, rejections };
   return { valid: true, state: { ...after, currentNodeId: to } };
@@ -388,7 +423,11 @@ export function traverseEdge(world: AuthoredWorld, state: SceneState, to: string
  *
  * Idempotent, through the same first-completion guard as traversal.
  */
-export function completeCurrentNode(world: AuthoredWorld, state: SceneState): SceneTransition {
+export function completeCurrentNode(
+  world: AuthoredWorld,
+  state: SceneState,
+  heroMaxHp?: number,
+): SceneTransition {
   const current = world.questNodes.get(state.currentNodeId);
   if (current === undefined) {
     return { valid: false, rejections: [missingCurrentNode(state)] };
@@ -401,5 +440,5 @@ export function completeCurrentNode(world: AuthoredWorld, state: SceneState): Sc
   if (state.completedNodeIds.has(current.nodeId)) return { valid: true, state };
   const rejections = entryRejections(world, state, state.currentNodeId);
   if (rejections.length > 0) return { valid: false, rejections };
-  return { valid: true, state: completed(world, current, state) };
+  return { valid: true, state: completed(world, current, state, heroMaxHp) };
 }

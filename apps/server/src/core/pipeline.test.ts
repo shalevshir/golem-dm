@@ -829,6 +829,7 @@ describe("handleCommand — free text", () => {
       relations: [],
       npcAffinities: [],
       day: 1,
+      heroHp: 28,
     };
     const campaign = await sceneCampaign(store, before);
     const ports: TurnPorts = {
@@ -929,6 +930,7 @@ describe("handleCommand — free text", () => {
       relations: [],
       npcAffinities: [],
       day: 1,
+      heroHp: 28,
     };
     const campaign = await sceneCampaign(store, before);
     const appendBatchSizes: number[] = [];
@@ -971,6 +973,7 @@ describe("handleCommand — free text", () => {
       relations: [{ factionA: "ashen-guild", factionB: "river-wardens", band: "war" }],
       npcAffinities: [],
       day: 1,
+      heroHp: 28,
     };
     const campaign = await sceneCampaign(store, before);
     const ports: TurnPorts = {
@@ -1009,6 +1012,7 @@ describe("handleCommand — free text", () => {
       relations: [],
       npcAffinities: [],
       day: 1,
+      heroHp: 28,
     };
     const campaign = await sceneCampaign(store, before);
     const ports: TurnPorts = {
@@ -1039,6 +1043,7 @@ describe("handleCommand — free text", () => {
       relations: [{ factionA: "ashen-guild", factionB: "river-wardens", band: "hostile" }],
       npcAffinities: [],
       day: 1,
+      heroHp: 28,
     };
     const campaign = await sceneCampaign(store, before);
     const ports: TurnPorts = {
@@ -1072,6 +1077,7 @@ describe("handleCommand — free text", () => {
       relations: [{ factionA: "ashen-guild", factionB: "river-wardens", band: "hostile" }],
       npcAffinities: [],
       day: 1,
+      heroHp: 28,
     };
     const campaign = await sceneCampaign(store, before);
     const ports: TurnPorts = {
@@ -1129,6 +1135,7 @@ describe("handleCommand — free text", () => {
       relations: [{ factionA: "ashen-guild", factionB: "river-wardens", band: "hostile" }],
       npcAffinities: [],
       day: 1,
+      heroHp: 28,
     };
     const campaign = await sceneCampaign(store, before);
     const hangingEpisodic: EpisodicStore = {
@@ -1215,6 +1222,7 @@ describe("handleCommand — free text", () => {
       relations: [{ factionA: "ashen-guild", factionB: "river-wardens", band: "hostile" }],
       npcAffinities: [],
       day: 1,
+      heroHp: 28,
     };
     const campaign = await sceneCampaign(store, before);
     const seen: SceneNarrationInput[] = [];
@@ -1244,6 +1252,7 @@ describe("handleCommand — free text", () => {
       relations: [{ factionA: "ashen-guild", factionB: "river-wardens", band: "hostile" }],
       npcAffinities: [],
       day: 1,
+      heroHp: 28,
     };
     const campaign = await sceneCampaign(store, before);
     const ports: TurnPorts = {
@@ -2237,6 +2246,83 @@ describe("handleCommand — enemy turns", () => {
     );
     expect(heroValidations).toHaveLength(2);
   });
+
+  // Drives the strand §8 named directly: goblin-a's attack knocks the hero
+  // Unconscious mid-round, and the SAME `runEnemyTurns` sweep that follows
+  // must keep going through the hero's own subsequent turns — rolling a
+  // death save automatically each time, never waiting on a
+  // `structured_action` an Unconscious actor can never send.
+  it("drives death saves on the hero's own turn once they fall unconscious", async () => {
+    const store = createInMemoryEventStore();
+    const campaign = await freshCampaign(store);
+    // Low HP, AC 1: goblin-a's first attack is a guaranteed hit that drops
+    // the hero to 0, and maxHp stays real (28) so the drop is never massive
+    // enough to trigger instant death — exactly the Unconscious path this
+    // test exercises.
+    campaign.state = {
+      ...campaign.state,
+      encounter: {
+        ...encounterOf(campaign),
+        combatants: encounterOf(campaign).combatants.map((each) =>
+          each.combatantId === "hero" ? { ...each, currentHp: 2, armorClass: 1 } : each,
+        ),
+      },
+    };
+    const dodgeAs = (actorId: string): ExecuteTurn => ({
+      actorId,
+      mainAction: { actionType: "dodge" },
+      tacticalRationaleEnglish: "Test fixture.",
+    });
+    const scripted: ExecuteTurn[] = [
+      {
+        actorId: "goblin-a",
+        mainAction: { actionType: "attack", actionId: "scimitar", targetIds: ["hero"] },
+        tacticalRationaleEnglish: "Test fixture: knock the hero out.",
+      },
+      dodgeAs("goblin-b"),
+    ];
+    // Padded well past this fixture's death save's own resolution (this
+    // seed reaches Stable in 4 rolls): a combat-only campaign has no other
+    // way to end a fight the goblins never lose (`resolveIfConcluded` is
+    // silent for one, by design), so once the hero stabilizes the sweep
+    // keeps running hostile turns — dodge in, dodge out — all the way to
+    // `runEnemyTurns`'s own bound (`turnOrder.length * (maxRounds + 1)`,
+    // §8's death-saves-persistent-hp spec Decision 5). 30 rounds of padding
+    // safely clears that bound for `goblin-ambush`'s `maxRounds: 20`.
+    for (let round = 0; round < 30; round += 1) {
+      scripted.push(dodgeAs("goblin-a"), dodgeAs("goblin-b"));
+    }
+
+    const frames = await drain(
+      handleCommand(campaign, dodge("hero", "c-down"), portsWith(store, agentProposing(scripted))),
+    );
+
+    // The hero fell unconscious, and never sent (or could send) a second
+    // `structured_action` — every later `state_delta_applied` for them came
+    // from the automatic driver, not a player turn.
+    const heroDeltas = frames
+      .filter((each): each is Extract<ServerFrame, { type: "event" }> => each.type === "event")
+      .map((each) => each.event)
+      .filter((each) => each.type === "state_delta_applied")
+      .map(
+        (each) =>
+          (each.payload["combatants"] as { combatantId: string; status: string }[]).find(
+            (c) => c.combatantId === "hero",
+          )?.status,
+      );
+    expect(heroDeltas).toContain("unconscious");
+
+    // This fixture's seed (`seedFor: rootSeed * 1000 + sequence`, threaded
+    // through the same `campaign.nextSequence` every other roll in this
+    // suite uses) resolves to Stable in exactly 4 rolls: pending, pending,
+    // pending, then a success that pushes the tally to 3. Exact, not "some
+    // terminal status" — the same determinism every other pipeline test in
+    // this file relies on.
+    const hero = campaign.state.encounter?.combatants.find((each) => each.combatantId === "hero");
+    expect(hero?.status).toBe("unconscious");
+    expect(hero?.currentHp).toBe(0);
+    expect(hero?.deathSaves).toEqual({ successes: 3, failures: 1 });
+  });
 });
 
 // The per-turn metrics requirement (`apps/server/CLAUDE.md`: tokens in/out,
@@ -3129,6 +3215,25 @@ describe("handleCommand — end of combat", () => {
     ]);
   });
 
+  it("carries the hero's wounded ending HP into scene.heroHp on victory", async () => {
+    const store = createInMemoryEventStore();
+    const campaign = await bridgedCampaign(store);
+    poseBoard(campaign, (each) =>
+      each.faction === "hostile"
+        ? { ...each, status: "dead", currentHp: 0 }
+        : { ...each, currentHp: 10 },
+    );
+
+    const frames = await drain(handleCommand(campaign, dodge("hero", "c-wounded"), portsWith(store)));
+
+    const resolved = frames
+      .filter((each): each is Extract<ServerFrame, { type: "event" }> => each.type === "event")
+      .map((each) => each.event)
+      .find((each) => each.type === "encounter_resolved");
+    expect(resolved?.payload).toMatchObject({ outcome: "victory", heroHp: 10 });
+    expect(campaign.state.world.scene?.heroHp).toBe(10);
+  });
+
   it("resolves with defeat and leaves the node uncompleted", async () => {
     const store = createInMemoryEventStore();
     const campaign = await bridgedCampaign(store);
@@ -3162,6 +3267,11 @@ describe("handleCommand — end of combat", () => {
       .map((each) => each.event)
       .find((each) => each.type === "encounter_resolved");
     expect(resolved?.payload).toMatchObject({ outcome: "defeat" });
+    // A loss changes nothing else (spec Decision 6): no `heroHp` in the
+    // payload, and `scene.heroHp` stays at whatever it was walking in —
+    // never the 0 HP the hero ended this fight at.
+    expect(resolved?.payload["heroHp"]).toBeUndefined();
+    expect(campaign.state.world.scene?.heroHp).toBe(28);
     expect(campaign.state.encounter).toBeNull();
     expect(campaign.state.world.scene?.completedNodeIds).not.toContain("saboteurs");
     expect(campaign.state.world.scene?.currentNodeId).toBe("saboteurs");

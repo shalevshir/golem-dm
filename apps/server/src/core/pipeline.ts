@@ -24,6 +24,7 @@ import {
   completeCurrentNode,
   DC_BY_DIFFICULTY,
   diffScene,
+  rollDeathSave,
   sceneStateFrom,
   seeded,
   traverseEdge,
@@ -68,6 +69,7 @@ import type {
   ClientMessage,
   Condition,
   DerivedCharacter,
+  EntityStatus,
   GameEvent,
   NarrationSource,
   SceneSnapshot,
@@ -1101,19 +1103,28 @@ export async function* handleCommand(
   }
 
   /**
-   * Run hostiles until it is a party member's turn again, or nobody is left
-   * to fight. Bounded by the turn order's length rather than an unbounded
-   * loop: each pass through the body either returns or emits exactly one
-   * `turn_advanced`, which `reduce` turns into exactly one step of
-   * `currentActorIndex` — so a bug that failed to ever return control to the
-   * party (or a fight that somehow never runs out of a second living
-   * faction) still cannot spin more than `turnOrder.length + 1` iterations
-   * here. The encounter's own termination — someone eventually dies — is a
-   * property of the combat math, not of this loop; this bound exists
-   * purely so a defect in that math or in `reduce` cannot hang the pipeline.
+   * Run hostiles — and, since death-saves-persistent-hp, an Unconscious
+   * party member's own automatic death save — until it is a conscious party
+   * member's turn again, or nobody is left to fight. Bounded rather than an
+   * unbounded loop: each pass through the body either returns or emits
+   * exactly one `turn_advanced`, which `reduce` turns into exactly one step
+   * of `currentActorIndex`, so a bug that failed to ever return control to
+   * the party (or a fight that somehow never runs out of a second living
+   * faction) still cannot spin forever here.
+   *
+   * The bound is `turnOrder.length * (maxRounds + 1)`, not bare
+   * `turnOrder.length` — a death save resolves within at most 5 rolls
+   * (`rollDeathSave` moves one of two counters toward 3 on every roll, never
+   * a no-op), which can span several rounds with nothing for the player to
+   * do in between, so a single call here must be able to auto-play the rest
+   * of the fight up to its own authored round cap, not just one circuit of
+   * the turn order. `resolveIfConcluded`'s own `maxRounds` terminator is
+   * what actually ends a fight that runs that long; this bound only has to
+   * outlast it, never enforce it a second way.
    */
   async function* runEnemyTurns(): AsyncIterable<ServerFrame> {
-    for (let guard = 0; guard <= encounterOf(campaign).turnOrder.length; guard += 1) {
+    const bound = encounterOf(campaign).turnOrder.length * (builtOf(campaign).maxRounds + 1);
+    for (let guard = 0; guard <= bound; guard += 1) {
       // Re-read per pass, not hoisted: `enemyTurn` and the skip below both
       // emit, and `emit` replaces `campaign.state` wholesale — a board bound
       // before the loop would describe a turn that has already ended.
@@ -1123,7 +1134,22 @@ export async function* handleCommand(
 
       const combatant = encounter.combatants.find((each) => each.combatantId === actorId);
       if (combatant === undefined) return;
-      if (combatant.faction === "party") return;
+
+      if (combatant.faction === "party") {
+        if (combatant.status === "alive") return; // control returns to the player, as today
+        // Unconscious with a death save still pending: this IS this turn —
+        // there is no proposal to make, so the pipeline rolls for them
+        // rather than waiting on a `structured_action` that can never
+        // arrive (RULES_REFERENCE.md §8's former gap; spec Decision 5).
+        if (combatant.status === "unconscious" && (combatant.deathSaves?.successes ?? 0) < 3) {
+          yield* rollDeathSaveTurn(actorId);
+          continue;
+        }
+        // Dead, fled, or stabilized-and-unconscious: nothing to do this
+        // turn — the same silent skip a downed monster gets below.
+        yield* emit("scene_changed", { kind: "turn_advanced" });
+        continue;
+      }
 
       // A downed or dead creature is skipped, not asked for a turn.
       if (combatant.status !== "alive") {
@@ -1137,6 +1163,36 @@ export async function* handleCommand(
 
       yield* enemyTurn(actorId);
     }
+  }
+
+  /**
+   * One automatic death save for an Unconscious party member, on their own
+   * turn. No tactical call, no narration — there is no proposal to make and
+   * (per the brief) no new narration to write; the moment the hero fell
+   * unconscious already narrated through the ordinary attack path
+   * (`AttackTrace.targetStatusAfter`), which both narrators already render.
+   * Mirrors `enemyTurn`'s own shape at the point it commits a roll: one seed
+   * off the campaign sequence, one `state_delta_applied`, one
+   * `turn_advanced`.
+   */
+  async function* rollDeathSaveTurn(actorId: string): AsyncIterable<ServerFrame> {
+    const encounter = encounterOf(campaign);
+    const combatant = encounter.combatants.find((each) => each.combatantId === actorId);
+    if (combatant === undefined) throw new Error(`No combatant ${actorId} in this encounter`);
+
+    const seed = ports.seedFor(campaign.state.world.rootSeed, campaign.nextSequence);
+    const result = rollDeathSave(combatant.deathSaves ?? { successes: 0, failures: 0 }, seeded(seed));
+
+    const status: EntityStatus =
+      result.outcome === "dead" ? "dead" : result.outcome === "revived" ? "alive" : "unconscious";
+    const currentHp =
+      result.outcome === "revived" ? Math.max(1, combatant.currentHp) : combatant.currentHp;
+
+    const combatants = encounter.combatants.map((each) =>
+      each.combatantId === actorId ? { ...each, status, currentHp, deathSaves: result.state } : each,
+    );
+    yield* emit("state_delta_applied", { combatants });
+    yield* emit("scene_changed", { kind: "turn_advanced" });
   }
 
   /**
@@ -1255,6 +1311,11 @@ export async function* handleCommand(
       deadline,
     });
 
+    // The hero's ending HP, carried into `scene.heroHp` on a won fight only
+    // (spec Decision 6) — a loss or stalemate leaves it exactly where it was
+    // going in, the same "nothing else changes" rule the rest of this
+    // branch already follows for a non-victory outcome.
+    const hero = encounter.combatants.find((each) => each.characterId !== undefined);
     const events: { type: GameEvent["type"]; payload: Record<string, unknown> }[] = [
       {
         type: "encounter_resolved",
@@ -1263,6 +1324,7 @@ export async function* handleCommand(
           outcome,
           survivorIds,
           summaryEnglish,
+          ...(outcome === "victory" && hero !== undefined ? { heroHp: hero.currentHp } : {}),
         },
       },
     ];
@@ -1284,7 +1346,7 @@ export async function* handleCommand(
     if (outcome === "victory") {
       const statics = sceneStaticsOf(campaign);
       const before = sceneStateFrom(currentScene());
-      const transition = completeCurrentNode(statics.authored, before);
+      const transition = completeCurrentNode(statics.authored, before, statics.character.maxHp);
       // Invalid means the node's own entry gate no longer holds, which cannot
       // happen for a node already entered — `completeCurrentNode` short-
       // circuits on an already-completed node and this one is not yet
@@ -1332,13 +1394,19 @@ export async function* handleCommand(
         type: "quest_node_completed",
         payload: { nodeId: before.currentNodeId, summaryEnglish: nodeSummaryEnglish },
       });
-      if (delta.relations.length > 0 || delta.npcAffinities.length > 0 || delta.day !== undefined) {
+      if (
+        delta.relations.length > 0 ||
+        delta.npcAffinities.length > 0 ||
+        delta.day !== undefined ||
+        delta.heroHp !== undefined
+      ) {
         events.push({
           type: "world_delta_applied",
           payload: {
             relations: delta.relations,
             npcAffinities: delta.npcAffinities,
             ...(delta.day === undefined ? {} : { day: delta.day }),
+            ...(delta.heroHp === undefined ? {} : { heroHp: delta.heroHp }),
           },
         });
       }
@@ -1694,8 +1762,8 @@ export async function* handleCommand(
                     ],
                   }
                 : targetNodeId === null
-                  ? completeCurrentNode(statics.authored, before)
-                  : traverseEdge(statics.authored, before, targetNodeId);
+                  ? completeCurrentNode(statics.authored, before, statics.character.maxHp)
+                  : traverseEdge(statics.authored, before, targetNodeId, statics.character.maxHp);
 
             if (!transition.valid) {
               // Refusal is data all the way to the player's ear (Decision 6):
@@ -1777,7 +1845,8 @@ export async function* handleCommand(
             if (
               delta.relations.length > 0 ||
               delta.npcAffinities.length > 0 ||
-              delta.day !== undefined
+              delta.day !== undefined ||
+              delta.heroHp !== undefined
             ) {
               sceneEvents.push({
                 type: "world_delta_applied",
@@ -1785,6 +1854,7 @@ export async function* handleCommand(
                   relations: delta.relations,
                   npcAffinities: delta.npcAffinities,
                   ...(delta.day === undefined ? {} : { day: delta.day }),
+                  ...(delta.heroHp === undefined ? {} : { heroHp: delta.heroHp }),
                 },
               });
             }
@@ -1805,10 +1875,17 @@ export async function* handleCommand(
             // current — the same node `sceneNarrate` below narrates.
             const enteredNodeId = targetNodeId ?? before.currentNodeId;
             const enteredNode = statics.authored.questNodes.get(enteredNodeId);
+            // `transition.state.heroHp`, not `before`'s: this node's own
+            // effects (a `long_rest` alongside its `encounterId`, however
+            // unlikely) have already been applied by this point. Floored the
+            // same way `campaign.ts`'s `startEncounter` floors a retry.
             const bridged =
               enteredNode?.encounterId === undefined
                 ? null
-                : buildEncounterById(enteredNode.encounterId);
+                : buildEncounterById(
+                    enteredNode.encounterId,
+                    Math.max(1, transition.state.heroHp),
+                  );
             if (bridged !== null) {
               sceneEvents.push({
                 type: "encounter_started",

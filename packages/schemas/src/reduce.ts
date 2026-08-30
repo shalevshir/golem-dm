@@ -186,7 +186,7 @@ export function reduce(state: CampaignState, event: GameEvent): CampaignState {
     // a combat event outside one, and throws for the same reason: the
     // resulting projection would be indistinguishable from a legitimate one.
     case "encounter_resolved": {
-      const { encounterId } = EncounterResolvedPayload.parse(event.payload);
+      const { encounterId, heroHp } = EncounterResolvedPayload.parse(event.payload);
       if (state.encounter === null) {
         throw new Error(
           `encounter_resolved at sequence ${String(event.sequence)} with no encounter open`,
@@ -207,7 +207,20 @@ export function reduce(state: CampaignState, event: GameEvent): CampaignState {
             `${encounterId} but ${state.encounter.encounterId} is the one open`,
         );
       }
-      return { ...state, encounter: null };
+      // `heroHp` only ever travels alongside a scene (death-saves-persistent-
+      // hp spec, Decision 6) — a payload carrying it with no scene open is
+      // the same corrupt-log class the guards above already throw for.
+      if (heroHp === undefined) return { ...state, encounter: null };
+      if (state.world.scene === null) {
+        throw new Error(
+          `encounter_resolved at sequence ${String(event.sequence)} carries heroHp with no scene open`,
+        );
+      }
+      return {
+        ...state,
+        encounter: null,
+        world: { ...state.world, scene: { ...state.world.scene, heroHp } },
+      };
     }
 
     // Replaces `scene.currentNodeId` verbatim. Whether the traversal was
@@ -247,7 +260,9 @@ export function reduce(state: CampaignState, event: GameEvent): CampaignState {
     // present is a true no-op (character-profiles spec Decision 6).
     case "world_delta_applied": {
       const scene = sceneOrThrow(state, event);
-      const { relations, day, npcAffinities } = WorldDeltaAppliedPayload.parse(event.payload);
+      const { relations, day, npcAffinities, heroHp } = WorldDeltaAppliedPayload.parse(
+        event.payload,
+      );
       const nextRelations = relations.reduce((acc, entry) => {
         const index = acc.findIndex(
           (existing) =>
@@ -273,6 +288,7 @@ export function reduce(state: CampaignState, event: GameEvent): CampaignState {
             relations: nextRelations,
             npcAffinities: nextNpcAffinities,
             day: day ?? scene.day,
+            heroHp: heroHp ?? scene.heroHp,
           },
         },
       };

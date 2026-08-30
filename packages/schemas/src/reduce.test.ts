@@ -29,6 +29,7 @@ const baseScene: SceneSnapshot = {
   relations: [{ factionA: "millers", factionB: "raiders", band: "neutral" }],
   npcAffinities: [],
   day: 1,
+  heroHp: 10,
 };
 
 function withScene(patch: Partial<SceneSnapshot>): CampaignState {
@@ -376,6 +377,51 @@ describe("reduce", () => {
     expect(midEncounter).toEqual(before);
   });
 
+  it("folds encounter_resolved's heroHp onto scene.heroHp when a scene is open", () => {
+    const midEncounter: CampaignState = {
+      world: { ...base.world, scene: { ...baseScene, heroHp: 20 } },
+      encounter: { ...baseEncounter, round: 3, currentActorIndex: 1 },
+    };
+    const resolved = event(19, "encounter_resolved", {
+      encounterId: "e1",
+      outcome: "victory",
+      survivorIds: ["hero"],
+      heroHp: 12,
+    });
+
+    const next = reduce(midEncounter, resolved);
+    expect(next.encounter).toBeNull();
+    expect(next.world.scene?.heroHp).toBe(12);
+  });
+
+  // A legacy payload persisted before this field existed — or one for an
+  // outcome that never carries it (defeat, stalemate) — must still fold,
+  // leaving `scene.heroHp` exactly where it was.
+  it("leaves scene.heroHp untouched when encounter_resolved carries none", () => {
+    const midEncounter: CampaignState = {
+      world: { ...base.world, scene: { ...baseScene, heroHp: 20 } },
+      encounter: { ...baseEncounter, round: 3, currentActorIndex: 1 },
+    };
+    const resolved = event(19, "encounter_resolved", {
+      encounterId: "e1",
+      outcome: "defeat",
+      survivorIds: [],
+    });
+
+    const next = reduce(midEncounter, resolved);
+    expect(next.world.scene?.heroHp).toBe(20);
+  });
+
+  it("throws when encounter_resolved carries heroHp with no scene open", () => {
+    const resolved = event(19, "encounter_resolved", {
+      encounterId: "e1",
+      outcome: "victory",
+      survivorIds: ["hero"],
+      heroHp: 12,
+    });
+    expect(() => reduce(base, resolved)).toThrow(/carries heroHp with no scene open/);
+  });
+
   // The four out-of-combat scene events (§4.7 step 4). Every case here is
   // the plan's single highest-risk change: the fold must be purely
   // mechanical (append/replace/merge), never a band computation, a clamp,
@@ -518,6 +564,15 @@ describe("reduce", () => {
     expect(next).toEqual(state);
   });
 
+  // A long rest (Decision 8): the fold merges the engine's already-computed
+  // absolute value, the same posture `day` already takes — never a delta to
+  // apply.
+  it("(d) replaces scene.heroHp on world_delta_applied", () => {
+    const state = withScene({ heroHp: 3 });
+    const next = reduce(state, event(28, "world_delta_applied", { heroHp: 28 }));
+    expect(next.world.scene?.heroHp).toBe(28);
+  });
+
   it("(e) throws with 'no scene' when quest_node_entered is folded with no scene open", () => {
     expect(() =>
       reduce(noSceneOpen, event(30, "quest_node_entered", { nodeId: "cross-the-bridge" })),
@@ -599,6 +654,7 @@ describe("fold", () => {
       relations: [{ factionA: "raiders", factionB: "millers", band: "hostile" }],
       npcAffinities: [],
       day: 2,
+      heroHp: 10,
     });
   });
 });

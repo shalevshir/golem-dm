@@ -79,7 +79,15 @@ export function hasEncounter(encounterId: string): boolean {
   return CATALOGUE.has(encounterId);
 }
 
-export function buildEncounterById(encounterId: string): BuiltEncounter {
+/**
+ * `heroCurrentHp`, when given, overrides the spawned character's HP below
+ * their sheet's own value — the seam `resolveSpawn` (`rules-engine/encounter/
+ * build.ts`) already has for "a character can join below full health." Used
+ * to carry the hero's HP forward across encounters (death-saves-persistent-
+ * hp spec, Decision 7); absent for a combat-only campaign, which spawns
+ * exactly as it does today.
+ */
+export function buildEncounterById(encounterId: string, heroCurrentHp?: number): BuiltEncounter {
   const definition = encounterById(encounterId);
   const statBlocks = new Map<string, MonsterStatBlock>();
   const characters = new Map<string, DerivedCharacter>();
@@ -87,7 +95,11 @@ export function buildEncounterById(encounterId: string): BuiltEncounter {
   for (const spawn of definition.spawns) {
     if ("characterId" in spawn) {
       if (!characters.has(spawn.characterId)) {
-        characters.set(spawn.characterId, loadCharacter(spawn.characterId));
+        const derived = loadCharacter(spawn.characterId);
+        characters.set(
+          spawn.characterId,
+          heroCurrentHp === undefined ? derived : { ...derived, currentHp: heroCurrentHp },
+        );
       }
       continue;
     }

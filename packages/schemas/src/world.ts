@@ -17,6 +17,16 @@ export const GridMap = z.object({
 export const Faction = z.enum(["party", "hostile", "neutral"]);
 
 /**
+ * A running death-save tally. Mirrors `@ai-dm/rules-engine`'s
+ * `DeathSaveState` structurally rather than importing it — `@ai-dm/schemas`
+ * may not depend on `rules-engine` (dependency direction).
+ */
+export const DeathSaveTally = z.object({
+  successes: z.number().int().min(0).max(3),
+  failures: z.number().int().min(0).max(3),
+});
+
+/**
  * What the creature has already spent during the current turn. The rules engine
  * resets this at the start of a turn and rejects any `ExecuteTurn` that would
  * overspend it — this object is the whole action-economy budget.
@@ -65,6 +75,11 @@ export const Combatant = z.object({
   spellSlots: SpellSlots.default({}),
   actionEconomy: ActionEconomy.default({}),
   status: EntityStatus.default("alive"),
+  /** Present exactly while `status` is "unconscious" and death saves have
+   *  been rolled at least once. Absent for a fresh drop, and cleared again
+   *  the moment the tally resolves (wakes or dies) — it does not outlive
+   *  the encounter. */
+  deathSaves: DeathSaveTally.optional(),
 });
 
 export type GridMap = z.infer<typeof GridMap>;
@@ -72,4 +87,5 @@ export type EntityStatus = z.infer<typeof EntityStatus>;
 export type TerrainType = z.infer<typeof TerrainType>;
 export type Faction = z.infer<typeof Faction>;
 export type ActionEconomy = z.infer<typeof ActionEconomy>;
+export type DeathSaveTally = z.infer<typeof DeathSaveTally>;
 export type Combatant = z.infer<typeof Combatant>;

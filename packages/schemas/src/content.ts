@@ -132,6 +132,15 @@ export const WorldEffect = z.discriminatedUnion("kind", [
     /** English, internal-only — never shown to the player verbatim (spec Decision 5). */
     fact: z.string().min(1),
   }),
+  /**
+   * Restores the hero's HP to their maximum. No fields — "restore to max" is
+   * the one absolute value that needs no delta math and cannot disagree with
+   * whatever HP the hero started the rest at. Compose with a separate
+   * `advance_calendar` effect on the same node when a rest should also cost
+   * narrative time; the two are orthogonal facts (death-saves-persistent-hp
+   * spec, Decision 8).
+   */
+  z.object({ kind: z.literal("long_rest") }),
 ]);
 
 /** A destination and a label. Predicates gate the target node, not the edge. */

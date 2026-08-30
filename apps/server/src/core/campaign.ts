@@ -191,16 +191,23 @@ export interface ResolveEncounterInput extends CampaignPorts {
  * `initialEncounterState` below, this needs no catalogue lookup and
  * therefore no substitution step at load time — `loadCampaign` calls this
  * same function with the parsed genesis payload, not a second projector.
+ *
+ * `sceneFromGenesis` cannot resolve the hero's starting HP itself (it stays
+ * pure); this is the one place both `createCampaign` and `loadCampaign`
+ * build a starting `WorldState`, so it resolves the character once and
+ * passes its `maxHp` in — a fresh campaign always starts at full HP.
  */
 function initialWorldState(input: {
   campaignId: string;
   genesis: CampaignStartedPayload;
 }): WorldState {
+  const { characterId } = input.genesis;
+  const heroMaxHp = characterId === undefined ? undefined : loadCharacter(characterId).maxHp;
   return {
     campaignId: input.campaignId,
     rootSeed: input.genesis.rootSeed,
     appliedClientMessageIds: [],
-    scene: sceneFromGenesis(input.genesis),
+    scene: sceneFromGenesis(input.genesis, heroMaxHp),
   };
 }
 
@@ -328,7 +335,18 @@ export async function createCampaign(input: CreateCampaignInput): Promise<Campai
 export async function startEncounter(input: StartEncounterInput): Promise<Campaign> {
   const { campaign } = input;
   const campaignId = campaign.state.world.campaignId;
-  const built = buildEncounterById(input.encounterId);
+  // Floored at 1, never at the persisted value directly: a hero who last won
+  // a fight only by stabilizing (Unconscious, 0 HP) would otherwise spawn
+  // already face-down. Natural recovery from Stable stays out of scope; this
+  // floor is what keeps that gap from cascading into an unplayable spawn
+  // (death-saves-persistent-hp spec, Decision 7). `undefined` for a
+  // combat-only campaign — `scene` is always null for one — keeps spawning
+  // byte-for-byte unchanged.
+  const heroCurrentHp =
+    campaign.state.world.scene === null
+      ? undefined
+      : Math.max(1, campaign.state.world.scene.heroHp);
+  const built = buildEncounterById(input.encounterId, heroCurrentHp);
 
   const event = envelope({
     ports: input,

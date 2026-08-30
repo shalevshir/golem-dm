@@ -118,6 +118,7 @@ Creatures do **not** block line of sight; they grant cover instead, so
 | Tally reset | Both counts reset to zero on regaining any HP or becoming Stable. | `combat/` `rollDeathSave` |
 | Damage at 0 HP | One death-save failure; **two** if from a critical hit; instant death if the damage ≥ HP maximum. | **not implemented** |
 | Stabilising | DC 10 Wisdom (Medicine) check. A Stable creature regains 1 HP after 1d4 hours. | not implemented |
+| Long Rest | Restores HP to maximum. (2024 SRD also removes one exhaustion level — see §8.) | `scene/` `applyEffect` (`long_rest` `WorldEffect`) |
 
 ---
 
@@ -208,17 +209,11 @@ These are where memory of 2014 will silently produce wrong code.
 Not yet implemented, roughly in dependency order:
 
 - Damage taken at 0 HP → death-save failures (§4)
-- **Every combatant dies at 0 HP, PCs included.** `resolve.ts` pins
-  `diesAtZeroHp: true` unconditionally rather than reading it off
-  `characterId` (correction C-31). Death saves themselves are implemented
-  and tested (`combat/` `rollDeathSave`, §4); what is missing is a driver —
-  `resolve.ts`'s own comment says it plainly, "this file does not drive it."
-  An Unconscious player character would strand the pipeline with nothing
-  that ever calls `rollDeathSave`. Both narrators already render an
-  `unconscious` beat that the pipeline cannot currently produce, so a
-  death-save driver gains working narration the day it lands. Closes once
-  something in the encounter pipeline drives it.
 - Stabilising, and the 1d4-hour natural recovery (§4)
+- **Long Rest does not reduce exhaustion.** SRD 2024 removes one level per
+  rest (§6); `exhaustionLevel` lives only on `Combatant` and has no
+  persistence across encounters at all — a bigger gap than the `long_rest`
+  `WorldEffect` (§4) was scoped to close, so it restores HP only.
 - HP maximum reduced to 0 (§4)
 - Condition mechanical effects beyond those listed in §6
 - Weapon mastery still needs SRD data. Player weapon ranges are no longer a

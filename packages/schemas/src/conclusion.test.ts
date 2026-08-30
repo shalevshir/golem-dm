@@ -92,4 +92,65 @@ describe("conclusionOf", () => {
   it("is ongoing on an empty board — not started, not finished", () => {
     expect(conclusionOf(stateWith([]))).toBe("ongoing");
   });
+
+  it("stays ongoing while a party member's death save is still pending, even with no hostile left", () => {
+    expect(
+      conclusionOf(
+        stateWith([
+          rawCombatant({
+            combatantId: "hero",
+            faction: "party",
+            status: "unconscious",
+            currentHp: 0,
+          }),
+          rawCombatant({ combatantId: "goblin", faction: "hostile", status: "dead", currentHp: 0 }),
+        ]),
+      ),
+    ).toBe("ongoing");
+  });
+
+  it("is victory when the only party member is unconscious but Stable, and no hostile is left", () => {
+    expect(
+      conclusionOf(
+        stateWith([
+          rawCombatant({
+            combatantId: "hero",
+            faction: "party",
+            status: "unconscious",
+            currentHp: 0,
+            deathSaves: { successes: 3, failures: 1 },
+          }),
+          rawCombatant({ combatantId: "goblin", faction: "hostile", status: "dead", currentHp: 0 }),
+        ]),
+      ),
+    ).toBe("victory");
+  });
+
+  it("stays ongoing when the hero is Stable but a hostile is still up", () => {
+    expect(
+      conclusionOf(
+        stateWith([
+          rawCombatant({
+            combatantId: "hero",
+            faction: "party",
+            status: "unconscious",
+            currentHp: 0,
+            deathSaves: { successes: 3, failures: 0 },
+          }),
+          rawCombatant({ combatantId: "goblin", faction: "hostile" }),
+        ]),
+      ),
+    ).toBe("ongoing");
+  });
+
+  it("is defeat once the hero's status has resolved to dead", () => {
+    expect(
+      conclusionOf(
+        stateWith([
+          rawCombatant({ combatantId: "hero", faction: "party", status: "dead", currentHp: 0 }),
+          rawCombatant({ combatantId: "goblin", faction: "hostile", status: "dead", currentHp: 0 }),
+        ]),
+      ),
+    ).toBe("defeat");
+  });
 });

@@ -232,12 +232,11 @@ describe("applyTurn", () => {
     expect(world.combatants.find((each) => each.combatantId === "guard_1")?.status).toBe("dead");
   });
 
-  it("kills a PC outright at 0 HP too -- death saves are implemented but not driven by the pipeline", () => {
+  it("drops a PC to Unconscious at 0 HP instead of killing them", () => {
     // Same fixture as "kills a monster outright at 0 HP", but the target now
-    // carries a populated characterId. Reading
-    // `diesAtZeroHp: target.characterId === undefined` would be false here
-    // and leave the target "unconscious"; the unconditional pin in resolve.ts
-    // makes it "dead" regardless of characterId.
+    // carries a populated characterId. `diesAtZeroHp: target.characterId ===
+    // undefined` is false here, so the target falls Unconscious and rolls
+    // death saves instead — never `effect.killed`.
     const wounded = {
       ...built.world,
       combatants: built.world.combatants.map((each) =>
@@ -259,9 +258,10 @@ describe("applyTurn", () => {
       rng: scripted([d20Exactly(18), 0.5]),
     });
 
-    expect(effect.killed).toEqual(["guard_1"]);
+    expect(effect.killed).toEqual([]);
     const target = world.combatants.find((each) => each.combatantId === "guard_1");
-    expect(target?.status).toBe("dead");
+    expect(target?.status).toBe("unconscious");
+    expect(target?.currentHp).toBe(0);
   });
 
   it("records flat damage as kind: flat, with no dice rolled", () => {
