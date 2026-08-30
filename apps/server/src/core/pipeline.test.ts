@@ -2864,6 +2864,23 @@ describe("handleCommand — end of combat", () => {
     expect(campaign.state.world.scene?.completedNodeIds).not.toContain("saboteurs");
   });
 
+  it("stays ongoing when the round lands exactly on maxRounds, not past it", async () => {
+    const store = createInMemoryEventStore();
+    const campaign = await bridgedCampaign(store);
+    // Everyone alive, so `conclusionOf` stays "ongoing". Posed at 19: the
+    // hero's dodge plus the two goblins' dodges wrap `currentActorIndex`
+    // back to 0 once, landing the checked round at exactly 20 —
+    // `goblin-ambush`'s `maxRounds`. `>` (not `>=`) must treat this as still
+    // ongoing; this is the direct negative of the stalemate test above,
+    // which only exercises round 22 (past the limit either way).
+    poseBoard(campaign, (each) => each, 19);
+
+    const frames = await drain(handleCommand(campaign, dodge("hero", "c-tie"), portsWith(store)));
+
+    expect(eventTypesOf(frames)).not.toContain("encounter_resolved");
+    expect(campaign.state.encounter).not.toBeNull();
+  });
+
   it("emits nothing for a combat-only campaign whose fight ends", async () => {
     const store = createInMemoryEventStore();
     const campaign = await freshCampaign(store);
