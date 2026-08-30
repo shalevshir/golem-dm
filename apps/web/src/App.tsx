@@ -164,8 +164,11 @@ export function App(props: AppProps): JSX.Element {
         (
           await createCampaign(worldId !== null ? { worldId } : { encounterId: ENCOUNTER_ID })
         ).campaignId;
-      if (stored === null) sessionStorage.setItem(CAMPAIGN_STORAGE_KEY, campaignId);
+      // The staleness check comes first: a superseded run must not persist
+      // ITS campaign id over whatever the surviving run has already written
+      // (or is about to write) — see `runIdRef` above.
       if (runIdRef.current !== runId) return;
+      if (stored === null) sessionStorage.setItem(CAMPAIGN_STORAGE_KEY, campaignId);
 
       connectionRef.current = connect({
         campaignId,
