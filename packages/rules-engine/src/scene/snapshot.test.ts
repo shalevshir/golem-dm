@@ -46,6 +46,7 @@ describe("round trip: snapshotOf(sceneStateFrom(s))", () => {
       currentNodeId: "start",
       completedNodeIds: [],
       relations: [],
+      npcAffinities: [],
       day: 1,
     };
     expect(sorted(snapshotOf(sceneStateFrom(snapshot), snapshot.worldId))).toEqual(
@@ -66,6 +67,7 @@ describe("round trip: snapshotOf(sceneStateFrom(s))", () => {
         { factionA: "alpha", factionB: "beta", band: "cold" },
         { factionA: "delta", factionB: "gamma", band: "friendly" },
       ],
+      npcAffinities: [],
       day: 3,
     };
     expect(sorted(snapshotOf(sceneStateFrom(snapshot), snapshot.worldId))).toEqual(
@@ -79,7 +81,25 @@ describe("round trip: snapshotOf(sceneStateFrom(s))", () => {
       currentNodeId: "end",
       completedNodeIds: ["middle", "start"],
       relations: [{ factionA: "alpha", factionB: "beta", band: "war" }],
+      npcAffinities: [],
       day: 4,
+    };
+    expect(sorted(snapshotOf(sceneStateFrom(snapshot), snapshot.worldId))).toEqual(
+      sorted(snapshot),
+    );
+  });
+
+  it("preserves a populated npcAffinities overlay", () => {
+    const snapshot: SceneSnapshot = {
+      worldId: "fixture",
+      currentNodeId: "middle",
+      completedNodeIds: ["start"],
+      relations: [],
+      npcAffinities: [
+        { npcId: "old-tobin", band: "friendly", facts: ["remembered fact"] },
+        { npcId: "sela-the-innkeeper", band: "cordial", facts: [] },
+      ],
+      day: 3,
     };
     expect(sorted(snapshotOf(sceneStateFrom(snapshot), snapshot.worldId))).toEqual(
       sorted(snapshot),
@@ -94,6 +114,7 @@ describe("round trip: snapshotOf(sceneStateFrom(s))", () => {
         [pairKey("zulu", "yankee"), "friendly"],
         [pairKey("alpha", "beta"), "cold"],
       ]),
+      npcAffinities: new Map(),
       day: 2,
     };
     const snapshot = snapshotOf(state, "fixture");
@@ -122,6 +143,7 @@ describe("sceneStateFrom", () => {
       currentNodeId: "start",
       completedNodeIds: [],
       relations: [{ factionA: "raiders", factionB: "millers", band: "hostile" }],
+      npcAffinities: [],
       day: 1,
     };
     const state = sceneStateFrom(snapshot);
@@ -136,7 +158,7 @@ describe("diffScene", () => {
   it("reports no change for identical states, with no day", () => {
     const state = stateOf(startScene(world));
     const delta = diffScene(state, state);
-    expect(delta).toEqual({ relations: [] });
+    expect(delta).toEqual({ relations: [], npcAffinities: [] });
     expect(delta.day).toBeUndefined();
   });
 
@@ -155,7 +177,7 @@ describe("diffScene", () => {
     const before = stateOf(traverseEdge(world, afterMiddle, "end")); // day 3, alpha/beta=cold
     // "end" has only advance_calendar; completing it shifts no relation.
     const after = stateOf(completeCurrentNode(world, before)); // day 4
-    expect(diffScene(before, after)).toEqual({ relations: [], day: 4 });
+    expect(diffScene(before, after)).toEqual({ relations: [], npcAffinities: [], day: 4 });
   });
 
   it("reports both a relation shift and a day advance together", () => {
@@ -166,5 +188,132 @@ describe("diffScene", () => {
     const delta = diffScene(before, after);
     expect(delta.relations).toEqual([{ factionA: "alpha", factionB: "beta", band: "cold" }]);
     expect(delta.day).toBe(4);
+  });
+
+  // `linearWorld()`'s "start" node has no edge to a node named "npc-node" —
+  // its only edge is to "middle" — so this test overrides a spread copy of
+  // "start" to add one, rather than mutating the shared fixture.
+  it("reports a shifted npc affinity alongside an unrelated relation change", () => {
+    const originalStart = world.questNodes.get("start");
+    if (originalStart === undefined) {
+      expect.unreachable('fixture is missing its "start" node');
+    }
+    const npcWorld = {
+      ...world,
+      npcs: new Map([
+        [
+          "sela-the-innkeeper",
+          {
+            npcId: "sela-the-innkeeper",
+            nameEnglish: "Sela",
+            nameHebrew: "סלה",
+            grammaticalGender: "feminine" as const,
+            locationId: "here",
+            descriptionEnglish: "A fixture npc.",
+          },
+        ],
+      ]),
+      questNodes: new Map([
+        ...world.questNodes,
+        [
+          "start",
+          {
+            ...originalStart,
+            edges: [...originalStart.edges, { to: "npc-node", labelEnglish: "Talk to Sela" }],
+          },
+        ],
+        [
+          "npc-node",
+          {
+            nodeId: "npc-node",
+            titleEnglish: "Npc node",
+            sceneEnglish: "A fixture node that shifts an npc's affinity.",
+            locationId: "here",
+            preconditions: [],
+            effects: [
+              { kind: "shift_npc_affinity" as const, npcId: "sela-the-innkeeper", delta: 1 },
+            ],
+            edges: [],
+          },
+        ],
+      ]),
+    };
+    const before = stateOf(startScene(npcWorld));
+    const traversed = stateOf(traverseEdge(npcWorld, before, "npc-node"));
+    const after = stateOf(completeCurrentNode(npcWorld, traversed));
+    const delta = diffScene(before, after);
+    expect(delta.npcAffinities).toEqual([
+      { npcId: "sela-the-innkeeper", band: "cordial", facts: [] },
+    ]);
+  });
+
+  // The case above's `before` never holds an overlay entry for the npc it
+  // diffs, so it only exercises the `beforeEntry === undefined` disjunct.
+  // This one gives `before` a real entry and re-applies a no-op shift, so the
+  // band/facts comparison itself runs and reports no change.
+  it("reports no npc change when a later node re-touches the same npc without altering it", () => {
+    const originalStart = world.questNodes.get("start");
+    if (originalStart === undefined) {
+      expect.unreachable('fixture is missing its "start" node');
+    }
+    const npcWorld = {
+      ...world,
+      npcs: new Map([
+        [
+          "sela-the-innkeeper",
+          {
+            npcId: "sela-the-innkeeper",
+            nameEnglish: "Sela",
+            nameHebrew: "סלה",
+            grammaticalGender: "feminine" as const,
+            locationId: "here",
+            descriptionEnglish: "A fixture npc.",
+          },
+        ],
+      ]),
+      questNodes: new Map([
+        ...world.questNodes,
+        [
+          "start",
+          {
+            ...originalStart,
+            edges: [...originalStart.edges, { to: "npc-node", labelEnglish: "Talk to Sela" }],
+          },
+        ],
+        [
+          "npc-node",
+          {
+            nodeId: "npc-node",
+            titleEnglish: "Npc node",
+            sceneEnglish: "A fixture node that shifts an npc's affinity.",
+            locationId: "here",
+            preconditions: [],
+            effects: [
+              { kind: "shift_npc_affinity" as const, npcId: "sela-the-innkeeper", delta: 1 },
+            ],
+            edges: [{ to: "npc-node-2", labelEnglish: "Talk again" }],
+          },
+        ],
+        [
+          "npc-node-2",
+          {
+            nodeId: "npc-node-2",
+            titleEnglish: "Npc node 2",
+            sceneEnglish: "A fixture node that re-touches the npc with a no-op shift.",
+            locationId: "here",
+            preconditions: [],
+            effects: [
+              { kind: "shift_npc_affinity" as const, npcId: "sela-the-innkeeper", delta: 0 },
+            ],
+            edges: [],
+          },
+        ],
+      ]),
+    };
+    const opening = stateOf(startScene(npcWorld));
+    const touched = stateOf(traverseEdge(npcWorld, opening, "npc-node"));
+    const before = stateOf(traverseEdge(npcWorld, touched, "npc-node-2"));
+    const after = stateOf(completeCurrentNode(npcWorld, before));
+    expect(diffScene(before, after).npcAffinities).toEqual([]);
   });
 });

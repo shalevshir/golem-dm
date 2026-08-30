@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  affinityOf,
   availableEdges,
   completeCurrentNode,
   evaluatePredicate,
@@ -20,13 +21,12 @@ import type {
 import { blockedWorld, linearWorld } from "./test-fixtures.js";
 import type { FactionBand } from "@ai-dm/schemas";
 
-function stateWith(
-  relations: readonly (readonly [string, string, FactionBand])[],
-): SceneState {
+function stateWith(relations: readonly (readonly [string, string, FactionBand])[]): SceneState {
   return {
     currentNodeId: "start",
     completedNodeIds: new Set<string>(),
     relations: new Map(relations.map(([a, b, band]) => [pairKey(a, b), band])),
+    npcAffinities: new Map(),
     day: 1,
   };
 }
@@ -101,6 +101,24 @@ describe("relationBetween", () => {
   });
 });
 
+describe("affinityOf", () => {
+  it("defaults to neutral with no facts for an npc the state has not touched", () => {
+    const state = stateWith([]);
+    expect(affinityOf(state, "sela-the-innkeeper")).toEqual({ band: "neutral", facts: [] });
+  });
+
+  it("reads the overlay for a touched npc", () => {
+    const state: SceneState = {
+      ...stateWith([]),
+      npcAffinities: new Map([["sela-the-innkeeper", { band: "cordial", facts: ["a fact"] }]]),
+    };
+    expect(affinityOf(state, "sela-the-innkeeper")).toEqual({
+      band: "cordial",
+      facts: ["a fact"],
+    });
+  });
+});
+
 /**
  * The state from a transition, or a loud failure naming the rejections.
  *
@@ -147,9 +165,9 @@ describe("traverseEdge", () => {
   it("evaluates the target's preconditions after the current node completes", () => {
     const world = linearWorld();
     const opening = stateOf(startScene(world));
-    expect(
-      evaluatePredicate(world, opening, { kind: "node_completed", nodeId: "start" }),
-    ).toBe(false);
+    expect(evaluatePredicate(world, opening, { kind: "node_completed", nodeId: "start" })).toBe(
+      false,
+    );
     expect(traverseEdge(world, opening, "middle").valid).toBe(true);
   });
 
@@ -261,6 +279,7 @@ describe("completeCurrentNode", () => {
       currentNodeId: "solo",
       completedNodeIds: new Set<string>(),
       relations: new Map(),
+      npcAffinities: new Map(),
       day: 1,
     };
     expect(partial.relations.get(pairKey("alpha", "beta"))).toBeUndefined();
@@ -317,6 +336,7 @@ describe("completeCurrentNode", () => {
       currentNodeId: "middle",
       completedNodeIds: new Set<string>(),
       relations: world.relations,
+      npcAffinities: new Map(),
       day: 1,
     };
     const transition = completeCurrentNode(world, stranded);
@@ -327,6 +347,115 @@ describe("completeCurrentNode", () => {
     // middle carries a -1 shift and a +2 day advance; neither may have run.
     expect(relationBetween(world, stranded, "alpha", "beta")).toBe("neutral");
     expect(stranded.day).toBe(1);
+  });
+
+  it("shifts an npc's affinity on node completion", () => {
+    const world: AuthoredWorld = {
+      ...linearWorld(),
+      startingNodeId: "solo",
+      questNodes: new Map([
+        [
+          "solo",
+          {
+            nodeId: "solo",
+            titleEnglish: "Solo",
+            sceneEnglish: "A node whose effect shifts an npc's affinity.",
+            locationId: "here",
+            preconditions: [],
+            effects: [{ kind: "shift_npc_affinity", npcId: "sela-the-innkeeper", delta: 1 }],
+            edges: [],
+          },
+        ],
+      ]),
+    };
+    const before = stateOf(startScene(world));
+    const after = stateOf(completeCurrentNode(world, before));
+    expect(affinityOf(after, "sela-the-innkeeper")).toEqual({ band: "cordial", facts: [] });
+  });
+
+  it("records a fact on node completion, without touching the band", () => {
+    const world: AuthoredWorld = {
+      ...linearWorld(),
+      startingNodeId: "solo",
+      questNodes: new Map([
+        [
+          "solo",
+          {
+            nodeId: "solo",
+            titleEnglish: "Solo",
+            sceneEnglish: "A node whose effect records a fact.",
+            locationId: "here",
+            preconditions: [],
+            effects: [
+              {
+                kind: "add_npc_fact",
+                npcId: "sela-the-innkeeper",
+                fact: "helped at the reckoning",
+              },
+            ],
+            edges: [],
+          },
+        ],
+      ]),
+    };
+    const before = stateOf(startScene(world));
+    const after = stateOf(completeCurrentNode(world, before));
+    expect(affinityOf(after, "sela-the-innkeeper")).toEqual({
+      band: "neutral",
+      facts: ["helped at the reckoning"],
+    });
+  });
+
+  it("appends a second fact rather than replacing the first", () => {
+    const world: AuthoredWorld = {
+      ...linearWorld(),
+      startingNodeId: "solo",
+      questNodes: new Map([
+        [
+          "solo",
+          {
+            nodeId: "solo",
+            titleEnglish: "Solo",
+            sceneEnglish: "A node with two fact-recording effects.",
+            locationId: "here",
+            preconditions: [],
+            effects: [
+              { kind: "add_npc_fact", npcId: "sela-the-innkeeper", fact: "first fact" },
+              { kind: "add_npc_fact", npcId: "sela-the-innkeeper", fact: "second fact" },
+            ],
+            edges: [],
+          },
+        ],
+      ]),
+    };
+    const before = stateOf(startScene(world));
+    const after = stateOf(completeCurrentNode(world, before));
+    expect(affinityOf(after, "sela-the-innkeeper").facts).toEqual(["first fact", "second fact"]);
+  });
+
+  it("is idempotent for npc effects too — a re-completed node does not double-shift", () => {
+    const world: AuthoredWorld = {
+      ...linearWorld(),
+      startingNodeId: "solo",
+      questNodes: new Map([
+        [
+          "solo",
+          {
+            nodeId: "solo",
+            titleEnglish: "Solo",
+            sceneEnglish: "A node whose effect shifts an npc's affinity.",
+            locationId: "here",
+            preconditions: [],
+            effects: [{ kind: "shift_npc_affinity", npcId: "sela-the-innkeeper", delta: 1 }],
+            edges: [],
+          },
+        ],
+      ]),
+    };
+    const before = stateOf(startScene(world));
+    const once = stateOf(completeCurrentNode(world, before));
+    const twice = stateOf(completeCurrentNode(world, once));
+    expect(affinityOf(twice, "sela-the-innkeeper")).toEqual(affinityOf(once, "sela-the-innkeeper"));
   });
 });
 
@@ -390,6 +519,7 @@ describe("evaluatePredicate", () => {
     currentNodeId: "start",
     completedNodeIds: new Set<string>(),
     relations: new Map([[pairKey("alpha", "beta"), "hostile"]]),
+    npcAffinities: new Map(),
     day: 1,
   };
 
@@ -471,9 +601,7 @@ describe("evaluatePredicate", () => {
 describe("refusing a traversal", () => {
   it("refuses an edge the current node does not have", () => {
     const world = linearWorld();
-    const rejections = rejectionsOf(
-      traverseEdge(world, stateOf(startScene(world)), "end"),
-    );
+    const rejections = rejectionsOf(traverseEdge(world, stateOf(startScene(world)), "end"));
     expect(rejections).toHaveLength(1);
     expect(rejections[0]?.reason).toBe("no_such_edge");
     expect(rejections[0]?.subjectId).toBe("end");
@@ -481,9 +609,7 @@ describe("refusing a traversal", () => {
 
   it("refuses an edge to a node that does not exist", () => {
     const world = blockedWorld();
-    const rejections = rejectionsOf(
-      traverseEdge(world, stateOf(startScene(world)), "nowhere"),
-    );
+    const rejections = rejectionsOf(traverseEdge(world, stateOf(startScene(world)), "nowhere"));
     // `start` has no edge to "nowhere", so this is the edge check, not the
     // node check — the two reasons are distinguishable and this pins which
     // one fires first.
@@ -496,9 +622,7 @@ describe("refusing a traversal", () => {
   // repo and fails exactly this one.
   it("refuses a traversal whose faction gate is not met", () => {
     const world = blockedWorld();
-    const rejections = rejectionsOf(
-      traverseEdge(world, stateOf(startScene(world)), "shut"),
-    );
+    const rejections = rejectionsOf(traverseEdge(world, stateOf(startScene(world)), "shut"));
     expect(rejections).toHaveLength(1);
     expect(rejections[0]?.reason).toBe("precondition_unmet");
     expect(rejections[0]?.subjectId).toBe("shut");
@@ -613,9 +737,7 @@ describe("startScene on a world it cannot open", () => {
 
   it("refuses a starting node id that resolves to nothing", () => {
     const world = linearWorld();
-    const rejections = rejectionsOf(
-      startScene({ ...world, startingNodeId: "no-such-node" }),
-    );
+    const rejections = rejectionsOf(startScene({ ...world, startingNodeId: "no-such-node" }));
     expect(rejections).toHaveLength(1);
     expect(rejections[0]?.reason).toBe("no_such_node");
   });
@@ -633,6 +755,7 @@ describe("acting from a state whose current node does not exist", () => {
       currentNodeId: "ghost",
       completedNodeIds: new Set<string>(),
       relations: new Map(),
+      npcAffinities: new Map(),
       day: 1,
     };
   }
