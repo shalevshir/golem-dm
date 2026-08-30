@@ -58,10 +58,10 @@ export interface RunLiveInput {
 /**
  * Every role points at the same spec. Only `tactical` is ever read — the sim
  * benchmarks the tactical agent alone — but `ModelRouting` is total over
- * `AgentRole`, so `intent`/`narrative` need a value too.
+ * `AgentRole`, so `intent`/`narrative`/`summary` need a value too.
  */
 function routingFor(spec: ModelSpec): ModelRouting {
-  return { intent: spec, tactical: spec, narrative: spec };
+  return { intent: spec, tactical: spec, narrative: spec, summary: spec };
 }
 
 export async function runLive(input: RunLiveInput): Promise<RunReport> {

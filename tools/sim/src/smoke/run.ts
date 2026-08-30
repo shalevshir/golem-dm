@@ -38,6 +38,7 @@ function routingFor(): ModelRouting {
     intent: SMOKE_ARM.spec,
     tactical: SMOKE_ARM.spec,
     narrative: SMOKE_ARM.spec,
+    summary: SMOKE_ARM.spec,
   };
 }
 

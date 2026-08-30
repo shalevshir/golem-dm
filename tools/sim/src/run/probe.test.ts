@@ -55,7 +55,12 @@ describe("runProbeArm", () => {
     const port = createScriptedPort();
     const timingPort = createTimingPort(port);
     const runtime = createAgentRuntime({
-      routing: { intent: SMOKE_ARM.spec, tactical: SMOKE_ARM.spec, narrative: SMOKE_ARM.spec },
+      routing: {
+        intent: SMOKE_ARM.spec,
+        tactical: SMOKE_ARM.spec,
+        narrative: SMOKE_ARM.spec,
+        summary: SMOKE_ARM.spec,
+      },
       port: timingPort,
     });
     const agent = createTacticalAgent({ runtime });
