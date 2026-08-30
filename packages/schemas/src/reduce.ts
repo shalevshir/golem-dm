@@ -268,11 +268,12 @@ export function reduce(state: CampaignState, event: GameEvent): CampaignState {
     // no projected field. Listed explicitly rather than caught by `default` so
     // adding a `GameEvent` type fails the exhaustiveness check here.
     //
-    // `campaign_started` is a no-op for the same reason `encounter_started`
-    // cannot fill its own bracket: the world it declares is rebuilt from its
-    // payload before the fold begins, not folded out of it. That is what
-    // keeps "fold from a snapshot plus events equals fold from the campaign's
-    // starting state" true.
+    // `campaign_started` is a no-op because the world it declares is rebuilt
+    // from its payload before the fold begins, not folded out of it — the
+    // caller (`apps/server/src/core/campaign.ts`) reads `rootSeed` and the
+    // genesis quartet to construct the starting `CampaignState` directly.
+    // That is what keeps "fold from a snapshot plus events equals fold from
+    // the campaign's starting state" true.
     //
     // `check_rolled` joins this group for the same reason `dice_rolled`
     // already does: the roll is already resolved by the time this event
