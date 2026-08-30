@@ -31,7 +31,12 @@ export function sceneStateFrom(snapshot: SceneSnapshot): SceneState {
     relations: new Map(
       snapshot.relations.map((entry) => [pairKey(entry.factionA, entry.factionB), entry.band]),
     ),
-    npcAffinities: new Map(snapshot.npcAffinities.map((entry) => [entry.npcId, entry])),
+    npcAffinities: new Map(
+      snapshot.npcAffinities.map((entry) => [
+        entry.npcId,
+        { band: entry.band, facts: entry.facts },
+      ]),
+    ),
     day: snapshot.day,
   };
 }

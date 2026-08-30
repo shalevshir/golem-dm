@@ -512,7 +512,7 @@ describe("reduce", () => {
     expect(next.world.scene?.day).toBe(5);
   });
 
-  it("(d) returns state unchanged when world_delta_applied carries neither relations nor day", () => {
+  it("(d) returns state unchanged when world_delta_applied carries no fields", () => {
     const state = withScene({});
     const next = reduce(state, event(29, "world_delta_applied", {}));
     expect(next).toEqual(state);

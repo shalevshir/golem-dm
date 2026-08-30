@@ -20,6 +20,7 @@ function sorted(snapshot: SceneSnapshot): SceneSnapshot {
     relations: [...snapshot.relations].sort(
       (a, b) => a.factionA.localeCompare(b.factionA) || a.factionB.localeCompare(b.factionB),
     ),
+    npcAffinities: [...snapshot.npcAffinities].sort((a, b) => a.npcId.localeCompare(b.npcId)),
   };
 }
 

@@ -292,6 +292,7 @@ function sortedSnapshot(snapshot: SceneSnapshot): SceneSnapshot {
     relations: [...snapshot.relations].sort(
       (a, b) => a.factionA.localeCompare(b.factionA) || a.factionB.localeCompare(b.factionB),
     ),
+    npcAffinities: [...snapshot.npcAffinities].sort((a, b) => a.npcId.localeCompare(b.npcId)),
   };
 }
 
@@ -1045,7 +1046,7 @@ describe("handleCommand — free text", () => {
     ]);
   });
 
-  it("shifts an npc's affinity and records a fact when reckoning completes, and a reload folds identically", async () => {
+  it("shifts an npc's affinity and records a fact when reckoning completes, and the delta event alone rebuilds it on reload", async () => {
     const store = createInMemoryEventStore();
     const before: SceneSnapshot = {
       worldId: "emberfall",
@@ -1084,6 +1085,11 @@ describe("handleCommand — free text", () => {
       },
     ]);
 
+    // Folds from genesis, not from `before`: `sceneCampaign`'s override is
+    // in-memory-only and never reaches the event log. This still proves the
+    // `world_delta_applied` event alone carries enough to reconstruct the
+    // affinity change — full-state reload parity is covered elsewhere
+    // (replay.test.ts, e2e.test.ts).
     const reloaded = await loadCampaign({ campaignId: campaign.state.world.campaignId, store });
     expect(reloaded?.state.world.scene?.npcAffinities).toEqual(
       campaign.state.world.scene?.npcAffinities,

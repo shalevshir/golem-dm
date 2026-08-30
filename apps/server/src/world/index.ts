@@ -237,7 +237,7 @@ export function loadWorld(dir: string = dataDir(WORLD_DIR_RELATIVE)): AuthoredWo
   for (const node of questNodes.values()) {
     const where = `quest node ${node.nodeId}`;
     checkRef({ kind: "location", id: node.locationId }, where);
-    // Not routed through `checkRef`: `collections` indexes the three
+    // Not routed through `checkRef`: `collections` indexes the four
     // collections THIS directory's files define, and the encounter catalogue
     // is neither loaded from `dir` nor one of them. The message shape matches
     // `checkRef`'s so an author reading `problems` sees one vocabulary.
