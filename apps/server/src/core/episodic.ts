@@ -86,21 +86,42 @@ export async function indexEpisode(args: {
   record: EpisodicMemory;
   deadline: number;
   onUsage?: (usage: { promptTokens: number; completionTokens: number; totalTokens: number }) => void;
+  /**
+   * Fires with a failure code wherever this function would otherwise swallow
+   * one silently — an `AdapterErrorCode` from a failed `embed()` call,
+   * `"aborted"` for a deadline race lost, or a sensible ad hoc string
+   * (`"no_vector"`, `"embed_failed"`) for the other branches. Purely a
+   * signal: it changes nothing about how the turn degrades, only whether
+   * anything downstream can tell "no memories yet" apart from "embedding has
+   * been broken since deploy" (whole-branch review finding 2).
+   */
+  onFailure?: (code: string) => void;
 }): Promise<void> {
   try {
     const result = await raceDeadline(
       args.embedding.embed(args.spec, [args.record.summaryEnglish]),
       args.deadline,
     );
-    if (result === DEADLINE_TIMEOUT || !result.ok) return;
+    if (result === DEADLINE_TIMEOUT) {
+      args.onFailure?.("aborted");
+      return;
+    }
+    if (!result.ok) {
+      args.onFailure?.(result.error.code);
+      return;
+    }
     args.onUsage?.(result.value.usage);
 
     const vector = result.value.vectors[0];
-    if (vector === undefined) return;
+    if (vector === undefined) {
+      args.onFailure?.("no_vector");
+      return;
+    }
 
     await args.store.write(args.record, vector);
   } catch {
     // Swallowed deliberately — see the doc comment above.
+    args.onFailure?.("embed_failed");
   }
 }
 
@@ -119,18 +140,31 @@ export async function retrieveMemories(args: {
   limit: number;
   deadline: number;
   onUsage?: (usage: { promptTokens: number; completionTokens: number; totalTokens: number }) => void;
+  /** Same contract as `indexEpisode`'s `onFailure` — see its doc comment. */
+  onFailure?: (code: string) => void;
 }): Promise<string[]> {
   try {
     const result = await raceDeadline(args.embedding.embed(args.spec, [args.queryEnglish]), args.deadline);
-    if (result === DEADLINE_TIMEOUT || !result.ok) return [];
+    if (result === DEADLINE_TIMEOUT) {
+      args.onFailure?.("aborted");
+      return [];
+    }
+    if (!result.ok) {
+      args.onFailure?.(result.error.code);
+      return [];
+    }
     args.onUsage?.(result.value.usage);
 
     const vector = result.value.vectors[0];
-    if (vector === undefined) return [];
+    if (vector === undefined) {
+      args.onFailure?.("no_vector");
+      return [];
+    }
 
     const hits = await args.store.search(args.campaignId, vector, args.limit);
     return hits.map((hit) => hit.memory.summaryEnglish);
   } catch {
+    args.onFailure?.("embed_failed");
     return [];
   }
 }

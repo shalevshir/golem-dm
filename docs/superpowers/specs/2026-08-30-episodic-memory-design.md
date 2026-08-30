@@ -474,9 +474,15 @@ relocating the pricing table out of `tools/sim` — stays step 11's, as
 What this step owes instead is that it does not make the meter *silently*
 worse. `MetricsPort` gains `recordEmbeddingCall` and `recordSummaryCall`,
 following the `IntentCallMetrics` precedent exactly (`pipeline.ts:167-177`),
-and both emit `TokenUsage` through the existing structured-log implementation
-in `main.ts:109-130`. When step 11's fix lands, these two call sites need no
-retrofit — they are already reporting what the fix will learn to price.
+and both are implemented in `main.ts:109-130`'s existing structured-log
+transport. Only `recordEmbeddingCall` is actually called: `indexEpisode` and
+`retrieveMemories` wire it end to end. `recordSummaryCall` has no live call
+site — `SceneSummaryPort.summarize()` returns only `string | null`,
+discarding the `TokenUsage` its own underlying model call receives one layer
+down, and widening that port to return `{text, usage}` is out of this step's
+scope. When step 11's fix lands, the embedding call site needs no retrofit;
+the summary call site still needs that port widened before it can report
+anything.
 
 The honest statement, which the plan requires in the relevant doc comments:
 the cost meter remains a lower bound, and after this step it has five billed

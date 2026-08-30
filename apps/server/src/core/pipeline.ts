@@ -419,6 +419,16 @@ async function* untilDeadline(
  */
 const NARRATION_TERMINATORS = [".", "!", "?", "…"] as const;
 
+/**
+ * `retrieveMemories`'s own sub-deadline inside `sceneNarrate`, capped well
+ * under the turn's full `turnTimeoutMs` budget. Retrieval only enriches the
+ * prompt with past episodes — losing it degrades to "no memories this turn",
+ * a far better outcome than retrieval eating enough of the shared deadline
+ * that narration itself has to fall back to deterministic prose (whole-
+ * branch review finding 1).
+ */
+const RETRIEVAL_BUDGET_MS = 750;
+
 function endsComplete(text: string): boolean {
   const trimmed = text.trimEnd();
   return trimmed !== "" && NARRATION_TERMINATORS.some((mark) => trimmed.endsWith(mark));
@@ -891,11 +901,12 @@ export async function* handleCommand(
         campaignId: campaign.state.world.campaignId,
         queryEnglish: [card.sceneEnglish, ...card.npcIds].join(" "),
         limit: 3,
-        // `sceneNarrate`'s own parameter — the same shared deadline the
-        // narration ladder below runs under, per the spec's "retrieval
-        // happens on node transitions only, never inside a turn's
-        // narration path" (bounded, not literally excluded from the turn).
-        deadline,
+        // A tighter sub-deadline than `sceneNarrate`'s own `deadline`
+        // parameter — retrieval is background prompt enrichment, not the
+        // narration itself, so it gets its own small budget rather than a
+        // share of whatever the turn has left (`RETRIEVAL_BUDGET_MS`'s doc
+        // comment; whole-branch review finding 1).
+        deadline: Math.min(deadline, Date.now() + RETRIEVAL_BUDGET_MS),
         onUsage: (usage) => {
           ports.metrics?.recordEmbeddingCall?.({
             outcome: "ok",
@@ -904,6 +915,16 @@ export async function* handleCommand(
             promptTokens: usage.promptTokens,
             completionTokens: usage.completionTokens,
             totalTokens: usage.totalTokens,
+          });
+        },
+        onFailure: (code) => {
+          ports.metrics?.recordEmbeddingCall?.({
+            outcome: code,
+            purpose: "retrieve",
+            latencyMs: Date.parse(ports.clock()) - Date.parse(retrieveStartedAt),
+            promptTokens: 0,
+            completionTokens: 0,
+            totalTokens: 0,
           });
         },
       });
@@ -1290,8 +1311,16 @@ export async function* handleCommand(
     // `builtOf`'s guard to catch the desync one read later.
     campaign.built = null;
 
+    // Fire-and-forget, not `await`ed: nothing in `resolveIfConcluded`
+    // narrates after this point (the turn's narration already streamed via
+    // `narrate()` before `runEnemyTurns`/`resolveIfConcluded` ran), so there
+    // is no "after the narration yield" point to defer past here the way the
+    // quest-node-completion site defers past its own `sceneNarrate`. Making
+    // the player's response wait on indexing anyway would cost latency for
+    // no narration benefit — `indexEpisode` is already best-effort and never
+    // throws, so `void` is safe (whole-branch review finding 1).
     const indexStartedAt = ports.clock();
-    await indexEpisode({
+    void indexEpisode({
       store: ports.episodic,
       embedding: ports.embedding,
       spec: DEFAULT_EMBEDDING_SPEC,
@@ -1316,6 +1345,16 @@ export async function* handleCommand(
           promptTokens: usage.promptTokens,
           completionTokens: usage.completionTokens,
           totalTokens: usage.totalTokens,
+        });
+      },
+      onFailure: (code) => {
+        ports.metrics?.recordEmbeddingCall?.({
+          outcome: code,
+          purpose: "index",
+          latencyMs: Date.parse(ports.clock()) - Date.parse(indexStartedAt),
+          promptTokens: 0,
+          completionTokens: 0,
+          totalTokens: 0,
         });
       },
     });
@@ -1706,6 +1745,29 @@ export async function* handleCommand(
             // `builtOf`'s guard has nothing to catch.
             if (bridged !== null) campaign.built = bridged;
 
+            // Reads `currentScene()` fresh, post-emit: for a traversal this
+            // is the new node; for a `completeCurrentNode` it is the same
+            // one, and either way `sceneNarrate` narrates whatever node the
+            // player is standing in now. `targetNodeId === null` means no
+            // traversal happened (Decision 1's "conclude the current node"
+            // path) — narrating that as `arrived` would tell the player they
+            // reached a place they were already standing in, so it gets its
+            // own beat instead (whole-branch review finding 2).
+            const card = questNodeCard(statics.authored, currentScene().currentNodeId);
+            yield* sceneNarrate(
+              statics.character.characterId,
+              targetNodeId === null
+                ? { kind: "concluded", locationNameHebrew: card.locationNameHebrew }
+                : { kind: "arrived", locationNameHebrew: card.locationNameHebrew },
+              deadline,
+            );
+
+            // Indexed AFTER narration, not before: `indexEpisode` needs
+            // nothing from `sceneNarrate` (the summary it writes is already
+            // durable in the event log via `emitAll` above) and is
+            // explicitly best-effort, so there is no reason to make the
+            // player wait on it before their narration starts streaming
+            // (whole-branch review finding 1).
             const indexStartedAt = ports.clock();
             await indexEpisode({
               store: ports.episodic,
@@ -1730,24 +1792,18 @@ export async function* handleCommand(
                   totalTokens: usage.totalTokens,
                 });
               },
+              onFailure: (code) => {
+                ports.metrics?.recordEmbeddingCall?.({
+                  outcome: code,
+                  purpose: "index",
+                  latencyMs: Date.parse(ports.clock()) - Date.parse(indexStartedAt),
+                  promptTokens: 0,
+                  completionTokens: 0,
+                  totalTokens: 0,
+                });
+              },
             });
 
-            // Reads `currentScene()` fresh, post-emit: for a traversal this
-            // is the new node; for a `completeCurrentNode` it is the same
-            // one, and either way `sceneNarrate` narrates whatever node the
-            // player is standing in now. `targetNodeId === null` means no
-            // traversal happened (Decision 1's "conclude the current node"
-            // path) — narrating that as `arrived` would tell the player they
-            // reached a place they were already standing in, so it gets its
-            // own beat instead (whole-branch review finding 2).
-            const card = questNodeCard(statics.authored, currentScene().currentNodeId);
-            yield* sceneNarrate(
-              statics.character.characterId,
-              targetNodeId === null
-                ? { kind: "concluded", locationNameHebrew: card.locationNameHebrew }
-                : { kind: "arrived", locationNameHebrew: card.locationNameHebrew },
-              deadline,
-            );
             // For symmetry with `structured_action`'s ending — out of combat
             // (guaranteed by guard 2 above) this yields nothing; the
             // client's input re-enables on the `narrative_emitted` fold

@@ -1071,9 +1071,15 @@ combat with a UI that can still send them.
      `SceneNarrativePort`. `EMBEDDING_DIMENSIONS` in `@ai-dm/schemas` is the
      only shared addition (spec Decision 1).
    - *Cost — deferred, but instrumented.* Fixing the meter stays step 11's.
-     Both new call sites report usage through `MetricsPort` so that fix
-     needs no retrofit (spec Decision 11). Note the embedding call is **not**
-     per-turn as this section assumed: retrieval fires once per node
+     The embedding call site reports usage through `MetricsPort`
+     (`recordEmbeddingCall`) so that fix needs no retrofit there (spec
+     Decision 11). The summary call site (`recordSummaryCall`) is declared
+     and wired into `main.ts`'s structured-log implementation, but has no
+     live call site yet: `SceneSummaryPort.summarize()` returns only
+     `string | null`, discarding the `TokenUsage` its underlying model call
+     receives one layer down — widening that port to return `{text, usage}`
+     is a follow-up, not done in this branch. Note the embedding call is
+     **not** per-turn as this section assumed: retrieval fires once per node
      transition, so an ordinary turn adds nothing (spec Decision 7).
    - *Correction — the producer was never built.* This section listed it as
      resolved. At `2a71326` `EncounterResolvedPayload` is
@@ -1094,6 +1100,9 @@ becomes *more* urgent, not less, because this sequence adds two model tiers
 to the three that already bill (intent, tactical, narrative): step 4's intent
 router and step 7's scene summarizer, plus step 7's embedding call — five
 billed sources in all, none of them priced, on a meter that is unreportable
-by construction. Step 7 leaves both of its new call sites reporting usage
-through `MetricsPort`, so the fix prices them without touching them. And none
-of the above requires party play — ADR-0002 stands.
+by construction. Step 7 wires its embedding call site to `MetricsPort`
+(`recordEmbeddingCall`); its summary call site (`recordSummaryCall`) is
+declared but not yet live, pending the `SceneSummaryPort` widening noted
+above. The fix prices what already reports without touching it, and
+inherits that one open wire. None of the above requires party play —
+ADR-0002 stands.

@@ -155,6 +155,35 @@ describe("indexEpisode", () => {
     expect(await store.search("c1", [1, 0, 0], 3)).toEqual([]);
   });
 
+  it("reports the embedding's AdapterErrorCode through onFailure, not just silence", async () => {
+    const store = createInMemoryEpisodicStore();
+    const failing = {
+      embed: () =>
+        Promise.resolve({ ok: false as const, error: { code: "provider_error" as const, message: "down" } }),
+    };
+    let reported: string | undefined;
+
+    await indexEpisode({
+      store,
+      embedding: failing,
+      spec: DEFAULT_EMBEDDING_SPEC,
+      record: {
+        campaignId: "c1",
+        sequence: 4,
+        kind: "quest_node" as const,
+        refId: "weir",
+        summaryEnglish: "Tobin opened the gate.",
+        day: 2,
+      },
+      deadline: FAR_FUTURE,
+      onFailure: (code) => {
+        reported = code;
+      },
+    });
+
+    expect(reported).toBe("provider_error");
+  });
+
   it("writes nothing and does not throw or hang when the embedding call hangs past the deadline", async () => {
     const store = createInMemoryEpisodicStore();
     const hanging = { embed: () => hangs<never>() };
@@ -229,6 +258,28 @@ describe("retrieveMemories", () => {
     });
 
     expect(lines).toEqual([]);
+  });
+
+  it("reports a deadline loss through onFailure as \"aborted\"", async () => {
+    const store = createInMemoryEpisodicStore();
+    const hanging = { embed: () => hangs<never>() };
+    let reported: string | undefined;
+
+    const lines = await retrieveMemories({
+      store,
+      embedding: hanging,
+      spec: DEFAULT_EMBEDDING_SPEC,
+      campaignId: "c1",
+      queryEnglish: "anything",
+      limit: 3,
+      deadline: ALREADY_PAST,
+      onFailure: (code) => {
+        reported = code;
+      },
+    });
+
+    expect(lines).toEqual([]);
+    expect(reported).toBe("aborted");
   });
 
   it("returns an empty list, not a hang, when the embedding call hangs past the deadline", async () => {
