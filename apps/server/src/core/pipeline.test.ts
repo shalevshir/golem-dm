@@ -818,6 +818,7 @@ describe("handleCommand — free text", () => {
       currentNodeId: "guild-offer",
       completedNodeIds: ["arrival"],
       relations: [],
+      npcAffinities: [],
       day: 1,
     };
     const campaign = await sceneCampaign(store, before);
@@ -908,6 +909,7 @@ describe("handleCommand — free text", () => {
       currentNodeId: "guild-offer",
       completedNodeIds: ["arrival"],
       relations: [],
+      npcAffinities: [],
       day: 1,
     };
     const campaign = await sceneCampaign(store, before);
@@ -949,6 +951,7 @@ describe("handleCommand — free text", () => {
       currentNodeId: "saboteurs",
       completedNodeIds: ["arrival", "guild-offer", "the-weir"],
       relations: [{ factionA: "ashen-guild", factionB: "river-wardens", band: "war" }],
+      npcAffinities: [],
       day: 1,
     };
     const campaign = await sceneCampaign(store, before);
@@ -986,6 +989,7 @@ describe("handleCommand — free text", () => {
       currentNodeId: "guild-offer",
       completedNodeIds: ["arrival"],
       relations: [],
+      npcAffinities: [],
       day: 1,
     };
     const campaign = await sceneCampaign(store, before);
@@ -1015,6 +1019,7 @@ describe("handleCommand — free text", () => {
       currentNodeId: "reckoning",
       completedNodeIds: ["arrival", "guild-offer", "the-weir"],
       relations: [{ factionA: "ashen-guild", factionB: "river-wardens", band: "hostile" }],
+      npcAffinities: [],
       day: 1,
     };
     const campaign = await sceneCampaign(store, before);
@@ -1052,6 +1057,7 @@ describe("handleCommand — free text", () => {
       currentNodeId: "reckoning",
       completedNodeIds: ["arrival", "guild-offer", "the-weir"],
       relations: [{ factionA: "ashen-guild", factionB: "river-wardens", band: "hostile" }],
+      npcAffinities: [],
       day: 1,
     };
     const campaign = await sceneCampaign(store, before);
@@ -1080,6 +1086,7 @@ describe("handleCommand — free text", () => {
       currentNodeId: "reckoning",
       completedNodeIds: ["arrival", "guild-offer", "the-weir"],
       relations: [{ factionA: "ashen-guild", factionB: "river-wardens", band: "hostile" }],
+      npcAffinities: [],
       day: 1,
     };
     const campaign = await sceneCampaign(store, before);
@@ -2811,7 +2818,7 @@ describe("handleCommand — end of combat", () => {
       .filter((each): each is Extract<ServerFrame, { type: "event" }> => each.type === "event")
       .map((each) => each.event)
       .find((each) => each.type === "world_delta_applied");
-    expect(deltaEvent?.payload).toEqual({ relations: [], day: 2 });
+    expect(deltaEvent?.payload).toEqual({ relations: [], npcAffinities: [], day: 2 });
     expect(campaign.state.world.scene?.day).toBe(2);
   });
 

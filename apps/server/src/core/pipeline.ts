@@ -1110,11 +1110,12 @@ export async function* handleCommand(
       // follows, so the payload records what the engine actually did,
       // post-clamp, and cannot disagree with it.
       const delta = diffScene(before, transition.state);
-      if (delta.relations.length > 0 || delta.day !== undefined) {
+      if (delta.relations.length > 0 || delta.npcAffinities.length > 0 || delta.day !== undefined) {
         events.push({
           type: "world_delta_applied",
           payload: {
             relations: delta.relations,
+            npcAffinities: delta.npcAffinities,
             ...(delta.day === undefined ? {} : { day: delta.day }),
           },
         });
@@ -1424,11 +1425,16 @@ export async function* handleCommand(
             const sceneEvents: { type: GameEvent["type"]; payload: Record<string, unknown> }[] = [
               { type: "quest_node_completed", payload: { nodeId: before.currentNodeId } },
             ];
-            if (delta.relations.length > 0 || delta.day !== undefined) {
+            if (
+              delta.relations.length > 0 ||
+              delta.npcAffinities.length > 0 ||
+              delta.day !== undefined
+            ) {
               sceneEvents.push({
                 type: "world_delta_applied",
                 payload: {
                   relations: delta.relations,
+                  npcAffinities: delta.npcAffinities,
                   ...(delta.day === undefined ? {} : { day: delta.day }),
                 },
               });
