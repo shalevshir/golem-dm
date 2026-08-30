@@ -833,6 +833,70 @@ describe("App", () => {
     expect(sockets[0]?.close).toHaveBeenCalledTimes(1);
     expect(sockets[1]?.close).not.toHaveBeenCalled();
   });
+
+  it("ignores a stale createCampaign() resolution instead of opening a second socket", async () => {
+    // The StrictMode test above no longer exercises `runIdRef` through an
+    // actual race -- its reconnect path (a stored id) has no `await` left to
+    // race against, so it deterministically creates two sockets rather than
+    // racing over whether a stale run's `connect()` call is skipped. This
+    // test puts the SAME guard through a real race on the one `await` that
+    // remains anywhere in the connect effect: a fresh campaign's
+    // `createCampaign()` call, held pending on purpose, while a dependency
+    // change (`wsUrl`) bumps `runIdRef` out from under it.
+    const factory = vi.fn((): FakeSocket => fakeSocket());
+
+    let resolveCreateCampaign!: () => void;
+    const pendingCreateCampaign = new Promise<Response>((resolve) => {
+      resolveCreateCampaign = () => {
+        resolve({
+          ok: true,
+          json: (): Promise<unknown> => Promise.resolve({ campaignId: "stale-campaign" }),
+        } as Response);
+      };
+    });
+    // Only the very next `fetch` call is deferred -- that is `createCampaign`'s
+    // POST, since nothing else has fetched anything yet at this point.
+    fetchMock.mockImplementationOnce(() => pendingCreateCampaign);
+
+    const { rerender } = render(<App socketFactory={factory} wsUrl="ws://test/ws" />);
+    act(() => {
+      screen.getByRole("button", { name: he.app.startFight }).click();
+    });
+
+    // Run 1 is now suspended inside `await createCampaign(...)`, having never
+    // reached `connect()`. Changing `wsUrl` is a dependency change the connect
+    // effect actually reacts to (`net/connection.test.ts`/App.tsx's own deps
+    // array), so it cleans up run 1 (bumping `runIdRef`, closing a still-null
+    // `connectionRef`) and starts run 2 with a fresh, non-stale `runId`.
+    act(() => {
+      rerender(<App socketFactory={factory} wsUrl="ws://test/ws-2" />);
+    });
+
+    // Run 2 has its own, un-deferred `createCampaign()` call (the mocked
+    // implementation set in `beforeEach` resumes once the `mockImplementationOnce`
+    // above is consumed), so it completes and reaches `connect()` normally.
+    await waitFor(() => {
+      expect(factory).toHaveBeenCalledTimes(1);
+    });
+
+    // Now let run 1's stale resolution land. In App.tsx, the `sessionStorage`
+    // write for a fresh campaign happens on the line immediately before the
+    // `runIdRef` guard check, with no `await` between them -- so once that
+    // write is observable, run 1's guard decision (return early vs. call
+    // `connect()`) has already happened too. Waiting for it is a
+    // deterministic way to know run 1's continuation has fully executed,
+    // with no arbitrary sleep.
+    act(() => {
+      resolveCreateCampaign();
+    });
+    await waitFor(() => {
+      expect(sessionStorage.getItem(CAMPAIGN_STORAGE_KEY)).toBe("stale-campaign");
+    });
+
+    // The guard did its job: run 1's resumed continuation never reached
+    // `connect()`, so no second socket was ever constructed for it.
+    expect(factory).toHaveBeenCalledTimes(1);
+  });
 });
 
 // §4.7 step 4's web slice. A joined scene campaign has `encounter === null`
