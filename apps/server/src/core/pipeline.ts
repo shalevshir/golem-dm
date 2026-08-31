@@ -43,6 +43,7 @@ import {
 import type {
   EmbeddingPort,
   IntentAgent,
+  IntentNpcPresent,
   IntentResult,
   NarrativePort,
   SceneBeat,
@@ -547,6 +548,7 @@ function questNodeCard(
   locationNameHebrew: string;
   npcNamesHebrew: string[];
   npcIds: string[];
+  npcs: IntentNpcPresent[];
 } {
   const node = authored.questNodes.get(nodeId);
   if (node === undefined) {
@@ -564,6 +566,14 @@ function questNodeCard(
     locationNameHebrew: location.nameHebrew,
     npcNamesHebrew: present.map((npc) => npc.nameHebrew),
     npcIds: present.map((npc) => npc.npcId),
+    // The same people, in the shape the intent router needs. `present` is
+    // already computed here, so the router and the narrator cannot disagree
+    // about who is standing in the scene.
+    npcs: present.map((npc) => ({
+      nameEnglish: npc.nameEnglish,
+      nameHebrew: npc.nameHebrew,
+      descriptionEnglish: npc.descriptionEnglish,
+    })),
   };
 }
 
@@ -1183,7 +1193,41 @@ export async function* handleCommand(
   // either way.
   function* playerAffordances(): Iterable<ServerFrame> {
     const encounter = campaign.state.encounter;
-    if (encounter === null) return;
+    if (encounter === null) {
+      // Out of combat this used to `return` with nothing, by design — the
+      // step 4 spec says so explicitly. A real playthrough showed what that
+      // costs: combat shows a board, a turn order and an action bar, while a
+      // scene showed a paragraph of Hebrew and an empty text box, and the
+      // node's edges existed only in `data/world/` and inside the router's
+      // system prompt. `arrival`'s two edges are both conversations, so the
+      // player most likely to be stuck is the one on their first turn, and
+      // the narrate-only categories answer them in fluent scene-aware prose
+      // that reads exactly like progress. Nothing anywhere told them the way
+      // on was to hear out the guild factor.
+      const scene = campaign.state.world.scene;
+      if (scene === null) return;
+
+      // `availableEdges` is the same call `free_text` classifies against, so
+      // what the player is shown and what the router is offered cannot drift
+      // apart. An invalid result returns empty rather than throwing: this
+      // runs at the END of an otherwise-complete turn, and the corrupt-content
+      // throw belongs to `free_text`, which reads the same edges before doing
+      // anything the player would lose.
+      const options = availableEdges(sceneStaticsOf(campaign).authored, sceneStateFrom(scene));
+      if (!options.valid) return;
+
+      yield {
+        type: "scene_affordances",
+        nodeId: scene.currentNodeId,
+        edges: options.edges.map((each) => ({
+          to: each.edge.to,
+          labelHebrew: each.edge.labelHebrew,
+          open: each.open,
+        })),
+        forSequence: campaign.nextSequence - 1,
+      };
+      return;
+    }
     const actorId = encounter.turnOrder[encounter.currentActorIndex];
     if (actorId === undefined) return;
 
@@ -1614,9 +1658,11 @@ export async function* handleCommand(
             );
           }
 
+          const routerCard = questNodeCard(statics.authored, before.currentNodeId);
           classifyResult = await ports.intent.classify({
             text: command.text,
-            sceneEnglish: questNodeCard(statics.authored, before.currentNodeId).sceneEnglish,
+            sceneEnglish: routerCard.sceneEnglish,
+            npcs: routerCard.npcs,
             edges: options.edges.map((each) => ({
               to: each.edge.to,
               labelEnglish: each.edge.labelEnglish,

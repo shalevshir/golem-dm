@@ -137,8 +137,21 @@ export const WorldEffect = z.discriminatedUnion("kind", [
 /** A destination and a label. Predicates gate the target node, not the edge. */
 export const QuestEdge = z.object({
   to: ContentId,
-  /** What the choice looks like to the router. English; the narrator translates. */
+  /** What the choice looks like to the router. English, like every other prompt input. */
   labelEnglish: z.string().min(1),
+  /**
+   * What the choice looks like to the PLAYER, in the `scene_affordances`
+   * frame. Authored rather than translated at runtime, for the same reason
+   * `LocationDefinition.nameHebrew` is: this is a fixed label on a fixed
+   * choice, so a model call per render would buy nothing but latency, cost
+   * and the chance that the same edge reads differently on two turns.
+   *
+   * Required, not optional — an edge the player cannot be shown is an edge
+   * they cannot choose, which is precisely the dead end this field exists to
+   * close. A missing one must fail at content load, not silently render a
+   * blank affordance.
+   */
+  labelHebrew: z.string().min(1),
 });
 
 export const QuestNode = z.object({

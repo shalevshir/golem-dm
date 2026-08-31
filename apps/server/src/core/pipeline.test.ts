@@ -1502,6 +1502,36 @@ describe("handleCommand — free text: narrate-only categories", () => {
     },
   );
 
+  // The dead end `scene_affordances` exists to close. A `social` turn changes
+  // nothing, yet still narrates fluent, scene-aware Hebrew that reads exactly
+  // like progress — so without this frame the player is left with a paragraph,
+  // an empty text box, and no way to learn that `arrival`'s two edges are both
+  // conversations. Asserted on the narrate-only branch deliberately: the turn
+  // that moves nothing is the one that most needs to say what would.
+  it("tells the player what the scene offers even on a turn that changes nothing", async () => {
+    const store = createInMemoryEventStore();
+    const campaign = await sceneCampaign(store);
+    const ports: TurnPorts = { ...portsWith(store), intent: classifiedAs({ category: "social" }) };
+
+    const frames = await drain(
+      handleCommand(
+        campaign,
+        { type: "free_text", clientMessageId: "c1", text: "hello there" },
+        ports,
+      ),
+    );
+
+    // Hebrew, because a person reads this frame — the one direction invariant
+    // 2 sanctions. `labelEnglish` stays on the content, for the router.
+    expect(frames.find((each) => each.type === "scene_affordances")).toMatchObject({
+      nodeId: "arrival",
+      edges: [
+        { to: "guild-offer", labelHebrew: "להקשיב לנציג הגילדה", open: true },
+        { to: "warden-warning", labelHebrew: "להקשיב לשומר הנהר", open: true },
+      ],
+    });
+  });
+
   it("routes combat to a grounded reply beat rather than starting a fight, narration only", async () => {
     const store = createInMemoryEventStore();
     const campaign = await sceneCampaign(store);

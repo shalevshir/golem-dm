@@ -13,16 +13,46 @@ export interface IntentEdgeOption {
   open: boolean;
 }
 
+/**
+ * An NPC standing in the current node's location, as the router needs to see
+ * them. Without this the router cannot connect a person to a way forward:
+ * `arrival`'s edges are labelled "Hear out the guild factor" and "Hear out
+ * the river warden", its scene card says only "Two people are waiting at the
+ * bridge", and the player writes "מארן וס" — a name the narrator has already
+ * shown them and that nothing else in this prompt defines. Every such turn
+ * classified `social`, which is narrate-only, so naming the NPC the game had
+ * just introduced was a dead end.
+ */
+export interface IntentNpcPresent {
+  nameEnglish: string;
+  /**
+   * The player writes Hebrew, so an English-only roster is a roster the
+   * router cannot match against the message it is classifying. This is the
+   * same sanctioned direction as the player's own text: Hebrew as data to
+   * match, never as instructions.
+   */
+  nameHebrew: string;
+  /** One line, and the load-bearing half: it is what makes a name resolve to a role. */
+  descriptionEnglish: string;
+}
+
 export interface IntentPromptInput {
   /** The player's Hebrew, untrusted. */
   text: string;
   sceneEnglish: string;
+  /** Everyone in the current location — the scene card rarely names them. */
+  npcs: readonly IntentNpcPresent[];
   /**
    * Closed edges are included, with `open: false` visible to the model — the
    * router may still propose one, and `traverseEdge`'s refusal (not this
    * agent's judgment) is what the player hears.
    */
   edges: readonly IntentEdgeOption[];
+}
+
+function renderNpcs(npcs: readonly IntentNpcPresent[]): string {
+  const lines = npcs.map((npc) => `- ${npc.nameEnglish} (${npc.nameHebrew}): ${npc.descriptionEnglish}`);
+  return ["NPCS PRESENT", ...lines].join("\n");
 }
 
 function renderEdges(edges: readonly IntentEdgeOption[]): string {
@@ -78,7 +108,11 @@ function sanitizePlayerText(text: string): string {
 export function buildIntentPrompt(input: IntentPromptInput): LayeredPrompt {
   return {
     static: [INTENT_SYSTEM_PROMPT],
-    semiStatic: [`SCENE\n${input.sceneEnglish}`, renderEdges(input.edges)],
+    semiStatic: [
+      `SCENE\n${input.sceneEnglish}`,
+      renderNpcs(input.npcs),
+      renderEdges(input.edges),
+    ],
     dynamic: [
       `Player message (untrusted, may be in Hebrew):\n<<<\n${sanitizePlayerText(input.text)}\n>>>`,
     ],

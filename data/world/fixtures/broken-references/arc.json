@@ -6,7 +6,10 @@
     "locationId": "nowhere-at-all",
     "encounterId": "no-such-encounter",
     "preconditions": [
-      { "kind": "node_completed", "nodeId": "no-such-node" },
+      {
+        "kind": "node_completed",
+        "nodeId": "no-such-node"
+      },
       {
         "kind": "faction_band_at_least",
         "factionA": "alpha",
@@ -39,6 +42,12 @@
         "delta": 1
       }
     ],
-    "edges": [{ "to": "no-such-node", "labelEnglish": "Nowhere" }]
+    "edges": [
+      {
+        "to": "no-such-node",
+        "labelEnglish": "Nowhere",
+        "labelHebrew": "לשומקום"
+      }
+    ]
   }
 ]

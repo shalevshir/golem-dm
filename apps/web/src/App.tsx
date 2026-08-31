@@ -28,6 +28,7 @@ import { ErrorBanner } from "./components/ErrorBanner.js";
 import { FreeTextBar } from "./components/FreeTextBar.js";
 import { Grid } from "./components/Grid.js";
 import { NarrativePane } from "./components/NarrativePane.js";
+import { SceneOptions } from "./components/SceneOptions.js";
 import { he } from "./i18n.js";
 
 const ENCOUNTER_ID = "goblin-ambush";
@@ -494,6 +495,15 @@ export function App(props: AppProps): JSX.Element {
         />
 
         <NarrativePane text={state.narrative} />
+
+        {/* Above the input, not below it: the options are what the player
+            reads before deciding what to type, and a list under the box is a
+            list found after the decision was already made. */}
+        <SceneOptions
+          affordances={state.sceneAffordances}
+          disabled={pendingFreeTextId !== null || status !== "open"}
+          onChoose={sendFreeText}
+        />
 
         <FreeTextBar
           disabled={pendingFreeTextId !== null || status !== "open"}

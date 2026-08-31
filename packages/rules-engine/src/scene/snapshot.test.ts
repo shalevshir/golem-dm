@@ -220,7 +220,7 @@ describe("diffScene", () => {
           "start",
           {
             ...originalStart,
-            edges: [...originalStart.edges, { to: "npc-node", labelEnglish: "Talk to Sela" }],
+            edges: [...originalStart.edges, { to: "npc-node", labelEnglish: "Talk to Sela", labelHebrew: "לדבר עם סלה" }],
           },
         ],
         [
@@ -278,7 +278,7 @@ describe("diffScene", () => {
           "start",
           {
             ...originalStart,
-            edges: [...originalStart.edges, { to: "npc-node", labelEnglish: "Talk to Sela" }],
+            edges: [...originalStart.edges, { to: "npc-node", labelEnglish: "Talk to Sela", labelHebrew: "לדבר עם סלה" }],
           },
         ],
         [
@@ -292,7 +292,7 @@ describe("diffScene", () => {
             effects: [
               { kind: "shift_npc_affinity" as const, npcId: "sela-the-innkeeper", delta: 1 },
             ],
-            edges: [{ to: "npc-node-2", labelEnglish: "Talk again" }],
+            edges: [{ to: "npc-node-2", labelEnglish: "Talk again", labelHebrew: "לדבר שוב" }],
           },
         ],
         [

@@ -11,9 +11,19 @@ import { INTENT_TOOL_NAME } from "./prompt-text.js";
 
 const usage = { promptTokens: 50, completionTokens: 10, totalTokens: 60 };
 
+/** One NPC present, so the roster the router reads is never empty in a test. */
+const NPCS = [
+  {
+    nameEnglish: "Sela the Innkeeper",
+    nameHebrew: "סלה הפונדקאית",
+    descriptionEnglish: "Keeps the only inn in town.",
+  },
+];
+
 const input = {
   text: "אני מנסה לפרוץ את המנעול",
   sceneEnglish: "A dusty tavern common room.",
+  npcs: NPCS,
   edges: [{ to: "cellar-stairs", labelEnglish: "the cellar stairs", open: true }],
 };
 

@@ -23,6 +23,9 @@ export const he = {
     placeholder: "מה תרצה לעשות?",
     send: "שלח",
   },
+  scene: {
+    optionsTitle: "מה אפשר לעשות כאן",
+  },
   actions: {
     dodge: "התחמקות",
     dash: "ריצה",

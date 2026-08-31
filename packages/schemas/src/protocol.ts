@@ -327,6 +327,43 @@ export const ServerFrame = z.discriminatedUnion("type", [
      */
     forSequence: z.number().int().min(0),
   }),
+  /**
+   * The out-of-combat twin of `turn_affordances`, and the answer to the
+   * question a scene could not previously answer: what can I actually do
+   * here? Combat has always shown its options — a board, a turn order, an
+   * action bar — while a scene showed a paragraph of Hebrew and an empty
+   * text box, with the node's edges reachable only by guessing the phrasing
+   * that the router would read as `exploration`. A player had no way to
+   * learn that `arrival`'s two edges are both conversations.
+   *
+   * Pushed at the same points `turn_affordances` is, from the same
+   * `playerAffordances()` call: exactly one of the two frames is emitted per
+   * turn, whichever matches the mode the campaign is in.
+   *
+   * Labels are Hebrew because this frame is read by a person, not a model —
+   * the one direction invariant 2 sanctions. `labelEnglish` stays on the
+   * content and keeps going to the router.
+   */
+  z.object({
+    type: z.literal("scene_affordances"),
+    /** The node the player is standing in, for the client to key renders on. */
+    nodeId: ContentId,
+    edges: z.array(
+      z.object({
+        to: ContentId,
+        labelHebrew: z.string().min(1),
+        /**
+         * Closed edges are sent, not filtered. The player learns the arc has
+         * somewhere else to go and that they cannot go there yet, which is
+         * strictly more information than an edge that silently does not
+         * exist. The client renders these disabled.
+         */
+        open: z.boolean(),
+      }),
+    ),
+    /** Same contract as `turn_affordances.forSequence` — see its comment. */
+    forSequence: z.number().int().min(0),
+  }),
   z.object({
     type: z.literal("rejected"),
     clientMessageId: z.string(),
