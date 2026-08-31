@@ -1175,8 +1175,12 @@ export async function* handleCommand(
    * do in between, so a single call here must be able to auto-play the rest
    * of the fight up to its own authored round cap, not just one circuit of
    * the turn order. `resolveIfConcluded`'s own `maxRounds` terminator is
-   * what actually ends a fight that runs that long; this bound only has to
-   * outlast it, never enforce it a second way.
+   * the backstop if a fight somehow runs that long; this bound only has to
+   * outlast it, never enforce it a second way. In practice the line below —
+   * `conclusionOf` returning `"stalemate"` the instant a Stable party member
+   * leaves no one able to act while a hostile survives — ends the loop
+   * within a handful of rounds, not `maxRounds` of them; see the design
+   * doc's 2026-08-31 addendum.
    */
   async function* runEnemyTurns(): AsyncIterable<ServerFrame> {
     const bound = encounterOf(campaign).turnOrder.length * (builtOf(campaign).maxRounds + 1);

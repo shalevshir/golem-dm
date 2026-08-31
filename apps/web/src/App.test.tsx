@@ -227,6 +227,28 @@ describe("App", () => {
     });
   });
 
+  it("renders a stalemate when the hero is Stable but a hostile is still up", async () => {
+    // A combat-only campaign never gets an `encounter_resolved` (the bracket
+    // stays open — `resolveIfConcluded` is silent when there's no scene to
+    // return to), so this status text is the ONLY place a player learns the
+    // fight is over: `conclusionOf` reporting "stalemate" is what ends the
+    // wait, not a terminal frame.
+    await start();
+    act(() => {
+      socket.emitMessage({
+        type: "campaign_state",
+        sequence: 9,
+        snapshot: snapshotWith([
+          combatant("hero", "party", "unconscious", { deathSaves: { successes: 3, failures: 0 } }),
+          combatant("goblin-a", "hostile", "alive"),
+        ]),
+      });
+    });
+
+    expect(await screen.findByText(he.app.stalemate)).toBeInTheDocument();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
   it("renders a defeat as a normal ending, not an error", async () => {
     // The party is expected to lose, and NO terminal frame is ever
     // sent — the pipeline simply stops answering. The conclusion is therefore

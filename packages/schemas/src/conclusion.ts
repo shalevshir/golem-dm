@@ -21,7 +21,7 @@
 // instant flip the moment HP hits 0.
 import type { EncounterState } from "./protocol.js";
 
-export type Conclusion = "ongoing" | "victory" | "defeat";
+export type Conclusion = "ongoing" | "victory" | "defeat" | "stalemate";
 
 /**
  * Who won, or whether the fight is still deciding that.
@@ -32,6 +32,14 @@ export type Conclusion = "ongoing" | "victory" | "defeat";
  * persistent-hp spec, Decision 4). Once no save is pending, "standing" means
  * alive OR unconscious-but-stable: a stabilized combatant did not lose just
  * by falling, and a won fight can end with the hero down but not dead.
+ *
+ * Two factions can still both be standing at that point — a Stable party
+ * member does not act again, and no rule lets a hostile end the fight
+ * either. If no party combatant left standing can still act, nothing here
+ * will ever change again, so this reports "stalemate" immediately rather
+ * than leaving the caller to keep polling an outcome that will never arrive
+ * (previously only `runEnemyTurns`'s own round cap caught this, many real
+ * turns later).
  */
 export function conclusionOf(snapshot: EncounterState): Conclusion {
   const combatants = snapshot.combatants;
@@ -49,7 +57,10 @@ export function conclusionOf(snapshot: EncounterState): Conclusion {
     (each) => each.status === "alive" || each.status === "unconscious",
   );
   const factions = new Set(standing.map((each) => each.faction));
-  if (factions.size > 1) return "ongoing";
+  if (factions.size > 1) {
+    const partyCanAct = standing.some((each) => each.faction === "party" && each.status === "alive");
+    return partyCanAct ? "ongoing" : "stalemate";
+  }
   if (standing.length === 0) return "defeat";
   return factions.has("party") ? "victory" : "defeat";
 }
