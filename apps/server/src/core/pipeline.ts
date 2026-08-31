@@ -1796,11 +1796,15 @@ export async function* handleCommand(
 
         const statics = sceneStaticsOf(campaign);
 
-        // One shared 10s budget for this turn's classify call AND its
-        // narration — see `enemyTurn`'s identical rationale and
-        // `sceneNarrate`'s doc comment. `controller` wraps only the classify
-        // call (the one thing here that takes an `AbortSignal`); `deadline`
-        // itself, not the controller, is what `sceneNarrate` shares it with.
+        // One shared 10s budget for this turn's classify call, `gmStep`'s
+        // GM call, and the narration — see `enemyTurn`'s identical rationale
+        // and `sceneNarrate`'s doc comment. `controller` wraps only the
+        // classify call — its `timer` is cleared the moment that call
+        // resolves (the `finally` below), so `controller.signal` cannot fire
+        // for anything that runs later in the same turn. `deadline` itself is
+        // what every later stage (`gmStep`, `sceneNarrate`) shares instead,
+        // each striking its own fresh `AbortSignal.timeout`/sub-deadline off
+        // of it rather than reusing this controller.
         const deadline = Date.now() + ports.turnTimeoutMs;
         const controller = new AbortController();
         const timer = setTimeout(
@@ -1928,7 +1932,16 @@ export async function* handleCommand(
               titleEnglish: each.node.titleEnglish,
               open: each.open,
             })),
-            abortSignal: controller.signal,
+            // NOT `controller.signal` — that controller's own `timer` is
+            // already cleared (in the `finally` right after the classify
+            // call above resolves), so its signal can never fire again by
+            // the time `gmStep` runs. A fresh timeout, scoped to whatever is
+            // left of the turn's shared `deadline`, is what actually makes
+            // the doc comment above's "timeout... degrades to no move" true
+            // — without it a hung GM provider blocks this turn (and, since
+            // `handleCommand` is drained under the per-campaign lock in
+            // `ws.ts`, the player's next one) forever.
+            abortSignal: AbortSignal.timeout(Math.max(0, deadline - Date.now())),
           });
 
           const totals = proposal.usage.reduce(
@@ -2047,13 +2060,16 @@ export async function* handleCommand(
 
             if (!transition.valid) {
               // Refusal is data all the way to the player's ear (Decision 6):
-              // no error frame, no event beyond the two already emitted, and
-              // `campaign.state.world.scene` is untouched — this branch never
-              // calls `emit` for a scene event.
-              //
-              // The GM tier still runs here (spec Decision 7): the traversal
-              // did not happen, but the player's turn did, and improvisation
-              // is not gated on exploration having succeeded.
+              // no error frame, and the REFUSED traversal itself contributes
+              // no event beyond the two already emitted — `campaign.state`
+              // is untouched by the refusal itself, this branch never calls
+              // `emit`/`emitAll` for it. That is no longer the whole story,
+              // though: the GM tier still runs here (spec Decision 7), and an
+              // ACCEPTED `gmStep()` move CAN append `narrative_move_applied`
+              // plus `world_delta_applied`/`quest_node_entered` and change
+              // scene state, right below — the traversal did not happen, but
+              // the player's turn did, and improvisation is not gated on
+              // exploration having succeeded.
               yield* gmStep();
               yield* sceneNarrate(
                 statics.character.characterId,
@@ -2294,9 +2310,12 @@ export async function* handleCommand(
               }),
             });
 
-            // No state change (design spec Non-goals: a check informs
-            // narration and the log, it does not gate traversal) — this
-            // branch never calls `emit`/`emitAll` for a scene event.
+            // No state change FROM THE CHECK ITSELF (design spec Non-goals: a
+            // check informs narration and the log, it does not gate
+            // traversal) — the roll above never calls `emit`/`emitAll` for a
+            // scene event. `gmStep` right below is a separate source: an
+            // ACCEPTED move it proposes off this check's outcome can still
+            // append `narrative_move_applied` and change scene state.
             yield* gmStep({
               ability,
               ...(classification.skill === undefined ? {} : { skill: classification.skill }),
@@ -2316,12 +2335,16 @@ export async function* handleCommand(
             return;
           }
 
-          // Narrate-only categories (design spec Decision 6): a grounded
-          // reply off the scene card and the category alone, no event beyond
-          // the `player_input`/`intent_classified` pair already emitted
-          // above, and no state change. `combat` does not enter combat here
-          // (Non-goals: the combat bridge is a later step) — it only tells
-          // the player fighting is not available this way yet.
+          // Narrate-only categories (design spec Decision 6): the CATEGORY
+          // ROUTING ITSELF contributes no event beyond the
+          // `player_input`/`intent_classified` pair already emitted above,
+          // and no state change — it is just a grounded reply off the scene
+          // card. `gmStep` right below is a separate source, though: an
+          // ACCEPTED move it proposes for this turn can still append
+          // `narrative_move_applied` and change scene state. `combat` does
+          // not enter combat here (Non-goals: the combat bridge is a later
+          // step) — it only tells the player fighting is not available this
+          // way yet.
           case "social":
           case "ooc":
           case "combat": {
