@@ -52,8 +52,16 @@ describe("DEFAULT_MODEL_ROUTING", () => {
     expect(DEFAULT_MODEL_ROUTING.summary.reasoningEffort).toBe("low");
   });
 
+  it("routes gm to openai, never google, since NarrativeMove is a discriminated union", () => {
+    expect(DEFAULT_MODEL_ROUTING.gm.provider).toBe("openai");
+    expect(DEFAULT_MODEL_ROUTING.gm.modelId).toBe("gpt-5.4-nano");
+    expect(DEFAULT_MODEL_ROUTING.gm.temperature).toBe(0.4);
+    expect(DEFAULT_MODEL_ROUTING.gm.reasoningEffort).toBe("low");
+  });
+
   it("covers every agent role", () => {
     expect(Object.keys(DEFAULT_MODEL_ROUTING).sort()).toStrictEqual([
+      "gm",
       "intent",
       "narrative",
       "summary",

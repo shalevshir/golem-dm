@@ -39,6 +39,7 @@ function routingFor(): ModelRouting {
     tactical: SMOKE_ARM.spec,
     narrative: SMOKE_ARM.spec,
     summary: SMOKE_ARM.spec,
+    gm: SMOKE_ARM.spec,
   };
 }
 

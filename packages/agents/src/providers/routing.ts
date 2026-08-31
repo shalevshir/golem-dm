@@ -7,7 +7,7 @@ import type { EmbeddingSpec } from "./embedding-port.js";
 /** JSON as providers accept it. Declared here so routing stays SDK-free. */
 export type JsonValue = null | string | number | boolean | JsonValue[] | { [key: string]: JsonValue };
 
-export type AgentRole = "intent" | "tactical" | "narrative" | "summary";
+export type AgentRole = "intent" | "tactical" | "narrative" | "summary" | "gm";
 export type ProviderId = "anthropic" | "google" | "openai";
 
 /**
@@ -121,6 +121,22 @@ export const DEFAULT_MODEL_ROUTING: ModelRouting = {
     provider: "google",
     modelId: "gemini-3.1-flash-lite",
     temperature: 0,
+    reasoningEffort: "low",
+  },
+  /**
+   * openai, not google, and not by preference: `NarrativeMove` is a
+   * `z.discriminatedUnion`, which compiles to `anyOf`, and that is outside
+   * google's function-calling schema subset — the same 400 that moved
+   * `intent` here on 2026-08-30.
+   *
+   * `temperature: 0.4`: a move is a judgement about what the scene warrants,
+   * so it is neither the cold compression `summary` wants nor the free
+   * invention `narrative` wants.
+   */
+  gm: {
+    provider: "openai",
+    modelId: "gpt-5.4-nano",
+    temperature: 0.4,
     reasoningEffort: "low",
   },
 };
