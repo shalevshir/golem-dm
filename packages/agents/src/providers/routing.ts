@@ -63,11 +63,41 @@ export type ModelRouting = Record<AgentRole, ModelSpec>;
  * rather than model thinking time. `claude-sonnet-5` was the only family
  * whose p95 (7.2-7.9s) fits inside the timeout, at 3.4x the cost, and is the
  * fallback choice if that tail proves unacceptable in the step 8 server.
+ *
+ * The first live session (2026-08-30) found two independent faults on the
+ * `intent` path, both fixed here as data edits:
+ *
+ * - **`gemini-3-flash` never existed.** A plan-time guess no live call ever
+ *   exercised: the first free-text turn came back `provider_error` in 254ms
+ *   with zero tokens, and the provider's own words were `Model is not found:
+ *   models/gemini-3-flash for api version v1beta`. `summary` now names
+ *   `gemini-3.1-flash-lite` — a real id (`GET
+ *   /v1beta/models/gemini-3.1-flash-lite` resolves it), the only google id
+ *   step 7b ever called live, and verified against this repo's own
+ *   `generateText` on 2026-08-30. Google's tactical disqualification above
+ *   does not carry over: a summary does not propose a legal turn.
+ *
+ * - **Google cannot express `IntentClassification`.** Correcting the id only
+ *   moved the failure from 404 to a 400, `Request contains an invalid
+ *   argument`. `IntentClassification` (`@ai-dm/schemas`) is a
+ *   `z.discriminatedUnion`, which compiles to `anyOf`, and that is outside
+ *   Google's function-calling schema subset. Isolated live, same prompt,
+ *   same 2026-08-30 session: google + the real union 400s, google + a flat
+ *   single-object schema succeeds, openai + the real union succeeds. So
+ *   `intent` moves to openai. Flattening the schema was the alternative and
+ *   was rejected — the `check` arm's `ability`/`skill`/`difficulty` only
+ *   exist because the union carries them, and invariant 4 makes that schema
+ *   the single definition, not a per-provider dialect.
+ *
+ * `gpt-5.4-nano` because it is already the wired, benchmarked openai tier;
+ * `low` effort, not tactical's `high`, because this is a closed-set label
+ * rather than a legality problem, and low measured 3.4s end to end against
+ * the 10s turn budget.
  */
 export const DEFAULT_MODEL_ROUTING: ModelRouting = {
   intent: {
-    provider: "google",
-    modelId: "gemini-3-flash",
+    provider: "openai",
+    modelId: "gpt-5.4-nano",
     temperature: 0,
     reasoningEffort: "low",
   },
@@ -89,7 +119,7 @@ export const DEFAULT_MODEL_ROUTING: ModelRouting = {
    */
   summary: {
     provider: "google",
-    modelId: "gemini-3-flash",
+    modelId: "gemini-3.1-flash-lite",
     temperature: 0,
     reasoningEffort: "low",
   },

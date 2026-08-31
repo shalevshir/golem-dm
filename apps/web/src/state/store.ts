@@ -20,11 +20,29 @@ import type {
   TurnAffordances,
 } from "@ai-dm/schemas";
 
+/**
+ * The `scene_affordances` frame minus its transport fields. Extracted from
+ * `ServerFrame` rather than re-declared: invariant 4 puts the shape in
+ * `@ai-dm/schemas` once, and a hand-written twin here is exactly the
+ * duplicate it forbids.
+ */
+export type SceneAffordances = Omit<
+  Extract<ServerFrame, { type: "scene_affordances" }>,
+  "type" | "forSequence"
+>;
+
 export interface ClientState {
   snapshot: CampaignState | null;
   /** The highest sequence folded. Drives `resumeFrom` on a reconnect. */
   sequence: number;
   affordances: TurnAffordances | null;
+  /**
+   * The out-of-combat twin of `affordances`: the current scene node's edges,
+   * as the player is allowed to see them. `null` until the first
+   * `scene_affordances` frame, and in a combat-only campaign forever — the
+   * server sends whichever of the two frames matches the mode.
+   */
+  sceneAffordances: SceneAffordances | null;
   /** The current turn's narrative, accumulated from its token stream. */
   narrative: string;
   narrativeStreamId: string | null;
@@ -58,6 +76,7 @@ export const initialClientState: ClientState = {
   snapshot: null,
   sequence: 0,
   affordances: null,
+  sceneAffordances: null,
   narrative: "",
   narrativeStreamId: null,
   lastError: null,
@@ -218,6 +237,7 @@ export function applyFrame(state: ClientState, frame: ServerFrame): ClientState 
         snapshot: frame.snapshot,
         sequence: frame.sequence,
         affordances: null,
+        sceneAffordances: null,
         lastError: null,
         lastRejection: null,
         combatLog: restated ? state.combatLog : [],
@@ -236,6 +256,10 @@ export function applyFrame(state: ClientState, frame: ServerFrame): ClientState 
         // stale. The server pushes a replacement when control is the
         // player's, so clearing here cannot strand the UI.
         affordances: null,
+        // Same reasoning for the scene half: a traversal invalidates the
+        // edge list, and every path through a turn ends in the
+        // `playerAffordances()` call that replaces it.
+        sceneAffordances: null,
         combatLog: foldCombatLog(state.combatLog, state.snapshot.encounter, frame.event),
       };
     }
@@ -250,6 +274,20 @@ export function applyFrame(state: ClientState, frame: ServerFrame): ClientState 
         actions: frame.actions,
       };
       return { ...state, affordances };
+    }
+
+    case "scene_affordances": {
+      // Same staleness rule as `turn_affordances` above: a set of edges must
+      // never be applied to a scene that has already moved past them.
+      if (frame.forSequence < state.sequence) return state;
+      return {
+        ...state,
+        sceneAffordances: {
+          nodeId: frame.nodeId,
+          edges: frame.edges,
+          canConclude: frame.canConclude,
+        },
+      };
     }
 
     case "narrative_token":

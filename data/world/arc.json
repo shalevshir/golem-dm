@@ -5,8 +5,16 @@
     "sceneEnglish": "The road drops out of the pines and Emberfall is below you: a weir throwing white water on the left, a hillside of smoking kilns on the right, and a town wedged between them that has clearly not been sleeping well. Two people are waiting at the bridge, and they are not standing together.",
     "locationId": "emberfall",
     "edges": [
-      { "to": "guild-offer", "labelEnglish": "Hear out the guild factor" },
-      { "to": "warden-warning", "labelEnglish": "Hear out the river warden" }
+      {
+        "to": "guild-offer",
+        "labelEnglish": "Hear out the guild factor",
+        "labelHebrew": "להקשיב לנציג הגילדה"
+      },
+      {
+        "to": "warden-warning",
+        "labelEnglish": "Hear out the river warden",
+        "labelHebrew": "להקשיב לשומר הנהר"
+      }
     ]
   },
   {
@@ -14,7 +22,12 @@
     "titleEnglish": "The Guild's Offer",
     "sceneEnglish": "Maren Vess buys you a meal you did not ask for and lays a ledger open beside it. The wardens, she says, have been opening the weir gates at night and drowning the lower kilns. She wants a witness who is not from here.",
     "locationId": "emberfall",
-    "preconditions": [{ "kind": "node_completed", "nodeId": "arrival" }],
+    "preconditions": [
+      {
+        "kind": "node_completed",
+        "nodeId": "arrival"
+      }
+    ],
     "effects": [
       {
         "kind": "shift_faction_relation",
@@ -23,24 +36,57 @@
         "delta": -1
       }
     ],
-    "edges": [{ "to": "the-weir", "labelEnglish": "Go and look at the weir yourself" }]
+    "edges": [
+      {
+        "to": "the-weir",
+        "labelEnglish": "Go and look at the weir yourself",
+        "labelHebrew": "ללכת לראות את הסכר במו עיניך"
+      }
+    ]
   },
   {
     "nodeId": "warden-warning",
     "titleEnglish": "The Warden's Warning",
     "sceneEnglish": "Old Tobin buys you nothing. He walks you along the bank until the water goes grey and stays grey, and points at it without saying anything for a long moment. The kilns, he says, are washing their ash straight into the fish ladder.",
     "locationId": "emberfall",
-    "preconditions": [{ "kind": "node_completed", "nodeId": "arrival" }],
-    "effects": [{ "kind": "advance_calendar", "days": 1 }],
-    "edges": [{ "to": "the-weir", "labelEnglish": "Go and look at the weir yourself" }]
+    "preconditions": [
+      {
+        "kind": "node_completed",
+        "nodeId": "arrival"
+      }
+    ],
+    "effects": [
+      {
+        "kind": "advance_calendar",
+        "days": 1
+      }
+    ],
+    "edges": [
+      {
+        "to": "the-weir",
+        "labelEnglish": "Go and look at the weir yourself",
+        "labelHebrew": "ללכת לראות את הסכר במו עיניך"
+      }
+    ]
   },
   {
     "nodeId": "the-weir",
     "titleEnglish": "The Weir at Low Water",
     "sceneEnglish": "The weir up close is older than either quarrel. The gate mechanism has been forced, recently and badly, and the ash on the stonework is weeks deep. Both stories are true, which is the one answer nobody in town has offered you.",
     "locationId": "emberfall",
-    "preconditions": [{ "kind": "node_completed", "nodeId": "arrival" }],
-    "edges": [{ "to": "saboteurs", "labelEnglish": "Search the forced gate mechanism" }]
+    "preconditions": [
+      {
+        "kind": "node_completed",
+        "nodeId": "arrival"
+      }
+    ],
+    "edges": [
+      {
+        "to": "saboteurs",
+        "labelEnglish": "Search the forced gate mechanism",
+        "labelHebrew": "לחפש במנגנון השער שנפרץ"
+      }
+    ]
   },
   {
     "nodeId": "saboteurs",
@@ -48,12 +94,30 @@
     "sceneEnglish": "You are still crouched over the forced gate mechanism when the scree above you shifts. They have been waiting for whoever came back to look twice, and they are not from Emberfall at all — which is the second answer nobody in town has offered you.",
     "locationId": "emberfall",
     "encounterId": "goblin-ambush",
-    "preconditions": [{ "kind": "node_completed", "nodeId": "the-weir" }],
-    "effects": [
-      { "kind": "advance_calendar", "days": 1 },
-      { "kind": "shift_npc_affinity", "npcId": "old-tobin", "delta": 1 }
+    "preconditions": [
+      {
+        "kind": "node_completed",
+        "nodeId": "the-weir"
+      }
     ],
-    "edges": [{ "to": "reckoning", "labelEnglish": "Bring what you found to the inn" }]
+    "effects": [
+      {
+        "kind": "advance_calendar",
+        "days": 1
+      },
+      {
+        "kind": "shift_npc_affinity",
+        "npcId": "old-tobin",
+        "delta": 1
+      }
+    ],
+    "edges": [
+      {
+        "to": "reckoning",
+        "labelEnglish": "Bring what you found to the inn",
+        "labelHebrew": "להביא את הממצאים אל הפונדק"
+      }
+    ]
   },
   {
     "nodeId": "reckoning",
@@ -61,7 +125,10 @@
     "sceneEnglish": "Sela clears the long table without being asked and stands where she can see the door. Maren Vess arrives with her ledgers; Old Tobin arrives with a piece of the forced gate mechanism. Nobody has to shout, which surprises everyone present.",
     "locationId": "emberfall",
     "preconditions": [
-      { "kind": "node_completed", "nodeId": "the-weir" },
+      {
+        "kind": "node_completed",
+        "nodeId": "the-weir"
+      },
       {
         "kind": "faction_band_at_least",
         "factionA": "ashen-guild",
@@ -76,8 +143,15 @@
         "factionB": "river-wardens",
         "delta": 2
       },
-      { "kind": "advance_calendar", "days": 2 },
-      { "kind": "shift_npc_affinity", "npcId": "sela-the-innkeeper", "delta": 1 },
+      {
+        "kind": "advance_calendar",
+        "days": 2
+      },
+      {
+        "kind": "shift_npc_affinity",
+        "npcId": "sela-the-innkeeper",
+        "delta": 1
+      },
       {
         "kind": "add_npc_fact",
         "npcId": "sela-the-innkeeper",

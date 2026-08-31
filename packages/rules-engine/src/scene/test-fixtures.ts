@@ -76,14 +76,14 @@ function world(
 export function linearWorld(): AuthoredWorld {
   return world(
     [
-      node("start", { edges: [{ to: "middle", labelEnglish: "Go on" }] }),
+      node("start", { edges: [{ to: "middle", labelEnglish: "Go on", labelHebrew: "להמשיך" }] }),
       node("middle", {
         preconditions: [{ kind: "node_completed", nodeId: "start" }],
         effects: [
           { kind: "shift_faction_relation", factionA: "alpha", factionB: "beta", delta: -1 },
           { kind: "advance_calendar", days: 2 },
         ],
-        edges: [{ to: "end", labelEnglish: "Finish" }],
+        edges: [{ to: "end", labelEnglish: "Finish", labelHebrew: "לסיים" }],
       }),
       node("end", {
         effects: [{ kind: "advance_calendar", days: 1 }],
@@ -112,8 +112,8 @@ export function blockedWorld(): AuthoredWorld {
     [
       node("start", {
         edges: [
-          { to: "open", labelEnglish: "The way that works" },
-          { to: "shut", labelEnglish: "The way that does not" },
+          { to: "open", labelEnglish: "The way that works", labelHebrew: "הדרך שעובדת" },
+          { to: "shut", labelEnglish: "The way that does not", labelHebrew: "הדרך שלא" },
         ],
       }),
       node("open", {

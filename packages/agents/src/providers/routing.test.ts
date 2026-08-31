@@ -10,9 +10,13 @@ describe("DEFAULT_MODEL_ROUTING", () => {
     expect(DEFAULT_MODEL_ROUTING.narrative.modelId).toBe("claude-sonnet-5");
   });
 
-  it("routes intent to the cheapest tier at zero temperature", () => {
-    expect(DEFAULT_MODEL_ROUTING.intent.provider).toBe("google");
-    expect(DEFAULT_MODEL_ROUTING.intent.modelId).toBe("gemini-3-flash");
+  // openai rather than the cheaper google tier, and that is load-bearing:
+  // `IntentClassification` is a discriminated union, google's
+  // function-calling schema subset has no `anyOf`, and google answered the
+  // real schema with a 400 live on 2026-08-30. See routing.ts.
+  it("routes intent to a provider whose tool schemas accept a union", () => {
+    expect(DEFAULT_MODEL_ROUTING.intent.provider).toBe("openai");
+    expect(DEFAULT_MODEL_ROUTING.intent.modelId).toBe("gpt-5.4-nano");
     expect(DEFAULT_MODEL_ROUTING.intent.temperature).toBe(0);
   });
 
@@ -43,7 +47,7 @@ describe("DEFAULT_MODEL_ROUTING", () => {
 
   it("routes summary to the cheapest tier at zero temperature", () => {
     expect(DEFAULT_MODEL_ROUTING.summary.provider).toBe("google");
-    expect(DEFAULT_MODEL_ROUTING.summary.modelId).toBe("gemini-3-flash");
+    expect(DEFAULT_MODEL_ROUTING.summary.modelId).toBe("gemini-3.1-flash-lite");
     expect(DEFAULT_MODEL_ROUTING.summary.temperature).toBe(0);
     expect(DEFAULT_MODEL_ROUTING.summary.reasoningEffort).toBe("low");
   });

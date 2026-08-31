@@ -18,6 +18,16 @@ import type { EpisodicMemory, FactionBand } from "@ai-dm/schemas";
 const DEADLINE_TIMEOUT = Symbol("episodic-deadline-timeout");
 
 /**
+ * The thrown value's own words, for the `message` half of `onFailure`. A
+ * non-`Error` throw is stringified rather than dropped: the whole point of
+ * these branches is that they swallow, so the one thing they must not do is
+ * swallow the only description of what went wrong.
+ */
+function messageOf(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+/**
  * Races `promise` against `deadline` (an absolute `Date.now()`-style
  * timestamp, matching `pipeline.ts`'s own convention — never a duration).
  * Resolves to `DEADLINE_TIMEOUT` if the deadline passes first; otherwise
@@ -94,8 +104,16 @@ export async function indexEpisode(args: {
    * signal: it changes nothing about how the turn degrades, only whether
    * anything downstream can tell "no memories yet" apart from "embedding has
    * been broken since deploy" (whole-branch review finding 2).
+   *
+   * `message` is the provider's or the store's own words, and is the half
+   * that says WHICH failure this is: a code of `provider_error` cannot tell
+   * a 404 on a model id apart from a 400 on a tool schema, which is exactly
+   * what made the 2026-08-30 intent-router outage a manual bisect. Optional
+   * because the branches that synthesise a code (`"aborted"`, `"no_vector"`)
+   * have no underlying error to quote, and inventing one would be worse
+   * than omitting it.
    */
-  onFailure?: (code: string) => void;
+  onFailure?: (code: string, message?: string) => void;
 }): Promise<void> {
   // Embedding and writing are two distinct failure sources, reported as two
   // distinct codes: an operator reading `onFailure` needs to tell a broken
@@ -113,7 +131,7 @@ export async function indexEpisode(args: {
       return;
     }
     if (!result.ok) {
-      args.onFailure?.(result.error.code);
+      args.onFailure?.(result.error.code, result.error.message);
       return;
     }
     args.onUsage?.(result.value.usage);
@@ -124,16 +142,16 @@ export async function indexEpisode(args: {
       return;
     }
     vector = embedded;
-  } catch {
+  } catch (error) {
     // Swallowed deliberately — see the doc comment above.
-    args.onFailure?.("embed_failed");
+    args.onFailure?.("embed_failed", messageOf(error));
     return;
   }
 
   try {
     await args.store.write(args.record, vector);
-  } catch {
-    args.onFailure?.("store_failed");
+  } catch (error) {
+    args.onFailure?.("store_failed", messageOf(error));
   }
 }
 
@@ -153,7 +171,7 @@ export async function retrieveMemories(args: {
   deadline: number;
   onUsage?: (usage: { promptTokens: number; completionTokens: number; totalTokens: number }) => void;
   /** Same contract as `indexEpisode`'s `onFailure` — see its doc comment. */
-  onFailure?: (code: string) => void;
+  onFailure?: (code: string, message?: string) => void;
 }): Promise<string[]> {
   // See `indexEpisode`'s matching comment: embed and search are reported as
   // distinct failure sources, not folded into one "embed_failed" for both.
@@ -165,7 +183,7 @@ export async function retrieveMemories(args: {
       return [];
     }
     if (!result.ok) {
-      args.onFailure?.(result.error.code);
+      args.onFailure?.(result.error.code, result.error.message);
       return [];
     }
     args.onUsage?.(result.value.usage);
@@ -176,16 +194,16 @@ export async function retrieveMemories(args: {
       return [];
     }
     vector = embedded;
-  } catch {
-    args.onFailure?.("embed_failed");
+  } catch (error) {
+    args.onFailure?.("embed_failed", messageOf(error));
     return [];
   }
 
   try {
     const hits = await args.store.search(args.campaignId, vector, args.limit);
     return hits.map((hit) => hit.memory.summaryEnglish);
-  } catch {
-    args.onFailure?.("store_failed");
+  } catch (error) {
+    args.onFailure?.("store_failed", messageOf(error));
     return [];
   }
 }

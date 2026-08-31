@@ -43,6 +43,7 @@ import {
 import type {
   EmbeddingPort,
   IntentAgent,
+  IntentNpcPresent,
   IntentResult,
   NarrativePort,
   SceneBeat,
@@ -175,6 +176,18 @@ export interface IntentCallMetrics {
   outcome: string;
   /** Present only when `outcome === "ok"` — a failed call classified nothing. */
   category?: string;
+  /**
+   * The provider's own words on failure, absent when `outcome === "ok"`.
+   * `outcome` alone names the CLASS of failure and nothing else: every
+   * unreachable model id, every rejected tool schema and every expired key
+   * arrives as the single code `provider_error`. That is what made the
+   * 2026-08-30 intent-router outage a manual bisect — the log said
+   * `provider_error` and the two real causes, a 404 on `gemini-3-flash` and
+   * a 400 on the discriminated-union tool schema, were indistinguishable in
+   * it. Optional, and never synthesised: a failure with nothing to quote
+   * omits the field rather than repeating the code back as prose.
+   */
+  message?: string;
   latencyMs: number;
   promptTokens: number;
   completionTokens: number;
@@ -189,6 +202,8 @@ export interface SummaryCallMetrics {
   outcome: string;
   /** `"model"` when the tier produced the summary, `"deterministic"` when it fell back. */
   source: string;
+  /** Same contract as `IntentCallMetrics.message` — see its doc comment. */
+  message?: string;
   promptVersion: string;
   latencyMs: number;
   promptTokens: number;
@@ -209,6 +224,8 @@ export interface EmbeddingCallMetrics {
   outcome: string;
   /** `"index"` when writing a closed episode, `"retrieve"` when reading on node entry. */
   purpose: string;
+  /** Same contract as `IntentCallMetrics.message` — see its doc comment. */
+  message?: string;
   latencyMs: number;
   promptTokens: number;
   completionTokens: number;
@@ -531,6 +548,7 @@ function questNodeCard(
   locationNameHebrew: string;
   npcNamesHebrew: string[];
   npcIds: string[];
+  npcs: IntentNpcPresent[];
 } {
   const node = authored.questNodes.get(nodeId);
   if (node === undefined) {
@@ -548,6 +566,14 @@ function questNodeCard(
     locationNameHebrew: location.nameHebrew,
     npcNamesHebrew: present.map((npc) => npc.nameHebrew),
     npcIds: present.map((npc) => npc.npcId),
+    // The same people, in the shape the intent router needs. `present` is
+    // already computed here, so the router and the narrator cannot disagree
+    // about who is standing in the scene.
+    npcs: present.map((npc) => ({
+      nameEnglish: npc.nameEnglish,
+      nameHebrew: npc.nameHebrew,
+      descriptionEnglish: npc.descriptionEnglish,
+    })),
   };
 }
 
@@ -926,10 +952,11 @@ export async function* handleCommand(
             totalTokens: usage.totalTokens,
           });
         },
-        onFailure: (code) => {
+        onFailure: (code, message) => {
           retrieval.failed = true;
           ports.metrics?.recordEmbeddingCall?.({
             outcome: code,
+            ...(message === undefined ? {} : { message }),
             purpose: "retrieve",
             latencyMs: Date.parse(ports.clock()) - Date.parse(retrieveStartedAt),
             promptTokens: 0,
@@ -1166,7 +1193,60 @@ export async function* handleCommand(
   // either way.
   function* playerAffordances(): Iterable<ServerFrame> {
     const encounter = campaign.state.encounter;
-    if (encounter === null) return;
+    if (encounter === null) {
+      // Out of combat this used to `return` with nothing, by design — the
+      // step 4 spec says so explicitly. A real playthrough showed what that
+      // costs: combat shows a board, a turn order and an action bar, while a
+      // scene showed a paragraph of Hebrew and an empty text box, and the
+      // node's edges existed only in `data/world/` and inside the router's
+      // system prompt. `arrival`'s two edges are both conversations, so the
+      // player most likely to be stuck is the one on their first turn, and
+      // the narrate-only categories answer them in fluent scene-aware prose
+      // that reads exactly like progress. Nothing anywhere told them the way
+      // on was to hear out the guild factor.
+      const scene = campaign.state.world.scene;
+      if (scene === null) return;
+
+      // `availableEdges` is the same call `free_text` classifies against, so
+      // what the player is shown and what the router is offered cannot drift
+      // apart. An invalid result returns empty rather than throwing: this
+      // runs at the END of an otherwise-complete turn, and the corrupt-content
+      // throw belongs to `free_text`, which reads the same edges before doing
+      // anything the player would lose.
+      const authored = sceneStaticsOf(campaign).authored;
+      const state = sceneStateFrom(scene);
+      const options = availableEdges(authored, state);
+      if (!options.valid) return;
+
+      // Terminal, not already concluded, and legal — the last clause asked of
+      // the engine rather than re-derived here. `completeCurrentNode` also
+      // re-checks the node's OWN entry preconditions, so a terminal node can
+      // be un-concludable for reasons no edge list shows; a button offered on
+      // `edges.length` alone would be one the engine then refuses, which is a
+      // worse lie at the end of an arc than no button at all. The
+      // already-completed check has to come first: `completeCurrentNode` is
+      // deliberately idempotent and answers `valid` for a node already past,
+      // which would leave the ending on offer forever.
+      const node = authored.questNodes.get(scene.currentNodeId);
+      const canConclude =
+        node !== undefined &&
+        node.edges.length === 0 &&
+        !scene.completedNodeIds.includes(scene.currentNodeId) &&
+        completeCurrentNode(authored, state).valid;
+
+      yield {
+        type: "scene_affordances",
+        nodeId: scene.currentNodeId,
+        edges: options.edges.map((each) => ({
+          to: each.edge.to,
+          labelHebrew: each.edge.labelHebrew,
+          open: each.open,
+        })),
+        canConclude,
+        forSequence: campaign.nextSequence - 1,
+      };
+      return;
+    }
     const actorId = encounter.turnOrder[encounter.currentActorIndex];
     if (actorId === undefined) return;
 
@@ -1395,9 +1475,10 @@ export async function* handleCommand(
           totalTokens: usage.totalTokens,
         });
       },
-      onFailure: (code) => {
+      onFailure: (code, message) => {
         ports.metrics?.recordEmbeddingCall?.({
           outcome: code,
+          ...(message === undefined ? {} : { message }),
           purpose: "index",
           latencyMs: Date.parse(ports.clock()) - Date.parse(indexStartedAt),
           promptTokens: 0,
@@ -1435,9 +1516,10 @@ export async function* handleCommand(
             totalTokens: usage.totalTokens,
           });
         },
-        onFailure: (code) => {
+        onFailure: (code, message) => {
           ports.metrics?.recordEmbeddingCall?.({
             outcome: code,
+            ...(message === undefined ? {} : { message }),
             purpose: "index",
             latencyMs: Date.parse(ports.clock()) - Date.parse(nodeIndexStartedAt),
             promptTokens: 0,
@@ -1595,9 +1677,11 @@ export async function* handleCommand(
             );
           }
 
+          const routerCard = questNodeCard(statics.authored, before.currentNodeId);
           classifyResult = await ports.intent.classify({
             text: command.text,
-            sceneEnglish: questNodeCard(statics.authored, before.currentNodeId).sceneEnglish,
+            sceneEnglish: routerCard.sceneEnglish,
+            npcs: routerCard.npcs,
             edges: options.edges.map((each) => ({
               to: each.edge.to,
               labelEnglish: each.edge.labelEnglish,
@@ -1620,7 +1704,9 @@ export async function* handleCommand(
           );
           ports.metrics.recordIntentCall?.({
             outcome: classifyResult.ok ? "ok" : classifyResult.error.code,
-            ...(classifyResult.ok ? { category: classifyResult.classification.category } : {}),
+            ...(classifyResult.ok
+              ? { category: classifyResult.classification.category }
+              : { message: classifyResult.error.message }),
             latencyMs: Date.now() - classifyStartedAt,
             ...totals,
           });
@@ -1885,9 +1971,10 @@ export async function* handleCommand(
                   totalTokens: usage.totalTokens,
                 });
               },
-              onFailure: (code) => {
+              onFailure: (code, message) => {
                 ports.metrics?.recordEmbeddingCall?.({
                   outcome: code,
+                  ...(message === undefined ? {} : { message }),
                   purpose: "index",
                   latencyMs: Date.parse(ports.clock()) - Date.parse(indexStartedAt),
                   promptTokens: 0,

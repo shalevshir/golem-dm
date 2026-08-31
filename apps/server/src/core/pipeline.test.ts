@@ -51,6 +51,7 @@ import type {
 } from "@ai-dm/schemas";
 import { SNAPSHOT_EVERY, handleCommand } from "./pipeline.js";
 import type {
+  IntentCallMetrics,
   NarrativeTurnMetrics,
   SnapshotFailureRecord,
   TacticalTurnMetrics,
@@ -816,6 +817,45 @@ describe("handleCommand — free text", () => {
     expect(campaign.state.world.scene).toEqual(sceneBefore);
   });
 
+  // The failing half of `intent_call_metrics`. `outcome` alone is the CLASS
+  // of failure — every unreachable model id and every rejected tool schema
+  // arrives as `provider_error` — so without `message` the log cannot say
+  // which one happened, which is what turned the 2026-08-30 outage into a
+  // manual bisect. `category` is the mirror assertion: it must NOT appear,
+  // since a failed call classified nothing.
+  it("puts the adapter's message on the intent metrics record when the classifier fails", async () => {
+    const store = createInMemoryEventStore();
+    const campaign = await sceneCampaign(store);
+    const recorded: IntentCallMetrics[] = [];
+
+    const ports: TurnPorts = {
+      ...portsWith(store),
+      intent: intentFailingWith({ code: "provider_error", message: "the model timed out" }),
+      metrics: {
+        recordTacticalTurn: () => undefined,
+        recordNarrativeTurn: () => undefined,
+        recordIntentCall(record) {
+          recorded.push(record);
+        },
+      },
+    };
+
+    await drain(
+      handleCommand(
+        campaign,
+        { type: "free_text", clientMessageId: "c1", text: "look around" },
+        ports,
+      ),
+    );
+
+    expect(recorded).toHaveLength(1);
+    expect(recorded[0]).toMatchObject({
+      outcome: "provider_error",
+      message: "the model timed out",
+    });
+    expect(recorded[0]).not.toHaveProperty("category");
+  });
+
   // (e) An open edge whose "from" node has a real effect: `guild-offer`
   // shifts ashen-guild/river-wardens from `cold` (the authored baseline) to
   // `hostile` on completion. `sceneNarrative` yields nothing, deliberately —
@@ -1461,6 +1501,101 @@ describe("handleCommand — free text: narrate-only categories", () => {
       expect(eventTypesOf(frames)).toEqual(["player_input", "intent_classified", "narrative_emitted"]);
     },
   );
+
+  // The dead end `scene_affordances` exists to close. A `social` turn changes
+  // nothing, yet still narrates fluent, scene-aware Hebrew that reads exactly
+  // like progress — so without this frame the player is left with a paragraph,
+  // an empty text box, and no way to learn that `arrival`'s two edges are both
+  // conversations. Asserted on the narrate-only branch deliberately: the turn
+  // that moves nothing is the one that most needs to say what would.
+  it("tells the player what the scene offers even on a turn that changes nothing", async () => {
+    const store = createInMemoryEventStore();
+    const campaign = await sceneCampaign(store);
+    const ports: TurnPorts = { ...portsWith(store), intent: classifiedAs({ category: "social" }) };
+
+    const frames = await drain(
+      handleCommand(
+        campaign,
+        { type: "free_text", clientMessageId: "c1", text: "hello there" },
+        ports,
+      ),
+    );
+
+    // Hebrew, because a person reads this frame — the one direction invariant
+    // 2 sanctions. `labelEnglish` stays on the content, for the router.
+    expect(frames.find((each) => each.type === "scene_affordances")).toMatchObject({
+      nodeId: "arrival",
+      edges: [
+        { to: "guild-offer", labelHebrew: "להקשיב לנציג הגילדה", open: true },
+        { to: "warden-warning", labelHebrew: "להקשיב לשומר הנהר", open: true },
+      ],
+      // Mid-arc: the ending is not on offer, and `edges.length` is not what
+      // decides that.
+      canConclude: false,
+    });
+  });
+
+  // The end of the arc. `reckoning` is node six of six and has no edges, so
+  // before `canConclude` the affordance panel simply emptied and the player
+  // could not tell a finished story from a broken one — that is exactly what
+  // a live playthrough hit. The closing beat is a real transition
+  // (`completeCurrentNode`) carrying the arc's payoff: the Guild/Warden
+  // relation shift, two days, and Sela's fact.
+  it("offers the closing beat on the terminal node, and stops offering it once rung", async () => {
+    const store = createInMemoryEventStore();
+    // `reckoning` gates its own entry on `the-weir`, and `completeCurrentNode`
+    // re-checks that gate — so a fixture that teleports to the last node with
+    // nothing completed is a state no playthrough can reach, and the engine
+    // rightly refuses to conclude it.
+    const campaign = await sceneCampaign(store, {
+      currentNodeId: "reckoning",
+      completedNodeIds: ["arrival", "guild-offer", "the-weir", "saboteurs"],
+    });
+    const ports: TurnPorts = { ...portsWith(store), intent: classifiedAs({ category: "social" }) };
+
+    const before = await drain(
+      handleCommand(
+        campaign,
+        { type: "free_text", clientMessageId: "c1", text: "hello there" },
+        ports,
+      ),
+    );
+    expect(before.find((each) => each.type === "scene_affordances")).toMatchObject({
+      nodeId: "reckoning",
+      edges: [],
+      canConclude: true,
+    });
+
+    // Ring it: `exploration` with a null target is "conclude the current
+    // node", the one path a terminal node has.
+    const concluding: TurnPorts = {
+      ...portsWith(store),
+      intent: classifiedAs({ category: "exploration", targetNodeId: null }),
+    };
+    const rung = await drain(
+      handleCommand(
+        campaign,
+        { type: "free_text", clientMessageId: "c2", text: "I finish here" },
+        concluding,
+      ),
+    );
+    expect(eventTypesOf(rung)).toContain("quest_node_completed");
+
+    const after = await drain(
+      handleCommand(
+        campaign,
+        { type: "free_text", clientMessageId: "c3", text: "anything else?" },
+        ports,
+      ),
+    );
+    // Still sent, now saying something different: the story is over, rather
+    // than the panel vanishing and leaving the player to guess.
+    expect(after.find((each) => each.type === "scene_affordances")).toMatchObject({
+      nodeId: "reckoning",
+      edges: [],
+      canConclude: false,
+    });
+  });
 
   it("routes combat to a grounded reply beat rather than starting a fight, narration only", async () => {
     const store = createInMemoryEventStore();
