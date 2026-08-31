@@ -36,7 +36,11 @@ import {
   NARRATIVE_PROMPT_VERSION,
   SCENE_PROMPT_VERSION,
 } from "@ai-dm/agents";
-import { createInMemoryEpisodicStore, createInMemoryEventStore, EventStoreUnavailableError } from "@ai-dm/memory";
+import {
+  createInMemoryEpisodicStore,
+  createInMemoryEventStore,
+  EventStoreUnavailableError,
+} from "@ai-dm/memory";
 import type { EpisodicStore, EventStore } from "@ai-dm/memory";
 import {
   CheckRolledPayload,
@@ -1072,7 +1076,11 @@ describe("handleCommand — free text", () => {
       ),
     );
 
-    expect(eventTypesOf(frames)).toEqual(["player_input", "intent_classified", "narrative_emitted"]);
+    expect(eventTypesOf(frames)).toEqual([
+      "player_input",
+      "intent_classified",
+      "narrative_emitted",
+    ]);
     expect(campaign.state.world.scene).toEqual(before);
   });
 
@@ -1112,7 +1120,11 @@ describe("handleCommand — free text", () => {
       ),
     );
 
-    expect(eventTypesOf(frames)).toEqual(["player_input", "intent_classified", "narrative_emitted"]);
+    expect(eventTypesOf(frames)).toEqual([
+      "player_input",
+      "intent_classified",
+      "narrative_emitted",
+    ]);
     expect(campaign.state.world.scene).toEqual(before);
   });
 
@@ -1286,7 +1298,11 @@ describe("handleCommand — free text", () => {
     expect(embedCalls).toBe(1);
 
     await drain(
-      handleCommand(campaign, { type: "free_text", clientMessageId: "c2", text: "hi again" }, ports),
+      handleCommand(
+        campaign,
+        { type: "free_text", clientMessageId: "c2", text: "hi again" },
+        ports,
+      ),
     );
     // A latched failure would have left `memoriesForNodeId` matching the
     // current node after the first (failed) attempt, skipping this second
@@ -1328,7 +1344,9 @@ describe("handleCommand — free text", () => {
       ),
     );
 
-    expect(seen.map((each) => each.beat)).toEqual([{ kind: "concluded", locationNameHebrew: "אמברפול" }]);
+    expect(seen.map((each) => each.beat)).toEqual([
+      { kind: "concluded", locationNameHebrew: "אמברפול" },
+    ]);
   });
 
   it("does not re-apply a world delta when re-completing an already-completed node", async () => {
@@ -1556,7 +1574,11 @@ describe("handleCommand — free text: narrate-only categories", () => {
         ),
       );
 
-      expect(eventTypesOf(frames)).toEqual(["player_input", "intent_classified", "narrative_emitted"]);
+      expect(eventTypesOf(frames)).toEqual([
+        "player_input",
+        "intent_classified",
+        "narrative_emitted",
+      ]);
     },
   );
 
@@ -1673,7 +1695,11 @@ describe("handleCommand — free text: narrate-only categories", () => {
       ),
     );
 
-    expect(eventTypesOf(frames)).toEqual(["player_input", "intent_classified", "narrative_emitted"]);
+    expect(eventTypesOf(frames)).toEqual([
+      "player_input",
+      "intent_classified",
+      "narrative_emitted",
+    ]);
     expect(seen.map((each) => each.beat)).toEqual([{ kind: "reply", category: "combat" }]);
   });
 });
@@ -1699,7 +1725,11 @@ describe("handleCommand — episodic memory", () => {
     expect(embedding.calls).toHaveLength(1);
 
     await drain(
-      handleCommand(campaign, { type: "free_text", clientMessageId: "c2", text: "hello again" }, ports),
+      handleCommand(
+        campaign,
+        { type: "free_text", clientMessageId: "c2", text: "hello again" },
+        ports,
+      ),
     );
     // Still 1: same node, so `campaign.memoriesForNodeId` already matches
     // and `sceneNarrate` must not retrieve a second time.
@@ -1719,7 +1749,11 @@ describe("handleCommand — episodic memory", () => {
     };
 
     await drain(
-      handleCommand(campaign, { type: "free_text", clientMessageId: "c1", text: "hi there" }, ports),
+      handleCommand(
+        campaign,
+        { type: "free_text", clientMessageId: "c1", text: "hi there" },
+        ports,
+      ),
     );
 
     expect(seen[0]?.memoryEnglish).toContain(
@@ -1768,7 +1802,11 @@ describe("handleCommand — episodic memory", () => {
     };
 
     await drain(
-      handleCommand(campaign, { type: "free_text", clientMessageId: "c1", text: "hi there" }, ports),
+      handleCommand(
+        campaign,
+        { type: "free_text", clientMessageId: "c1", text: "hi there" },
+        ports,
+      ),
     );
 
     expect(seen[0]?.memoryEnglish).toContain("Goblins were driven off at the weir.");
@@ -1805,7 +1843,9 @@ describe("handleCommand — free text: schema parsing at emit sites", () => {
     const ports: TurnPorts = { ...portsWith(store), intent: classifiedAs(bogus) };
 
     await expect(
-      drain(handleCommand(campaign, { type: "free_text", clientMessageId: "c1", text: "hello" }, ports)),
+      drain(
+        handleCommand(campaign, { type: "free_text", clientMessageId: "c1", text: "hello" }, ports),
+      ),
     ).rejects.toThrow();
   });
 
@@ -2227,9 +2267,9 @@ describe("handleCommand — snapshot cadence", () => {
     expect(encounterOf(campaign).currentActorIndex).toBe(0);
     // The log is complete past the crossing event: the append half of the
     // turn never depended on the snapshot half.
-    expect((await store.readSince("s1", SNAPSHOT_EVERY - 1)).map((each) => each.sequence)).toContain(
-      SNAPSHOT_EVERY,
-    );
+    expect(
+      (await store.readSince("s1", SNAPSHOT_EVERY - 1)).map((each) => each.sequence),
+    ).toContain(SNAPSHOT_EVERY);
     // Contained, not swallowed: the operator still learns the store rejected
     // a write, exactly once, for the sequence that failed.
     expect(failures.map((each) => each.sequence)).toEqual([SNAPSHOT_EVERY]);
@@ -3427,7 +3467,9 @@ describe("handleCommand — end of combat", () => {
         : { ...each, currentHp: 10 },
     );
 
-    const frames = await drain(handleCommand(campaign, dodge("hero", "c-wounded"), portsWith(store)));
+    const frames = await drain(
+      handleCommand(campaign, dodge("hero", "c-wounded"), portsWith(store)),
+    );
 
     const resolved = frames
       .filter((each): each is Extract<ServerFrame, { type: "event" }> => each.type === "event")
@@ -3496,9 +3538,7 @@ describe("handleCommand — end of combat", () => {
         : { ...each, currentHp: 10 },
     );
 
-    const frames = await drain(
-      handleCommand(campaign, dodge("hero", "c-heal"), portsWith(store)),
-    );
+    const frames = await drain(handleCommand(campaign, dodge("hero", "c-heal"), portsWith(store)));
 
     expect(eventTypesOf(frames)).toContain("world_delta_applied");
     const resolved = frames
@@ -3642,7 +3682,14 @@ function gmFixtureWorld(): AuthoredWorld {
     locationId: "here",
     preconditions: [],
     effects: [],
-    edges: [{ to: "guild-offer", labelEnglish: "Hear out the guild factor", labelHebrew: "להקשיב" }],
+    edges: [
+      { to: "guild-offer", labelEnglish: "Hear out the guild factor", labelHebrew: "להקשיב" },
+      {
+        to: "ambush-clearing",
+        labelEnglish: "Cut through the clearing",
+        labelHebrew: "לחצות את הקרחת",
+      },
+    ],
     detour: false,
   };
   const guildOffer: QuestNode = {
@@ -3654,6 +3701,22 @@ function gmFixtureWorld(): AuthoredWorld {
     effects: [],
     edges: [],
     detour: false,
+  };
+  // A second edge out of `arrival`, distinct from `guild-offer`, that bridges
+  // into a real combat bracket on entry — `guild-offer` itself stays
+  // encounter-free so the existing "runs after an exploration traversal"
+  // tests below (which traverse into `guild-offer` and expect the GM tier to
+  // fire normally) are untouched by Fix 1's guard.
+  const ambushClearing: QuestNode = {
+    nodeId: "ambush-clearing",
+    titleEnglish: "The Ambush Clearing",
+    sceneEnglish: "A fixture scene that bridges into combat.",
+    locationId: "here",
+    preconditions: [],
+    effects: [],
+    edges: [],
+    detour: false,
+    encounterId: "goblin-ambush",
   };
   const tobinsErrand: QuestNode = {
     nodeId: "tobins-errand",
@@ -3678,6 +3741,7 @@ function gmFixtureWorld(): AuthoredWorld {
     questNodes: new Map([
       ["arrival", arrival],
       ["guild-offer", guildOffer],
+      ["ambush-clearing", ambushClearing],
       ["tobins-errand", tobinsErrand],
     ]),
     relations: new Map(),
@@ -3811,7 +3875,9 @@ describe("handleCommand — the GM tier", () => {
       },
     });
     const types = eventsOf(frames).map((each) => each.type);
-    expect(types.indexOf("quest_node_entered")).toBeLessThan(types.indexOf("narrative_move_applied"));
+    expect(types.indexOf("quest_node_entered")).toBeLessThan(
+      types.indexOf("narrative_move_applied"),
+    );
   });
 
   it("runs on an exploration refusal too, where the traversal did not happen", async () => {
@@ -3834,7 +3900,10 @@ describe("handleCommand — the GM tier", () => {
       move: { kind: "enter_detour", nodeId: "tobins-errand", reasonEnglish: "he asked for help" },
     });
     const entered = eventsOf(frames).find((each) => each.type === "quest_node_entered");
-    expect(entered?.payload).toMatchObject({ nodeId: "tobins-errand", detourReturnNodeId: "arrival" });
+    expect(entered?.payload).toMatchObject({
+      nodeId: "tobins-errand",
+      detourReturnNodeId: "arrival",
+    });
   });
 
   it("reports every GM call to metrics, refusals included", async () => {
@@ -3850,5 +3919,39 @@ describe("handleCommand — the GM tier", () => {
     });
     expect(records).toHaveLength(1);
     expect(records[0]?.refusal).toBeDefined();
+  });
+
+  // Fix 1 (final whole-branch review): a traversal into a node that itself
+  // declares an `encounterId` (`ambush-clearing`, unlike `guild-offer` which
+  // the tests above deliberately keep encounter-free) opens a bracket
+  // MID-TURN, after guard 2 at the top of the `free_text` case already ran.
+  // `gmStep` must notice the now-open bracket on its own and refuse to fire
+  // — an accepted `enter_detour` here would move the player again while
+  // combat is bracketed.
+  it("does not run the GM tier when the same turn opens a combat bracket", async () => {
+    const frames = await runFreeText({
+      classification: { category: "exploration", targetNodeId: "ambush-clearing" },
+      move: { kind: "enter_detour", nodeId: "tobins-errand", reasonEnglish: "he asked for help" },
+    });
+    const events = eventsOf(frames);
+    const types = events.map((each) => each.type);
+    expect(types).toContain("encounter_started");
+    expect(types).not.toContain("narrative_move_applied");
+    // Exactly one `quest_node_entered` — the exploration branch's own entry
+    // into `ambush-clearing`. The guarded `gmStep` never appends a second one
+    // for `tobins-errand`.
+    const entered = events.filter((each) => each.type === "quest_node_entered");
+    expect(entered).toHaveLength(1);
+    expect(entered[0]?.payload).toMatchObject({ nodeId: "ambush-clearing" });
+  });
+
+  it("reports no GM metric at all when the guard short-circuits (no attempt was made)", async () => {
+    const records: GmCallMetrics[] = [];
+    await runFreeText({
+      classification: { category: "exploration", targetNodeId: "ambush-clearing" },
+      move: { kind: "enter_detour", nodeId: "tobins-errand", reasonEnglish: "he asked for help" },
+      metrics: { recordGmCall: (record) => records.push(record) },
+    });
+    expect(records).toHaveLength(0);
   });
 });

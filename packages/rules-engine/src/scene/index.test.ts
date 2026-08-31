@@ -191,6 +191,20 @@ describe("traverseEdge", () => {
     expect(before.currentNodeId).toBe("start");
     expect(before.completedNodeIds.size).toBe(0);
   });
+
+  // Fix 2 (final whole-branch review): `reduce.ts`'s fold clears
+  // `detourReturnNodeId` on a `quest_node_entered` whose payload carries no
+  // pointer — a normal spine traversal resets it for free. The engine's own
+  // `traverseEdge` must match that, or a state coming out of a detour (via
+  // `validateMove`'s `enter_detour`, never through this function itself)
+  // would still read as "on a detour" after a completely ordinary next move,
+  // and wrongly trip `validateMove`'s no-nesting guard.
+  it("clears a stale detourReturnNodeId on an ordinary traversal", () => {
+    const world = linearWorld();
+    const onADetour = { ...stateOf(startScene(world)), detourReturnNodeId: "somewhere-else" };
+    const after = stateOf(traverseEdge(world, onADetour, "middle"));
+    expect(after.detourReturnNodeId).toBeNull();
+  });
 });
 
 describe("completeCurrentNode", () => {
@@ -888,10 +902,15 @@ describe("validateMove — the door guard", () => {
   // improvised -1 would make the arc's ending permanently unenterable.
   it("refuses a shift that closes a currently-open precondition on an uncompleted node", () => {
     const world = loadFixtureWorld();
-    const state = { ...stateOf(startScene(world)), relations: new Map([[pairKey("guild", "wardens"), "hostile" as const]]) };
+    const state = {
+      ...stateOf(startScene(world)),
+      relations: new Map([[pairKey("guild", "wardens"), "hostile" as const]]),
+    };
     const result = validateMove(world, state, {
       kind: "world",
-      effects: [{ kind: "shift_faction_relation", factionA: "guild", factionB: "wardens", delta: -1 }],
+      effects: [
+        { kind: "shift_faction_relation", factionA: "guild", factionB: "wardens", delta: -1 },
+      ],
       reasonEnglish: "the player sided loudly with the kilns",
     });
     expect(result.valid).toBe(false);
@@ -900,10 +919,15 @@ describe("validateMove — the door guard", () => {
 
   it("allows a shift that OPENS a gate — improvisation may make the world more reachable", () => {
     const world = loadFixtureWorld();
-    const state = { ...stateOf(startScene(world)), relations: new Map([[pairKey("guild", "wardens"), "war" as const]]) };
+    const state = {
+      ...stateOf(startScene(world)),
+      relations: new Map([[pairKey("guild", "wardens"), "war" as const]]),
+    };
     const result = validateMove(world, state, {
       kind: "world",
-      effects: [{ kind: "shift_faction_relation", factionA: "guild", factionB: "wardens", delta: 1 }],
+      effects: [
+        { kind: "shift_faction_relation", factionA: "guild", factionB: "wardens", delta: 1 },
+      ],
       reasonEnglish: "the player talked them down",
     });
     expect(result.valid).toBe(true);
@@ -919,7 +943,9 @@ describe("validateMove — the door guard", () => {
     };
     const result = validateMove(world, state, {
       kind: "world",
-      effects: [{ kind: "shift_faction_relation", factionA: "guild", factionB: "wardens", delta: -1 }],
+      effects: [
+        { kind: "shift_faction_relation", factionA: "guild", factionB: "wardens", delta: -1 },
+      ],
       reasonEnglish: "no longer matters",
     });
     expect(result.valid).toBe(true);
@@ -927,7 +953,10 @@ describe("validateMove — the door guard", () => {
 
   it("refuses the WHOLE move when only one of two effects would close a door", () => {
     const world = loadFixtureWorld();
-    const state = { ...stateOf(startScene(world)), relations: new Map([[pairKey("guild", "wardens"), "hostile" as const]]) };
+    const state = {
+      ...stateOf(startScene(world)),
+      relations: new Map([[pairKey("guild", "wardens"), "hostile" as const]]),
+    };
     const result = validateMove(world, state, {
       kind: "world",
       effects: [
@@ -946,7 +975,9 @@ describe("validateMove — the improvised magnitude ceiling", () => {
     const state = stateOf(startScene(world));
     const result = validateMove(world, state, {
       kind: "world",
-      effects: [{ kind: "shift_faction_relation", factionA: "guild", factionB: "wardens", delta: 3 }],
+      effects: [
+        { kind: "shift_faction_relation", factionA: "guild", factionB: "wardens", delta: 3 },
+      ],
       reasonEnglish: "the player was very charming",
     });
     expect(result.valid).toBe(false);

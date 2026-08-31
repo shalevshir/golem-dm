@@ -692,6 +692,9 @@ function assertNever(value: never): never {
  * optional and how they're spread into the payload," shared by the
  * combat-victory and exploration branches below rather than duplicated in
  * each, so a future `SceneDelta` field needs adding here once, not twice.
+ * `detourReturnNodeId` is the one exception: it rides on `quest_node_entered`'s
+ * own payload instead (never on this event), so it is deliberately absent
+ * from the spread below — not an oversight.
  */
 function worldDeltaEventOrNull(
   delta: SceneDelta,
@@ -1283,7 +1286,10 @@ export async function* handleCommand(
     if (combatant === undefined) throw new Error(`No combatant ${actorId} in this encounter`);
 
     const seed = ports.seedFor(campaign.state.world.rootSeed, campaign.nextSequence);
-    const result = rollDeathSave(combatant.deathSaves ?? { successes: 0, failures: 0 }, seeded(seed));
+    const result = rollDeathSave(
+      combatant.deathSaves ?? { successes: 0, failures: 0 },
+      seeded(seed),
+    );
 
     const status: EntityStatus =
       result.outcome === "dead" ? "dead" : result.outcome === "revived" ? "alive" : "unconscious";
@@ -1291,7 +1297,9 @@ export async function* handleCommand(
       result.outcome === "revived" ? Math.max(1, combatant.currentHp) : combatant.currentHp;
 
     const combatants = encounter.combatants.map((each) =>
-      each.combatantId === actorId ? { ...each, status, currentHp, deathSaves: result.state } : each,
+      each.combatantId === actorId
+        ? { ...each, status, currentHp, deathSaves: result.state }
+        : each,
     );
     // One append, not two: nothing runs between these events (no narration,
     // unlike `enemyTurn`), so a store failure between separate `emit` calls
@@ -1915,9 +1923,17 @@ export async function* handleCommand(
          * degrades to no move. A turn never fails because improvisation did
          * not work out; it just does not improvise.
          */
-        const gmStep = async function* (
-          checkOutcome?: { ability: string; skill?: string; success: boolean },
-        ): AsyncGenerator<ServerFrame, void> {
+        const gmStep = async function* (checkOutcome?: {
+          ability: string;
+          skill?: string;
+          success: boolean;
+        }): AsyncGenerator<ServerFrame, void> {
+          // A bracket opened by THIS turn's own traversal (the encounter bridge in
+          // the exploration branch above) is still an open bracket — guard 2 at the
+          // top of this case only saw the state before this turn ran. No GM move may
+          // ever fire while combat is bracketed, full stop.
+          if (campaign.state.encounter !== null) return;
+
           const before = sceneStateFrom(currentScene());
           const card = questNodeCard(statics.authored, before.currentNodeId);
           const startedAt = Date.now();
@@ -2005,6 +2021,13 @@ export async function* handleCommand(
           const worldDeltaEvent = worldDeltaEventOrNull(diffScene(before, transition.state));
           if (worldDeltaEvent !== null) events.push(worldDeltaEvent);
           if (transition.state.currentNodeId !== before.currentNodeId) {
+            // `enter_detour` never bridges an `encounterId` into `encounter_started`
+            // (unlike the exploration branch above) — if a future detour ever declares
+            // one, entering it here would silently skip combat. Guarded today only by
+            // `arc.test.ts`'s "keeps every detour's own effects inside the improvised
+            // vocabulary's spirit" content assertion, not by the engine or schema —
+            // a deliberate, documented ceiling (design spec: "a detour cannot declare
+            // an encounter"), not something to build enforcement for at this scale.
             events.push({
               type: "quest_node_entered",
               payload: {
@@ -2127,7 +2150,8 @@ export async function* handleCommand(
                     (entry) => `${entry.npcId} now regards the player as ${entry.band}.`,
                   ),
                   ...delta.relations.map(
-                    (entry) => `${entry.factionA} and ${entry.factionB} now stand at ${entry.band}.`,
+                    (entry) =>
+                      `${entry.factionA} and ${entry.factionB} now stand at ${entry.band}.`,
                   ),
                 ],
                 recentNarrations: campaign.recentNarrations,
@@ -2197,19 +2221,22 @@ export async function* handleCommand(
             // `builtOf`'s guard has nothing to catch.
             if (bridged !== null) campaign.built = bridged;
 
-            // Reads `currentScene()` fresh, post-emit: for a traversal this
-            // is the new node; for a `completeCurrentNode` it is the same
-            // one, and either way `sceneNarrate` narrates whatever node the
-            // player is standing in now. `targetNodeId === null` means no
-            // traversal happened (Decision 1's "conclude the current node"
-            // path) — narrating that as `arrived` would tell the player they
-            // reached a place they were already standing in, so it gets its
-            // own beat instead (whole-branch review finding 2).
-            const card = questNodeCard(statics.authored, currentScene().currentNodeId);
             // Against the POST-transition state: the DAG already moved via
             // `emitAll` above, so improvisation only decorates the node the
             // player now stands in, never the one they left.
             yield* gmStep();
+
+            // Reads `currentScene()` fresh, AFTER `gmStep()`: for a traversal
+            // this is the new node; for a `completeCurrentNode` it is the
+            // same one; and an accepted `enter_detour` inside `gmStep` moves
+            // `currentNodeId` again, so reading this any earlier would narrate
+            // the pre-detour node while the player is actually standing
+            // somewhere else. `targetNodeId === null` means no traversal
+            // happened (Decision 1's "conclude the current node" path) —
+            // narrating that as `arrived` would tell the player they reached a
+            // place they were already standing in, so it gets its own beat
+            // instead (whole-branch review finding 2).
+            const card = questNodeCard(statics.authored, currentScene().currentNodeId);
             yield* sceneNarrate(
               statics.character.characterId,
               targetNodeId === null

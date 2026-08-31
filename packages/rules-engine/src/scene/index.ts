@@ -151,11 +151,7 @@ export function evaluatePredicate(
 }
 
 export type SceneRejectionReason =
-  | "no_such_node"
-  | "no_such_edge"
-  | "precondition_unmet"
-  | "would_close_door"
-  | "not_a_detour";
+  "no_such_node" | "no_such_edge" | "precondition_unmet" | "would_close_door" | "not_a_detour";
 
 export interface SceneRejection {
   reason: SceneRejectionReason;
@@ -420,7 +416,7 @@ export function traverseEdge(
   const after = completed(world, current, state, heroMaxHp);
   const rejections = entryRejections(world, after, to);
   if (rejections.length > 0) return { valid: false, rejections };
-  return { valid: true, state: { ...after, currentNodeId: to } };
+  return { valid: true, state: { ...after, currentNodeId: to, detourReturnNodeId: null } };
 }
 
 /**
@@ -523,6 +519,11 @@ function magnitudeRejection(effect: ImprovisedEffect): SceneRejection | null {
  * player can no longer get to still constrains what may be improvised.
  * Over-strict, and irrelevant at this graph size; add reachability analysis if
  * the world ever grows enough for it to bite.
+ *
+ * Called only from `validateMove`'s `world` branch — `enter_detour` changes no
+ * `completedNodeIds` or relation, so it has nothing for this guard to check,
+ * though a future predicate kind that reads scene position would need this
+ * called there too.
  */
 function closedDoors(
   world: AuthoredWorld,
@@ -604,7 +605,11 @@ export function validateMove(
         return {
           valid: false,
           rejections: [
-            { reason: "no_such_node", message: `no quest node "${move.nodeId}"`, subjectId: move.nodeId },
+            {
+              reason: "no_such_node",
+              message: `no quest node "${move.nodeId}"`,
+              subjectId: move.nodeId,
+            },
           ],
         };
       }

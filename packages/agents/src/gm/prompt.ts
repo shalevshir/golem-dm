@@ -47,7 +47,9 @@ export interface GmPromptInput {
 }
 
 function renderNpcs(npcs: readonly IntentNpcPresent[]): string {
-  const lines = npcs.map((npc) => `- ${npc.nameEnglish} (${npc.nameHebrew}): ${npc.descriptionEnglish}`);
+  const lines = npcs.map(
+    (npc) => `- ${npc.nameEnglish} (${npc.nameHebrew}): ${npc.descriptionEnglish}`,
+  );
   return ["NPCS PRESENT", ...lines].join("\n");
 }
 

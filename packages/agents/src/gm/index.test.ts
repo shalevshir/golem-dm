@@ -126,7 +126,9 @@ describe("createGmAgent — a successful proposal", () => {
       ...DEFAULT_MODEL_ROUTING,
       gm: { provider: "openai", modelId: "gpt-5.4-nano-gm" },
     };
-    const port = createFakePort({ structured: [adapterSuccess({ value: { kind: "none" }, usage })] });
+    const port = createFakePort({
+      structured: [adapterSuccess({ value: { kind: "none" }, usage })],
+    });
     const agent = createGmAgent({ runtime: createAgentRuntime({ routing, port }) });
 
     const result = await agent.propose(baseInput());
@@ -173,7 +175,9 @@ describe("createGmAgent — an adapter failure", () => {
   });
 
   it("makes no retry of its own", async () => {
-    const { port, agent } = agentWith(adapterFailure("no_tool_call", "The model answered in prose."));
+    const { port, agent } = agentWith(
+      adapterFailure("no_tool_call", "The model answered in prose."),
+    );
 
     await agent.propose(baseInput());
 
