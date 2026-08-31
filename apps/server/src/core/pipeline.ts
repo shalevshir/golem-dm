@@ -175,6 +175,18 @@ export interface IntentCallMetrics {
   outcome: string;
   /** Present only when `outcome === "ok"` — a failed call classified nothing. */
   category?: string;
+  /**
+   * The provider's own words on failure, absent when `outcome === "ok"`.
+   * `outcome` alone names the CLASS of failure and nothing else: every
+   * unreachable model id, every rejected tool schema and every expired key
+   * arrives as the single code `provider_error`. That is what made the
+   * 2026-08-30 intent-router outage a manual bisect — the log said
+   * `provider_error` and the two real causes, a 404 on `gemini-3-flash` and
+   * a 400 on the discriminated-union tool schema, were indistinguishable in
+   * it. Optional, and never synthesised: a failure with nothing to quote
+   * omits the field rather than repeating the code back as prose.
+   */
+  message?: string;
   latencyMs: number;
   promptTokens: number;
   completionTokens: number;
@@ -189,6 +201,8 @@ export interface SummaryCallMetrics {
   outcome: string;
   /** `"model"` when the tier produced the summary, `"deterministic"` when it fell back. */
   source: string;
+  /** Same contract as `IntentCallMetrics.message` — see its doc comment. */
+  message?: string;
   promptVersion: string;
   latencyMs: number;
   promptTokens: number;
@@ -209,6 +223,8 @@ export interface EmbeddingCallMetrics {
   outcome: string;
   /** `"index"` when writing a closed episode, `"retrieve"` when reading on node entry. */
   purpose: string;
+  /** Same contract as `IntentCallMetrics.message` — see its doc comment. */
+  message?: string;
   latencyMs: number;
   promptTokens: number;
   completionTokens: number;
@@ -926,10 +942,11 @@ export async function* handleCommand(
             totalTokens: usage.totalTokens,
           });
         },
-        onFailure: (code) => {
+        onFailure: (code, message) => {
           retrieval.failed = true;
           ports.metrics?.recordEmbeddingCall?.({
             outcome: code,
+            ...(message === undefined ? {} : { message }),
             purpose: "retrieve",
             latencyMs: Date.parse(ports.clock()) - Date.parse(retrieveStartedAt),
             promptTokens: 0,
@@ -1395,9 +1412,10 @@ export async function* handleCommand(
           totalTokens: usage.totalTokens,
         });
       },
-      onFailure: (code) => {
+      onFailure: (code, message) => {
         ports.metrics?.recordEmbeddingCall?.({
           outcome: code,
+          ...(message === undefined ? {} : { message }),
           purpose: "index",
           latencyMs: Date.parse(ports.clock()) - Date.parse(indexStartedAt),
           promptTokens: 0,
@@ -1435,9 +1453,10 @@ export async function* handleCommand(
             totalTokens: usage.totalTokens,
           });
         },
-        onFailure: (code) => {
+        onFailure: (code, message) => {
           ports.metrics?.recordEmbeddingCall?.({
             outcome: code,
+            ...(message === undefined ? {} : { message }),
             purpose: "index",
             latencyMs: Date.parse(ports.clock()) - Date.parse(nodeIndexStartedAt),
             promptTokens: 0,
@@ -1620,7 +1639,9 @@ export async function* handleCommand(
           );
           ports.metrics.recordIntentCall?.({
             outcome: classifyResult.ok ? "ok" : classifyResult.error.code,
-            ...(classifyResult.ok ? { category: classifyResult.classification.category } : {}),
+            ...(classifyResult.ok
+              ? { category: classifyResult.classification.category }
+              : { message: classifyResult.error.message }),
             latencyMs: Date.now() - classifyStartedAt,
             ...totals,
           });
@@ -1885,9 +1906,10 @@ export async function* handleCommand(
                   totalTokens: usage.totalTokens,
                 });
               },
-              onFailure: (code) => {
+              onFailure: (code, message) => {
                 ports.metrics?.recordEmbeddingCall?.({
                   outcome: code,
+                  ...(message === undefined ? {} : { message }),
                   purpose: "index",
                   latencyMs: Date.parse(ports.clock()) - Date.parse(indexStartedAt),
                   promptTokens: 0,

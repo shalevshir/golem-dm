@@ -51,6 +51,7 @@ import type {
 } from "@ai-dm/schemas";
 import { SNAPSHOT_EVERY, handleCommand } from "./pipeline.js";
 import type {
+  IntentCallMetrics,
   NarrativeTurnMetrics,
   SnapshotFailureRecord,
   TacticalTurnMetrics,
@@ -814,6 +815,45 @@ describe("handleCommand — free text", () => {
       true,
     );
     expect(campaign.state.world.scene).toEqual(sceneBefore);
+  });
+
+  // The failing half of `intent_call_metrics`. `outcome` alone is the CLASS
+  // of failure — every unreachable model id and every rejected tool schema
+  // arrives as `provider_error` — so without `message` the log cannot say
+  // which one happened, which is what turned the 2026-08-30 outage into a
+  // manual bisect. `category` is the mirror assertion: it must NOT appear,
+  // since a failed call classified nothing.
+  it("puts the adapter's message on the intent metrics record when the classifier fails", async () => {
+    const store = createInMemoryEventStore();
+    const campaign = await sceneCampaign(store);
+    const recorded: IntentCallMetrics[] = [];
+
+    const ports: TurnPorts = {
+      ...portsWith(store),
+      intent: intentFailingWith({ code: "provider_error", message: "the model timed out" }),
+      metrics: {
+        recordTacticalTurn: () => undefined,
+        recordNarrativeTurn: () => undefined,
+        recordIntentCall(record) {
+          recorded.push(record);
+        },
+      },
+    };
+
+    await drain(
+      handleCommand(
+        campaign,
+        { type: "free_text", clientMessageId: "c1", text: "look around" },
+        ports,
+      ),
+    );
+
+    expect(recorded).toHaveLength(1);
+    expect(recorded[0]).toMatchObject({
+      outcome: "provider_error",
+      message: "the model timed out",
+    });
+    expect(recorded[0]).not.toHaveProperty("category");
   });
 
   // (e) An open edge whose "from" node has a real effect: `guild-offer`

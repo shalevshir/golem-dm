@@ -162,6 +162,7 @@ describe("indexEpisode", () => {
         Promise.resolve({ ok: false as const, error: { code: "provider_error" as const, message: "down" } }),
     };
     let reported: string | undefined;
+    let reportedMessage: string | undefined;
 
     await indexEpisode({
       store,
@@ -176,12 +177,17 @@ describe("indexEpisode", () => {
         day: 2,
       },
       deadline: FAR_FUTURE,
-      onFailure: (code) => {
+      onFailure: (code, message) => {
         reported = code;
+        reportedMessage = message;
       },
     });
 
     expect(reported).toBe("provider_error");
+    // The half that says WHICH provider_error this is. A code alone cannot
+    // tell a 404 on a model id from a 400 on a tool schema — see
+    // `IntentCallMetrics.message` in pipeline.ts.
+    expect(reportedMessage).toBe("down");
   });
 
   it("writes nothing and does not throw or hang when the embedding call hangs past the deadline", async () => {
@@ -217,6 +223,7 @@ describe("indexEpisode", () => {
       search: () => Promise.resolve([]),
     };
     let reported: string | undefined;
+    let reportedMessage: string | undefined;
 
     await indexEpisode({
       store: failingStore,
@@ -231,12 +238,14 @@ describe("indexEpisode", () => {
         day: 2,
       },
       deadline: FAR_FUTURE,
-      onFailure: (code) => {
+      onFailure: (code, message) => {
         reported = code;
+        reportedMessage = message;
       },
     });
 
     expect(reported).toBe("store_failed");
+    expect(reportedMessage).toBe("connection refused");
   });
 });
 
@@ -341,6 +350,7 @@ describe("retrieveMemories", () => {
       search: () => Promise.reject(new Error("connection refused")),
     };
     let reported: string | undefined;
+    let reportedMessage: string | undefined;
 
     const lines = await retrieveMemories({
       store: failingStore,
@@ -350,13 +360,15 @@ describe("retrieveMemories", () => {
       queryEnglish: "anything",
       limit: 3,
       deadline: FAR_FUTURE,
-      onFailure: (code) => {
+      onFailure: (code, message) => {
         reported = code;
+        reportedMessage = message;
       },
     });
 
     expect(lines).toEqual([]);
     expect(reported).toBe("store_failed");
+    expect(reportedMessage).toBe("connection refused");
   });
 });
 
