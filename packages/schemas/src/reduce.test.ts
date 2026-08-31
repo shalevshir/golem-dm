@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { fold, reduce } from "./reduce.js";
 import { ActionEconomy, Combatant } from "./world.js";
+import { NarrativeMoveAppliedPayload } from "./events.js";
 import type { GameEvent } from "./events.js";
 import type { CampaignState, EncounterState, SceneSnapshot } from "./protocol.js";
 
@@ -748,5 +749,39 @@ describe("quest_node_entered — the detour return pointer", () => {
     );
     const back = reduce(inDetour, event(102, "quest_node_entered", { nodeId: "the-weir" }));
     expect(back.world.scene?.detourReturnNodeId).toBeNull();
+  });
+});
+
+describe("narrative_move_applied", () => {
+  it("is an audit no-op — the state change rides on the events emitted alongside it", () => {
+    const state = withScene({});
+    const next = reduce(
+      state,
+      event(103, "narrative_move_applied", {
+        actorId: "hero",
+        move: {
+          kind: "world",
+          effects: [{ kind: "shift_npc_affinity", npcId: "tobin", delta: 1 }],
+          reasonEnglish: "r",
+        },
+        reasonEnglish: "r",
+        provider: "openai",
+        modelId: "gpt-5.4-nano",
+        promptVersion: "gm-v1",
+      }),
+    );
+    expect(next).toEqual(state);
+  });
+
+  it("parses its payload", () => {
+    const payload = {
+      actorId: "hero",
+      move: { kind: "enter_detour", nodeId: "side-errand", reasonEnglish: "he asked" },
+      reasonEnglish: "he asked",
+      provider: "openai",
+      modelId: "gpt-5.4-nano",
+      promptVersion: "gm-v1",
+    };
+    expect(NarrativeMoveAppliedPayload.parse(payload)).toEqual(payload);
   });
 });

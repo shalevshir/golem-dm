@@ -319,6 +319,11 @@ export function reduce(state: CampaignState, event: GameEvent): CampaignState {
     // already does: the roll is already resolved by the time this event
     // exists, and the event exists for replay, audit and metrics, not to
     // change `CampaignState`.
+    //
+    // `narrative_move_applied` joins for the same reason `intent_classified`
+    // already does: the move's state change is already carried by the
+    // `world_delta_applied` / `quest_node_entered` events emitted alongside
+    // it, and this event exists purely as the audit record.
     case "campaign_started":
     case "intent_classified":
     case "action_proposed":
@@ -327,6 +332,7 @@ export function reduce(state: CampaignState, event: GameEvent): CampaignState {
     case "dice_rolled":
     case "narrative_emitted":
     case "check_rolled":
+    case "narrative_move_applied":
       return state;
   }
 }

@@ -205,6 +205,7 @@ function foldCombatLog(
     case "quest_node_completed":
     case "world_delta_applied":
     case "check_rolled":
+    case "narrative_move_applied":
       return [...log];
   }
 }
