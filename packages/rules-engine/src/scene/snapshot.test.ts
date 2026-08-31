@@ -241,6 +241,7 @@ describe("diffScene", () => {
               { kind: "shift_npc_affinity" as const, npcId: "sela-the-innkeeper", delta: 1 },
             ],
             edges: [],
+            detour: false,
           },
         ],
       ]),
@@ -299,6 +300,7 @@ describe("diffScene", () => {
               { kind: "shift_npc_affinity" as const, npcId: "sela-the-innkeeper", delta: 1 },
             ],
             edges: [{ to: "npc-node-2", labelEnglish: "Talk again", labelHebrew: "לדבר שוב" }],
+            detour: false,
           },
         ],
         [
@@ -313,6 +315,7 @@ describe("diffScene", () => {
               { kind: "shift_npc_affinity" as const, npcId: "sela-the-innkeeper", delta: 0 },
             ],
             edges: [],
+            detour: false,
           },
         ],
       ]),

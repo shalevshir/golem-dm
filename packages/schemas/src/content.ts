@@ -103,44 +103,62 @@ export const WorldPredicate = z.discriminatedUnion("kind", [
   }),
 ]);
 
+export const ShiftFactionRelationEffect = z.object({
+  kind: z.literal("shift_faction_relation"),
+  factionA: ContentId,
+  factionB: ContentId,
+  /** Bands, not points. Clamping to the -3..+3 ends is the step 3 engine's job. */
+  delta: z.number().int().min(-6).max(6),
+});
+
+export const AdvanceCalendarEffect = z.object({
+  kind: z.literal("advance_calendar"),
+  days: z.number().int().min(1),
+});
+
+export const ShiftNpcAffinityEffect = z.object({
+  kind: z.literal("shift_npc_affinity"),
+  npcId: ContentId,
+  /** Same bound as shift_faction_relation's delta, reusing FactionBand. */
+  delta: z.number().int().min(-6).max(6),
+});
+
+export const AddNpcFactEffect = z.object({
+  kind: z.literal("add_npc_fact"),
+  npcId: ContentId,
+  /** English, internal-only — never shown to the player verbatim (spec Decision 5). */
+  fact: z.string().min(1),
+});
+
+/**
+ * Restores the hero's HP to their maximum. No fields — "restore to max" is
+ * the one absolute value that needs no delta math and cannot disagree with
+ * whatever HP the hero started the rest at. Compose with a separate
+ * `advance_calendar` effect on the same node when a rest should also cost
+ * narrative time; the two are orthogonal facts (death-saves-persistent-hp
+ * spec, Decision 8).
+ */
+export const LongRestEffect = z.object({ kind: z.literal("long_rest") });
+
 /**
  * A world change declared as data and applied by the step 3 engine — never by
  * a model, which is what keeps invariant 1 intact one level above combat.
+ *
+ * Composed from the named members above rather than declaring them inline, so
+ * `ImprovisedEffect` (`narrative-move.ts`) can be this union minus
+ * `long_rest` without a second copy of any member — invariant 4's rule
+ * against a hand-written duplicate.
  *
  * There is no effect that writes regional danger. §4.7: regional danger is
  * derived from faction relations and quest progress, never stored, because
  * derived state cannot drift.
  */
 export const WorldEffect = z.discriminatedUnion("kind", [
-  z.object({
-    kind: z.literal("shift_faction_relation"),
-    factionA: ContentId,
-    factionB: ContentId,
-    /** Bands, not points. Clamping to the -3..+3 ends is the step 3 engine's job. */
-    delta: z.number().int().min(-6).max(6),
-  }),
-  z.object({ kind: z.literal("advance_calendar"), days: z.number().int().min(1) }),
-  z.object({
-    kind: z.literal("shift_npc_affinity"),
-    npcId: ContentId,
-    /** Same bound as shift_faction_relation's delta, reusing FactionBand. */
-    delta: z.number().int().min(-6).max(6),
-  }),
-  z.object({
-    kind: z.literal("add_npc_fact"),
-    npcId: ContentId,
-    /** English, internal-only — never shown to the player verbatim (spec Decision 5). */
-    fact: z.string().min(1),
-  }),
-  /**
-   * Restores the hero's HP to their maximum. No fields — "restore to max" is
-   * the one absolute value that needs no delta math and cannot disagree with
-   * whatever HP the hero started the rest at. Compose with a separate
-   * `advance_calendar` effect on the same node when a rest should also cost
-   * narrative time; the two are orthogonal facts (death-saves-persistent-hp
-   * spec, Decision 8).
-   */
-  z.object({ kind: z.literal("long_rest") }),
+  ShiftFactionRelationEffect,
+  AdvanceCalendarEffect,
+  ShiftNpcAffinityEffect,
+  AddNpcFactEffect,
+  LongRestEffect,
 ]);
 
 /** A destination and a label. Predicates gate the target node, not the edge. */
@@ -192,6 +210,16 @@ export const QuestNode = z.object({
    * catalogues are in scope.
    */
   encounterId: ContentId.optional(),
+  /**
+   * A node with no authored inbound edge, enterable ONLY by a validated
+   * `enter_detour` move (`narrative-move.ts`). Three jobs for one field: it
+   * bounds the GM tier to off-spine content, it keeps `availableEdges`
+   * unchanged (a detour arrives through the fiction, never as a button), and
+   * it is what lets `loadWorld` finally assert that every SPINE node is
+   * reachable — before this marker existed, an orphan and a typo were
+   * indistinguishable.
+   */
+  detour: z.boolean().default(false),
 });
 
 export const FactionRelationEntry = z.object({

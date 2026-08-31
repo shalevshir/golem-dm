@@ -41,6 +41,7 @@ function node(nodeId: string, rest: Partial<QuestNode> = {}): QuestNode {
     preconditions: [],
     effects: [],
     edges: [],
+    detour: false,
     ...rest,
   };
 }

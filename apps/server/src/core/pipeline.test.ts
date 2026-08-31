@@ -3411,6 +3411,7 @@ describe("handleCommand — end of combat", () => {
       preconditions: [],
       effects: [{ kind: "long_rest" }],
       edges: [],
+      detour: false,
       encounterId: "goblin-ambush",
     };
     const longRestWorld: AuthoredWorld = {
