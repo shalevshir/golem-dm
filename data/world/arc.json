@@ -165,6 +165,7 @@
     "sceneEnglish": "Old Tobin does not so much invite you as start walking and assume. The boathouse is a lean-to full of things the river has given back over forty years, and one shelf of things it has not. He wants a second pair of hands and, it becomes clear, a second opinion he can afford to ignore.",
     "locationId": "emberfall",
     "detour": true,
+    "preconditions": [{ "kind": "node_completed", "nodeId": "the-weir" }],
     "effects": [
       { "kind": "shift_npc_affinity", "npcId": "old-tobin", "delta": 1 },
       {

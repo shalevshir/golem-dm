@@ -165,6 +165,27 @@ describe("the Emberfall arc", () => {
     expect(open.map((each) => each.node.nodeId)).toContain("after-the-reckoning");
   });
 
+  // Regression: `tobins-errand` originally had no precondition, so it was
+  // enterable straight from `arrival` — before the player had taken either
+  // branch, and before `the-weir` (whose own precondition only checks
+  // `arrival`) was reachable any other way. That let a detour visit stand in
+  // for the branch choice, and its one edge back required `the-weir`
+  // completed, which a turn-one entrant could never satisfy — a permanent
+  // soft-lock. Gating `tobins-errand` on `the-weir` itself closes both holes.
+  it("keeps tobins-errand closed until the-weir is completed", () => {
+    const world = loadWorld();
+    const startState = stateOf(startScene(world));
+    expect(availableDetours(world, startState).find((each) => each.node.nodeId === "tobins-errand")?.open).toBe(
+      false,
+    );
+
+    let state = stateOf(traverseEdge(world, startState, "guild-offer"));
+    state = stateOf(traverseEdge(world, state, "the-weir"));
+    state = stateOf(completeCurrentNode(world, state));
+    const open = availableDetours(world, state).filter((each) => each.open);
+    expect(open.map((each) => each.node.nodeId)).toContain("tobins-errand");
+  });
+
   it("keeps every detour's own effects inside the improvised vocabulary's spirit", () => {
     const world = loadWorld();
     for (const node of Array.from(world.questNodes.values()).filter((each) => each.detour)) {
