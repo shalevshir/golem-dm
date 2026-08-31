@@ -248,6 +248,11 @@ export function loadWorld(dir: string = dataDir(WORLD_DIR_RELATIVE)): AuthoredWo
     }
     for (const edge of node.edges) {
       checkRef({ kind: "quest node", id: edge.to }, `${where} edge`);
+      // A detour has no authored way in — that is what makes it a detour, and
+      // what makes the inbound-edge check below meaningful.
+      if (questNodes.get(edge.to)?.detour === true) {
+        problems.push(`${where} edge may not point at detour node "${edge.to}"`);
+      }
     }
     for (const predicate of node.preconditions) {
       for (const ref of predicateRefs(predicate)) checkRef(ref, `${where} precondition`);
@@ -265,6 +270,20 @@ export function loadWorld(dir: string = dataDir(WORLD_DIR_RELATIVE)): AuthoredWo
         );
       }
     }
+  }
+
+  // The dividend from `QuestNode.detour`. Before the marker existed, an
+  // unreferenced node and a typo'd edge target were indistinguishable, so
+  // this check could not be written. Now that off-spine content declares
+  // itself, a SPINE node nobody points at is unambiguously a defect.
+  const targeted = new Set(
+    Array.from(questNodes.values()).flatMap((node) => node.edges.map((edge) => edge.to)),
+  );
+  for (const node of questNodes.values()) {
+    if (node.detour) continue;
+    if (node.nodeId === manifest.startingNodeId) continue;
+    if (targeted.has(node.nodeId)) continue;
+    problems.push(`quest node ${node.nodeId} has no inbound edge and is not a detour`);
   }
 
   const world: AuthoredWorld = {
