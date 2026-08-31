@@ -9,6 +9,7 @@
 import { randomUUID } from "node:crypto";
 import {
   createAgentRuntime,
+  createGmAgent,
   createHebrewNarrative,
   createHebrewSceneNarrative,
   createIntentAgent,
@@ -136,6 +137,14 @@ const summaryRuntime = createAgentRuntime({
   port: createVercelPort({}),
 });
 
+// A fifth runtime, for the GM tier — the same one-runtime-per-role reasoning
+// as the three above: independent instrumentation and routing, no shared
+// lifecycle with any other agent.
+const gmRuntime = createAgentRuntime({
+  routing: DEFAULT_MODEL_ROUTING,
+  port: createVercelPort({}),
+});
+
 const metrics: MetricsPort = {
   recordTacticalTurn(turn) {
     logHolder.current?.info(turn, "tactical_turn_metrics");
@@ -157,6 +166,9 @@ const metrics: MetricsPort = {
   },
   recordIntentCall(record) {
     logHolder.current?.info(record, "intent_call_metrics");
+  },
+  recordGmCall(record) {
+    logHolder.current?.info(record, "gm_call_metrics");
   },
   recordSummaryCall(record) {
     logHolder.current?.info(record, "summary_call_metrics");
@@ -195,6 +207,7 @@ const app = buildApp({
       },
     }),
     intent: createIntentAgent({ runtime: intentRuntime }),
+    gm: createGmAgent({ runtime: gmRuntime }),
     // Wired unconditionally, mirroring `narrative` above: a missing provider
     // key degrades through `sceneNarrate`'s own ladder (pipeline.ts) rather
     // than failing the turn.

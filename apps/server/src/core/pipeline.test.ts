@@ -11,6 +11,8 @@ import {
 import type { AuthoredWorld, SceneState, SceneTransition } from "@ai-dm/rules-engine";
 import type {
   AdapterError,
+  GmAgent,
+  GmResult,
   IntentAgent,
   IntentResult,
   NarrativeFinish,
@@ -49,6 +51,8 @@ import type {
   ExecuteTurn,
   GameEvent,
   IntentClassification,
+  NarrativeMove,
+  NpcDefinition,
   QuestNode,
   SceneSnapshot,
   ServerFrame,
@@ -57,7 +61,9 @@ import type {
 } from "@ai-dm/schemas";
 import { SNAPSHOT_EVERY, handleCommand } from "./pipeline.js";
 import type {
+  GmCallMetrics,
   IntentCallMetrics,
+  MetricsPort,
   NarrativeTurnMetrics,
   SnapshotFailureRecord,
   TacticalTurnMetrics,
@@ -138,12 +144,33 @@ function unreachableIntent(): IntentAgent {
   };
 }
 
+/**
+ * A GM double that always proposes `{ kind: "none" }` — the working default
+ * for every test that does not care about the GM tier specifically. Matches
+ * `gmStep`'s own no-op degradation, so every pre-existing `free_text` test's
+ * event stream is unaffected by the GM tier now running on every turn.
+ */
+function gmNone(): GmAgent {
+  return {
+    propose() {
+      return Promise.resolve({
+        ok: true,
+        move: { kind: "none" },
+        provider: "test",
+        modelId: "test",
+        usage: [],
+      } satisfies GmResult);
+    },
+  };
+}
+
 function portsWith(store: EventStore, tactical: TacticalAgent = defaultTactical()): TurnPorts {
   return {
     store,
     tactical,
     narrative: createDeterministicNarrative(),
     intent: unreachableIntent(),
+    gm: gmNone(),
     // Mirrors `narrative` above: the deterministic renderer stands in as the
     // "primary" port for every test that does not care about the scene
     // narration ladder specifically, exactly the way `createDeterministicNarrative()`
@@ -327,6 +354,13 @@ function eventTypesOf(frames: ServerFrame[]): string[] {
   return frames
     .filter((each): each is Extract<ServerFrame, { type: "event" }> => each.type === "event")
     .map((each) => each.event.type);
+}
+
+/** `eventTypesOf`'s sibling for tests that need a payload, not just a type. */
+function eventsOf(frames: ServerFrame[]): GameEvent[] {
+  return frames
+    .filter((each): each is Extract<ServerFrame, { type: "event" }> => each.type === "event")
+    .map((each) => each.event);
 }
 
 // `clientMessageId` defaults to "c1" for every existing call site; the
@@ -3568,5 +3602,253 @@ describe("handleCommand — end of combat", () => {
     expect(eventTypesOf(frames)).not.toContain("encounter_resolved");
     expect(campaign.state.encounter).not.toBeNull();
     expect(campaign.built).not.toBeNull();
+  });
+});
+
+/**
+ * A hand-built world for the GM tier's own tests, mirroring the shape of the
+ * `longRestWorld` fixture above rather than `data/world/`'s real Emberfall
+ * content: the real arc authors no `detour: true` node, and this task's
+ * declared files do not include `data/world/arc.json`. Node and NPC ids echo
+ * the real arc's own (`arrival`, `guild-offer`, `old-tobin`, `maren-vess`)
+ * for readability, plus the one shape the real arc lacks — `tobins-errand`,
+ * a detour reachable only through a validated `enter_detour` move.
+ *
+ * - `arrival`: the start, with one authored edge to `guild-offer` — enough
+ *   for the exploration-ordering tests below to traverse the spine.
+ * - `guild-offer`: gated on `arrival` being completed, exactly like the real
+ *   node of the same name.
+ * - `tobins-errand`: a detour, open unconditionally.
+ */
+function gmFixtureWorld(): AuthoredWorld {
+  const here = {
+    locationId: "here",
+    nameEnglish: "Here",
+    nameHebrew: "כאן",
+    descriptionEnglish: "A fixture location.",
+  };
+  const npc = (npcId: string, nameEnglish: string): NpcDefinition => ({
+    npcId,
+    nameEnglish,
+    nameHebrew: nameEnglish,
+    grammaticalGender: "masculine",
+    locationId: "here",
+    descriptionEnglish: `A fixture NPC named ${nameEnglish}.`,
+  });
+  const arrival: QuestNode = {
+    nodeId: "arrival",
+    titleEnglish: "Arrival",
+    sceneEnglish: "A fixture arrival scene.",
+    locationId: "here",
+    preconditions: [],
+    effects: [],
+    edges: [{ to: "guild-offer", labelEnglish: "Hear out the guild factor", labelHebrew: "להקשיב" }],
+    detour: false,
+  };
+  const guildOffer: QuestNode = {
+    nodeId: "guild-offer",
+    titleEnglish: "The Guild's Offer",
+    sceneEnglish: "A fixture guild-offer scene.",
+    locationId: "here",
+    preconditions: [{ kind: "node_completed", nodeId: "arrival" }],
+    effects: [],
+    edges: [],
+    detour: false,
+  };
+  const tobinsErrand: QuestNode = {
+    nodeId: "tobins-errand",
+    titleEnglish: "Tobin's Errand",
+    sceneEnglish: "A fixture detour scene.",
+    locationId: "here",
+    preconditions: [],
+    effects: [],
+    edges: [],
+    detour: true,
+  };
+  return {
+    worldId: "gm-fixture",
+    startingDay: 1,
+    startingNodeId: "arrival",
+    factions: new Map(),
+    locations: new Map([["here", here]]),
+    npcs: new Map([
+      ["old-tobin", npc("old-tobin", "Old Tobin")],
+      ["maren-vess", npc("maren-vess", "Maren Vess")],
+    ]),
+    questNodes: new Map([
+      ["arrival", arrival],
+      ["guild-offer", guildOffer],
+      ["tobins-errand", tobinsErrand],
+    ]),
+    relations: new Map(),
+  };
+}
+
+/** A GM double that always proposes `move`. */
+function gmProposing(move: NarrativeMove): GmAgent {
+  return {
+    propose() {
+      return Promise.resolve({
+        ok: true,
+        move,
+        provider: "test-gm-provider",
+        modelId: "test-gm-model",
+        usage: [{ promptTokens: 10, completionTokens: 5, totalTokens: 15 }],
+      } satisfies GmResult);
+    },
+  };
+}
+
+/** A GM double that always fails with `error` — a provider/adapter failure. */
+function gmFailingWith(error: AdapterError): GmAgent {
+  return {
+    propose() {
+      return Promise.resolve({ ok: false, error, usage: [] } satisfies GmResult);
+    },
+  };
+}
+
+/**
+ * The GM tier's own `free_text` harness: a fresh scene campaign on
+ * `gmFixtureWorld()`, an `intent` double resolving to exactly `classification`,
+ * and a `gm` double proposing exactly `move` (or failing with `gmError`, or
+ * defaulting to `{ kind: "none" }` when neither is given). `metrics` is
+ * spliced onto a working `MetricsPort` so a test can supply only the one
+ * method it cares about, `recordGmCall`, without also implementing the two
+ * non-optional ones.
+ */
+async function runFreeText(options: {
+  classification: IntentClassification;
+  move?: NarrativeMove;
+  gmError?: AdapterError;
+  metrics?: Partial<MetricsPort>;
+}): Promise<ServerFrame[]> {
+  const store = createInMemoryEventStore();
+  const campaign = await createCampaign({
+    campaignId: "s1",
+    rootSeed: 42,
+    store,
+    clock: () => "2026-08-19T10:00:00.000Z",
+    uuid: uuids(),
+    scene: { authored: gmFixtureWorld(), character: loadCharacter("hero") },
+  });
+
+  const gm =
+    options.gmError !== undefined
+      ? gmFailingWith(options.gmError)
+      : gmProposing(options.move ?? { kind: "none" });
+
+  const ports: TurnPorts = {
+    ...portsWith(store),
+    intent: classifiedAs(options.classification),
+    gm,
+    ...(options.metrics === undefined
+      ? {}
+      : {
+          metrics: {
+            recordTacticalTurn: () => {},
+            recordNarrativeTurn: () => {},
+            ...options.metrics,
+          },
+        }),
+  };
+
+  return drain(
+    handleCommand(
+      campaign,
+      { type: "free_text", clientMessageId: "c1", text: "test input" },
+      ports,
+    ),
+  );
+}
+
+describe("handleCommand — the GM tier", () => {
+  it("applies an accepted world move as an audit event plus a world delta", async () => {
+    const frames = await runFreeText({
+      classification: { category: "social" },
+      move: {
+        kind: "world",
+        effects: [{ kind: "shift_npc_affinity", npcId: "old-tobin", delta: 1 }],
+        reasonEnglish: "listened to him",
+      },
+    });
+    const types = eventsOf(frames).map((each) => each.type);
+    expect(types).toContain("narrative_move_applied");
+    expect(types).toContain("world_delta_applied");
+  });
+
+  it("emits nothing when the engine refuses the move, and still narrates", async () => {
+    const frames = await runFreeText({
+      classification: { category: "social" },
+      // Three bands: over the improvised ceiling, so validateMove refuses.
+      move: {
+        kind: "world",
+        effects: [{ kind: "shift_npc_affinity", npcId: "old-tobin", delta: 3 }],
+        reasonEnglish: "r",
+      },
+    });
+    expect(eventsOf(frames).map((each) => each.type)).not.toContain("narrative_move_applied");
+    expect(eventsOf(frames).map((each) => each.type)).toContain("narrative_emitted");
+  });
+
+  it("degrades to no move when the GM call fails, without failing the turn", async () => {
+    const frames = await runFreeText({
+      classification: { category: "social" },
+      gmError: { code: "provider_error", message: "boom" },
+    });
+    expect(eventsOf(frames).map((each) => each.type)).not.toContain("narrative_move_applied");
+    expect(frames.some((each) => each.type === "error")).toBe(false);
+    expect(eventsOf(frames).map((each) => each.type)).toContain("narrative_emitted");
+  });
+
+  it("runs after an exploration traversal, against the post-traversal state", async () => {
+    const frames = await runFreeText({
+      classification: { category: "exploration", targetNodeId: "guild-offer" },
+      move: {
+        kind: "world",
+        effects: [{ kind: "add_npc_fact", npcId: "maren-vess", fact: "was watched closely" }],
+        reasonEnglish: "r",
+      },
+    });
+    const types = eventsOf(frames).map((each) => each.type);
+    expect(types.indexOf("quest_node_entered")).toBeLessThan(types.indexOf("narrative_move_applied"));
+  });
+
+  it("runs on an exploration refusal too, where the traversal did not happen", async () => {
+    const frames = await runFreeText({
+      classification: { category: "exploration", targetNodeId: "no-such-node" },
+      move: {
+        kind: "world",
+        effects: [{ kind: "add_npc_fact", npcId: "maren-vess", fact: "noticed the hesitation" }],
+        reasonEnglish: "r",
+      },
+    });
+    const types = eventsOf(frames).map((each) => each.type);
+    expect(types).not.toContain("quest_node_entered");
+    expect(types).toContain("narrative_move_applied");
+  });
+
+  it("enters a detour and records the return pointer in the fold", async () => {
+    const frames = await runFreeText({
+      classification: { category: "social" },
+      move: { kind: "enter_detour", nodeId: "tobins-errand", reasonEnglish: "he asked for help" },
+    });
+    const entered = eventsOf(frames).find((each) => each.type === "quest_node_entered");
+    expect(entered?.payload).toMatchObject({ nodeId: "tobins-errand", detourReturnNodeId: "arrival" });
+  });
+
+  it("reports every GM call to metrics, refusals included", async () => {
+    const records: GmCallMetrics[] = [];
+    await runFreeText({
+      classification: { category: "ooc" },
+      move: {
+        kind: "world",
+        effects: [{ kind: "shift_npc_affinity", npcId: "old-tobin", delta: 5 }],
+        reasonEnglish: "r",
+      },
+      metrics: { recordGmCall: (record) => records.push(record) },
+    });
+    expect(records).toHaveLength(1);
+    expect(records[0]?.refusal).toBeDefined();
   });
 });

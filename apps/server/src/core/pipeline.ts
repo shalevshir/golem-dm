@@ -20,6 +20,7 @@ import {
   affinityOf,
   affordancesFor,
   applyTurn,
+  availableDetours,
   availableEdges,
   completeCurrentNode,
   DC_BY_DIFFICULTY,
@@ -29,6 +30,7 @@ import {
   seeded,
   traverseEdge,
   validateExecuteTurn,
+  validateMove,
 } from "@ai-dm/rules-engine";
 import type { AuthoredWorld, SceneDelta, SceneTransition, TurnEffect } from "@ai-dm/rules-engine";
 import {
@@ -37,12 +39,14 @@ import {
   createDeterministicNarrative,
   createDeterministicSceneNarrative,
   DEFAULT_EMBEDDING_SPEC,
+  GM_PROMPT_VERSION,
   INTENT_PROMPT_VERSION,
   NARRATIVE_PROMPT_VERSION,
   SCENE_PROMPT_VERSION,
 } from "@ai-dm/agents";
 import type {
   EmbeddingPort,
+  GmAgent,
   IntentAgent,
   IntentNpcPresent,
   IntentResult,
@@ -62,7 +66,13 @@ import {
   CampaignMismatchError,
 } from "@ai-dm/memory";
 import type { EpisodicStore, EventStore } from "@ai-dm/memory";
-import { CheckRolledPayload, conclusionOf, IntentClassifiedPayload, reduce } from "@ai-dm/schemas";
+import {
+  CheckRolledPayload,
+  conclusionOf,
+  IntentClassifiedPayload,
+  NarrativeMoveAppliedPayload,
+  reduce,
+} from "@ai-dm/schemas";
 import { indexEpisode, memoryLines, retrieveMemories, summarizeEpisode } from "./episodic.js";
 import type {
   AbilityKey,
@@ -197,6 +207,29 @@ export interface IntentCallMetrics {
 }
 
 /**
+ * The fifth billed source. `outcome` is `"ok"` or an `AdapterErrorCode`, an
+ * open `string` for the same reason `IntentCallMetrics.outcome` is.
+ */
+export interface GmCallMetrics {
+  outcome: string;
+  /** Present only when the call succeeded — the kind the model proposed. */
+  moveKind?: string;
+  /**
+   * Present only when the ENGINE refused an otherwise-successful call: the
+   * joined rejection messages. Distinct from `message`, which is the
+   * PROVIDER's words on a failed call. A refusal is the design working, not
+   * an error, and conflating the two would hide how often the guard fires.
+   */
+  refusal?: string;
+  /** Same contract as `IntentCallMetrics.message` — see its doc comment. */
+  message?: string;
+  latencyMs: number;
+  promptTokens: number;
+  completionTokens: number;
+  totalTokens: number;
+}
+
+/**
  * The fourth billed source. `outcome` is `"ok"` or an `AdapterErrorCode`,
  * an open `string` for the same reason `IntentCallMetrics.outcome` is.
  */
@@ -300,6 +333,13 @@ export interface MetricsPort {
    * siblings are.
    */
   recordEmbeddingCall?(record: EmbeddingCallMetrics): void;
+  /**
+   * One call per `free_text` turn that reaches `gmStep`'s `ports.gm.propose`
+   * call — success, engine refusal, and provider failure alike, mirroring
+   * `recordIntentCall`'s "every call, not just the ones that stuck" contract.
+   * Optional for the same reason its siblings are.
+   */
+  recordGmCall?(record: GmCallMetrics): void;
 }
 
 export interface TurnPorts {
@@ -308,6 +348,8 @@ export interface TurnPorts {
   narrative: NarrativePort;
   /** The intent router — `free_text`'s classifier. */
   intent: IntentAgent;
+  /** The GM tier — `free_text`'s improviser, run on every category. */
+  gm: GmAgent;
   /** The out-of-combat narrator — `free_text`'s sibling of `narrative`. */
   sceneNarrative: SceneNarrativePort;
   /** Episodic memory's durable index — `@ai-dm/memory`. Never imported
@@ -1859,6 +1901,113 @@ export async function* handleCommand(
           }),
         });
 
+        /**
+         * The GM tier (spec Decision 7). Runs on EVERY category, always
+         * against the post-transition state, so on `exploration` the DAG
+         * moves first and improvisation only decorates the node the player
+         * now stands in. Ordering is therefore never ambiguous.
+         *
+         * Every failure path — timeout, provider error, engine refusal —
+         * degrades to no move. A turn never fails because improvisation did
+         * not work out; it just does not improvise.
+         */
+        const gmStep = async function* (
+          checkOutcome?: { ability: string; skill?: string; success: boolean },
+        ): AsyncGenerator<ServerFrame, void> {
+          const before = sceneStateFrom(currentScene());
+          const card = questNodeCard(statics.authored, before.currentNodeId);
+          const startedAt = Date.now();
+          const proposal = await ports.gm.propose({
+            text: command.text,
+            sceneEnglish: card.sceneEnglish,
+            npcs: card.npcs,
+            category: classification.category,
+            ...(checkOutcome === undefined ? {} : { checkOutcome }),
+            detours: availableDetours(statics.authored, before).map((each) => ({
+              nodeId: each.node.nodeId,
+              titleEnglish: each.node.titleEnglish,
+              open: each.open,
+            })),
+            abortSignal: controller.signal,
+          });
+
+          const totals = proposal.usage.reduce(
+            (sum, each) => ({
+              promptTokens: sum.promptTokens + each.promptTokens,
+              completionTokens: sum.completionTokens + each.completionTokens,
+              totalTokens: sum.totalTokens + each.totalTokens,
+            }),
+            { promptTokens: 0, completionTokens: 0, totalTokens: 0 },
+          );
+          const report = (extra: Partial<GmCallMetrics>): void => {
+            ports.metrics?.recordGmCall?.({
+              outcome: proposal.ok ? "ok" : proposal.error.code,
+              latencyMs: Date.now() - startedAt,
+              ...totals,
+              ...extra,
+            });
+          };
+
+          if (!proposal.ok) {
+            report({ message: proposal.error.message });
+            return;
+          }
+          if (proposal.move.kind === "none") {
+            report({ moveKind: "none" });
+            return;
+          }
+
+          const transition = validateMove(statics.authored, before, proposal.move);
+          if (!transition.valid) {
+            // Refusal is silent to the player: nothing happened, and the
+            // narrator is already about to describe the turn. No event, no
+            // error frame — only a metric.
+            report({
+              moveKind: proposal.move.kind,
+              refusal: transition.rejections.map((each) => each.message).join("; "),
+            });
+            return;
+          }
+          report({ moveKind: proposal.move.kind });
+
+          const events: { type: GameEvent["type"]; payload: Record<string, unknown> }[] = [
+            {
+              type: "narrative_move_applied",
+              payload: {
+                ...NarrativeMoveAppliedPayload.parse({
+                  actorId: statics.character.characterId,
+                  move: proposal.move,
+                  reasonEnglish: proposal.move.reasonEnglish,
+                  provider: proposal.provider,
+                  modelId: proposal.modelId,
+                  promptVersion: GM_PROMPT_VERSION,
+                }),
+              },
+            },
+          ];
+          // Diffed from the engine's own pre/post states, never re-read off
+          // the proposal — the same rule the exploration branch follows, and
+          // what makes a replay reproduce the live state even if the GM
+          // prompt later changes.
+          const worldDeltaEvent = worldDeltaEventOrNull(diffScene(before, transition.state));
+          if (worldDeltaEvent !== null) events.push(worldDeltaEvent);
+          if (transition.state.currentNodeId !== before.currentNodeId) {
+            events.push({
+              type: "quest_node_entered",
+              payload: {
+                nodeId: transition.state.currentNodeId,
+                ...(transition.state.detourReturnNodeId === null
+                  ? {}
+                  : { detourReturnNodeId: transition.state.detourReturnNodeId }),
+              },
+            });
+          }
+          // ONE append, for the reason the exploration branch documents:
+          // separate appends leave a window where a store failure durably
+          // records half a transition no later turn can repair.
+          yield* emitAll(events);
+        };
+
         switch (classification.category) {
           case "exploration": {
             const before = sceneStateFrom(currentScene());
@@ -1901,6 +2050,11 @@ export async function* handleCommand(
               // no error frame, no event beyond the two already emitted, and
               // `campaign.state.world.scene` is untouched — this branch never
               // calls `emit` for a scene event.
+              //
+              // The GM tier still runs here (spec Decision 7): the traversal
+              // did not happen, but the player's turn did, and improvisation
+              // is not gated on exploration having succeeded.
+              yield* gmStep();
               yield* sceneNarrate(
                 statics.character.characterId,
                 {
@@ -2036,6 +2190,10 @@ export async function* handleCommand(
             // reached a place they were already standing in, so it gets its
             // own beat instead (whole-branch review finding 2).
             const card = questNodeCard(statics.authored, currentScene().currentNodeId);
+            // Against the POST-transition state: the DAG already moved via
+            // `emitAll` above, so improvisation only decorates the node the
+            // player now stands in, never the one they left.
+            yield* gmStep();
             yield* sceneNarrate(
               statics.character.characterId,
               targetNodeId === null
@@ -2139,6 +2297,11 @@ export async function* handleCommand(
             // No state change (design spec Non-goals: a check informs
             // narration and the log, it does not gate traversal) — this
             // branch never calls `emit`/`emitAll` for a scene event.
+            yield* gmStep({
+              ability,
+              ...(classification.skill === undefined ? {} : { skill: classification.skill }),
+              success: result.success,
+            });
             yield* sceneNarrate(
               statics.character.characterId,
               {
@@ -2162,6 +2325,7 @@ export async function* handleCommand(
           case "social":
           case "ooc":
           case "combat": {
+            yield* gmStep();
             yield* sceneNarrate(
               statics.character.characterId,
               { kind: "reply", category: classification.category },

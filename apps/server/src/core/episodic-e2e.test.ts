@@ -175,6 +175,19 @@ function portsWith(store: EventStore, sceneInputs: SceneNarrationInput[]): TurnP
     intent: {
       classify: () => Promise.reject(new Error("intent.classify not scripted for this call")),
     },
+    // `gmStep` (`pipeline.ts`) runs on every `free_text` category regardless
+    // of `intent`'s per-call override below, so this needs a real
+    // always-resolving `{ kind: "none" }` double, not a rejecting one.
+    gm: {
+      propose: () =>
+        Promise.resolve({
+          ok: true,
+          move: { kind: "none" },
+          provider: "test",
+          modelId: "test",
+          usage: [],
+        }),
+    },
     sceneNarrative: recordingSceneNarrative(sceneInputs),
     episodic: createInMemoryEpisodicStore(),
     embedding: createFakeEmbeddingPort(),
