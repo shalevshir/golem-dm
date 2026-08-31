@@ -142,11 +142,15 @@ describe("createCampaign with a scene", () => {
       // `state.world.scene` is exactly `sceneFromGenesis` of the payload just
       // written — the one definition of the rebuild, not a second hand-rolled
       // projection.
-      expect(campaign.state.world.scene).toEqual(sceneFromGenesis(genesisPayload));
+      expect(campaign.state.world.scene).toEqual(
+        sceneFromGenesis(genesisPayload, scene.character.maxHp),
+      );
       expect(campaign.state.world.scene?.currentNodeId).toBe(scene.authored.startingNodeId);
       expect(campaign.state.world.scene?.day).toBe(scene.authored.startingDay);
       expect(campaign.state.world.scene?.completedNodeIds).toEqual([]);
       expect(campaign.state.world.scene?.relations).toEqual([]);
+      // A fresh campaign starts at full HP.
+      expect(campaign.state.world.scene?.heroHp).toBe(scene.character.maxHp);
       expect(campaign.sceneStatics).toBe(scene);
       // No board — a scene campaign starts no fight.
       expect(campaign.state.encounter).toBeNull();
@@ -185,6 +189,55 @@ describe("startEncounter", () => {
     const campaign = await startedCampaign(baseInput());
     expect(builtOf(campaign).sceneEnglish).toContain("hillside");
     expect(builtOf(campaign).encounterId).toBe(ENCOUNTER_ID);
+  });
+
+  it("spawns the hero at their persisted HP for a scene campaign", async () => {
+    const input = baseInput();
+    const scene = heroSceneStatics();
+    const campaign = await createCampaign({ ...input, scene });
+    if (campaign.state.world.scene === null) throw new Error("unreachable — asserted above");
+    campaign.state = {
+      ...campaign.state,
+      world: { ...campaign.state.world, scene: { ...campaign.state.world.scene, heroHp: 5 } },
+    };
+    const started = await startEncounter({
+      campaign,
+      encounterId: ENCOUNTER_ID,
+      store: input.store,
+      clock: input.clock,
+      uuid: input.uuid,
+    });
+    const hero = encounterOf(started).combatants.find((each) => each.combatantId === "hero");
+    expect(hero?.currentHp).toBe(5);
+  });
+
+  it("floors the spawn at 1 HP rather than spawning already-down", async () => {
+    const input = baseInput();
+    const scene = heroSceneStatics();
+    const campaign = await createCampaign({ ...input, scene });
+    if (campaign.state.world.scene === null) throw new Error("unreachable — asserted above");
+    campaign.state = {
+      ...campaign.state,
+      world: { ...campaign.state.world, scene: { ...campaign.state.world.scene, heroHp: 0 } },
+    };
+    const started = await startEncounter({
+      campaign,
+      encounterId: ENCOUNTER_ID,
+      store: input.store,
+      clock: input.clock,
+      uuid: input.uuid,
+    });
+    const hero = encounterOf(started).combatants.find((each) => each.combatantId === "hero");
+    expect(hero?.currentHp).toBe(1);
+  });
+
+  it("spawns at full HP for a combat-only campaign, unaffected by heroHp", async () => {
+    // `baseInput()` carries no `scene`, so `startedCampaign` behaves exactly
+    // as it always has — the override is `undefined`, not read from
+    // anywhere.
+    const campaign = await startedCampaign(baseInput());
+    const hero = encounterOf(campaign).combatants.find((each) => each.combatantId === "hero");
+    expect(hero?.currentHp).toBe(hero?.maxHp);
   });
 
   it("mutates the campaign it was handed rather than returning a copy", async () => {

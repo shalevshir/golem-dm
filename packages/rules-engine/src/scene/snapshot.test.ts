@@ -49,6 +49,7 @@ describe("round trip: snapshotOf(sceneStateFrom(s))", () => {
       relations: [],
       npcAffinities: [],
       day: 1,
+      heroHp: 10,
     };
     expect(sorted(snapshotOf(sceneStateFrom(snapshot), snapshot.worldId))).toEqual(
       sorted(snapshot),
@@ -70,6 +71,7 @@ describe("round trip: snapshotOf(sceneStateFrom(s))", () => {
       ],
       npcAffinities: [],
       day: 3,
+      heroHp: 10,
     };
     expect(sorted(snapshotOf(sceneStateFrom(snapshot), snapshot.worldId))).toEqual(
       sorted(snapshot),
@@ -84,6 +86,7 @@ describe("round trip: snapshotOf(sceneStateFrom(s))", () => {
       relations: [{ factionA: "alpha", factionB: "beta", band: "war" }],
       npcAffinities: [],
       day: 4,
+      heroHp: 10,
     };
     expect(sorted(snapshotOf(sceneStateFrom(snapshot), snapshot.worldId))).toEqual(
       sorted(snapshot),
@@ -101,6 +104,7 @@ describe("round trip: snapshotOf(sceneStateFrom(s))", () => {
         { npcId: "sela-the-innkeeper", band: "cordial", facts: [] },
       ],
       day: 3,
+      heroHp: 10,
     };
     expect(sorted(snapshotOf(sceneStateFrom(snapshot), snapshot.worldId))).toEqual(
       sorted(snapshot),
@@ -117,6 +121,7 @@ describe("round trip: snapshotOf(sceneStateFrom(s))", () => {
       ]),
       npcAffinities: new Map(),
       day: 2,
+      heroHp: 10,
     };
     const snapshot = snapshotOf(state, "fixture");
     expect(snapshot.completedNodeIds).toEqual(["alpha", "zeta"]);
@@ -146,6 +151,7 @@ describe("sceneStateFrom", () => {
       relations: [{ factionA: "raiders", factionB: "millers", band: "hostile" }],
       npcAffinities: [],
       day: 1,
+      heroHp: 10,
     };
     const state = sceneStateFrom(snapshot);
     expect(relationBetween(world, state, "millers", "raiders")).toBe("hostile");

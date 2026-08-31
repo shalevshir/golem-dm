@@ -6,18 +6,19 @@
 // of them would hang or pass for the wrong reason:
 //
 //   1. `applyTurn`'s `applyDamage` call in
-//      packages/rules-engine/src/encounter/resolve.ts pins `diesAtZeroHp:
-//      true` unconditionally for every combatant (death saves are
-//      implemented but not driven by the encounter pipeline —
-//      RULES_REFERENCE.md §8's gap), so the hero DIES at 0 HP rather than
-//      falling unconscious, and that is exactly what makes the fight
-//      terminate at all. `goblin-ambush`'s hero is a real character spawn
-//      and so carries a real `characterId` — which is exactly
-//      why the pin is load-bearing rather than incidental: without it, a
-//      combatant with a `characterId` would fall Unconscious at 0 HP
-//      instead, and with death saves undriven here the fight would have
-//      nothing left to conclude on. This file asserts "one faction left
-//      standing", never a party win.
+//      packages/rules-engine/src/encounter/resolve.ts reads `diesAtZeroHp`
+//      off `characterId` presence (death-saves-persistent-hp spec), so
+//      `goblin-ambush`'s hero — a real character spawn with a real
+//      `characterId` — falls Unconscious at 0 HP and rolls death saves,
+//      driven automatically by the encounter pipeline (`runEnemyTurns`'s
+//      party-unconscious branch) rather than dying outright. The hero never
+//      attacks (Dodge only, below), so the goblins never die; the fight
+//      still terminates because a death save resolves within at most 5
+//      rolls (`rollDeathSave` moves one of two counters toward 3 on every
+//      roll), and "revived"/"stable" only postpone the outcome — the hero
+//      keeps taking hits and re-rolling until the tally finally reaches
+//      "dead". This file asserts "one faction left standing", never a party
+//      win.
 //   2. Once the hero dies, `runEnemyTurns` (pipeline.ts) returns at
 //      its `livingFactions.size < 2` check with `currentActorIndex` still
 //      pointing at a hostile. No terminal event is emitted, and the next
@@ -523,8 +524,10 @@ describe("end to end", () => {
     // expected damage per round against the hero's 28 HP concludes in
     // roughly 6-7 rounds; 20 still gives about 3x headroom without letting a
     // genuinely wedged pipeline spin unbounded. The hero only ever dodges
-    // here, which is what makes the outcome deterministic regardless of
-    // dice (file header, point 1).
+    // here, so the goblins never die and the eventual "hostile faction
+    // wins" outcome is structural — but exactly when it arrives (a death
+    // save resolves within at most 5 rolls, not on the first hit) is dice-
+    // dependent (file header, point 1).
     const concluded = await playToConclusion(socket, store, campaignId, (turn) =>
       heroDodge(`hero-turn-${String(turn)}`),
     );
@@ -537,15 +540,15 @@ describe("end to end", () => {
     const hero = encounterOf(concluded).combatants.find((c) => c.combatantId === "hero");
     if (hero === undefined) throw new Error("hero missing from the final projection");
     expect(hero.currentHp).toBe(0);
-    // applyTurn's applyDamage call in
-    // packages/rules-engine/src/encounter/resolve.ts pins diesAtZeroHp true
-    // unconditionally (death saves are implemented but not driven by the
-    // encounter pipeline — RULES_REFERENCE.md §8's gap), so the hero dies
-    // here rather than falling unconscious, regardless of whether it
-    // carries a characterId. That is a real, load-bearing property of this
-    // encounter (an unconscious hero, with death saves undriven, would
-    // leave the pipeline with nothing to conclude on), not an incidental
-    // detail.
+    // The hero fell Unconscious at 0 HP (`diesAtZeroHp` reads off its real
+    // `characterId`) and the encounter pipeline auto-drove its death saves
+    // on every subsequent turn (`runEnemyTurns`'s party-unconscious branch)
+    // until the tally finally reached three failures. Not the first hit,
+    // and not guaranteed by any single roll — a `"stable"` or `"revived"`
+    // result along the way only postpones this, since the hero (Dodge-only)
+    // never stops taking hits until the goblins run out of turns to give,
+    // which they don't. This assertion is therefore about the eventual,
+    // dice-dependent outcome of that loop, not a deterministic single roll.
     expect(hero.status).toBe("dead");
 
     // Real combat happened — not merely 20+ frames of any kind (dice_rolled

@@ -38,6 +38,7 @@ export function sceneStateFrom(snapshot: SceneSnapshot): SceneState {
       ]),
     ),
     day: snapshot.day,
+    heroHp: snapshot.heroHp,
   };
 }
 
@@ -62,6 +63,7 @@ export function snapshotOf(state: SceneState, worldId: ContentId): SceneSnapshot
     relations,
     npcAffinities,
     day: state.day,
+    heroHp: state.heroHp,
   };
 }
 
@@ -74,6 +76,7 @@ export interface SceneDelta {
   relations: FactionRelationEntry[];
   npcAffinities: NpcAffinityEntry[];
   day?: number;
+  heroHp?: number;
 }
 
 /**
@@ -102,5 +105,6 @@ export function diffScene(before: SceneState, after: SceneState): SceneDelta {
   }
   const delta: SceneDelta = { relations, npcAffinities };
   if (after.day !== before.day) delta.day = after.day;
+  if (after.heroHp !== before.heroHp) delta.heroHp = after.heroHp;
   return delta;
 }

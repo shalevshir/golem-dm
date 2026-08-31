@@ -128,6 +128,16 @@ export const EncounterResolvedPayload = z.object({
    * is a fact recorded for the indexer, not campaign state.
    */
   summaryEnglish: z.string().min(1).optional(),
+  /**
+   * The hero's ending current HP, when this encounter had one and it was
+   * won — carried into `scene.heroHp` so the next encounter spawns them
+   * wounded rather than fresh (death-saves-persistent-hp spec, Decision 6).
+   * Absent for a combat-only campaign, an encounter with no `characterId`
+   * combatant, or any non-victory outcome; those leave `scene.heroHp`
+   * exactly where it already was, the same "defeat changes nothing else"
+   * rule `quest_node_completed`/`world_delta_applied` already follow.
+   */
+  heroHp: z.number().int().min(0).optional(),
 });
 export type EncounterResolvedPayload = z.infer<typeof EncounterResolvedPayload>;
 
@@ -326,6 +336,9 @@ export const WorldDeltaAppliedPayload = z.object({
   day: z.number().int().min(1).optional(),
   /** Absolute resulting affinity, post-clamp, whole entries. Same contract as `relations`. */
   npcAffinities: z.array(NpcAffinityEntry).default([]),
+  /** Absolute resulting HP, when a `long_rest` (or any future HP-affecting
+   *  effect) moved it. Same contract as `day`: absent means unchanged. */
+  heroHp: z.number().int().min(0).optional(),
 });
 export type WorldDeltaAppliedPayload = z.infer<typeof WorldDeltaAppliedPayload>;
 

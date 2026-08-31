@@ -195,17 +195,14 @@ export function applyTurn(input: ApplyTurnInput): ApplyTurnResult {
         damage += extraTrace.total;
       }
 
-      // Every combatant dies at 0 HP, PCs included — not just monsters.
-      // `rollDeathSave` exists in `../combat/`, but nothing in the encounter
-      // pipeline drives it (RULES_REFERENCE.md §8's gap), so letting a PC
-      // fall Unconscious instead would strand it with nothing that ever
-      // resolves that state. `diesAtZeroHp` is therefore pinned `true`
-      // unconditionally, not read off `target.characterId`, until death
-      // saves are actually driven from here.
+      // A monster dies instantly at 0 HP; a character falls Unconscious and
+      // rolls death saves instead — driven from `apps/server`'s encounter
+      // pipeline on that combatant's own turn. A `Combatant` without a
+      // `characterId` is a monster.
       const applied = applyDamage(
         { currentHp: target.currentHp, maxHp: target.maxHp, tempHp: target.tempHp },
         damage,
-        { diesAtZeroHp: true },
+        { diesAtZeroHp: target.characterId === undefined },
       );
       statusAfter = applied.status;
       if (applied.status === "dead") killed.push(target.combatantId);

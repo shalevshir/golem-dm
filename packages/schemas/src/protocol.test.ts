@@ -303,6 +303,7 @@ describe("WorldState.scene", () => {
       relations: [{ factionA: "town-guard", factionB: "goblin-warband", band: "hostile" }],
       npcAffinities: [],
       day: 3,
+      heroHp: 12,
     };
     const parsed = WorldState.parse({ ...legacy, scene });
     expect(parsed.scene).toStrictEqual(scene);
@@ -311,17 +312,20 @@ describe("WorldState.scene", () => {
 
 describe("sceneFromGenesis", () => {
   it("is null when the payload carries only rootSeed", () => {
-    expect(sceneFromGenesis({ rootSeed: 1 })).toBeNull();
+    expect(sceneFromGenesis({ rootSeed: 1 }, 12)).toBeNull();
   });
 
   it("builds the starting scene from a full genesis quartet", () => {
-    const scene = sceneFromGenesis({
-      rootSeed: 1,
-      worldId: "riverbend",
-      startingNodeId: "find-the-trail",
-      startingDay: 1,
-      characterId: "hero",
-    });
+    const scene = sceneFromGenesis(
+      {
+        rootSeed: 1,
+        worldId: "riverbend",
+        startingNodeId: "find-the-trail",
+        startingDay: 1,
+        characterId: "hero",
+      },
+      12,
+    );
     expect(scene).toStrictEqual({
       worldId: "riverbend",
       currentNodeId: "find-the-trail",
@@ -329,6 +333,22 @@ describe("sceneFromGenesis", () => {
       relations: [],
       npcAffinities: [],
       day: 1,
+      heroHp: 12,
     });
+  });
+
+  it("throws rather than silently defaulting when the caller omits heroMaxHp for a real quartet", () => {
+    expect(() =>
+      sceneFromGenesis(
+        {
+          rootSeed: 1,
+          worldId: "riverbend",
+          startingNodeId: "find-the-trail",
+          startingDay: 1,
+          characterId: "hero",
+        },
+        undefined,
+      ),
+    ).toThrow(/heroMaxHp/);
   });
 });

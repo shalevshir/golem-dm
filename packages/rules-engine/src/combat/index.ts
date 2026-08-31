@@ -52,13 +52,9 @@ export interface DamageOptions {
   /**
    * SRD 5.2.1 (Instant Death): a monster dies the instant it drops to 0 Hit
    * Points, whereas a character falls Unconscious and rolls death saves. Pass
-   * true for monsters. A `Combatant` without a `characterId` is a monster.
-   *
-   * The sole production caller, `encounter/` `resolve.ts`, pins this `true`
-   * unconditionally instead — death saves are implemented (`rollDeathSave`)
-   * but nothing yet drives them from the encounter pipeline, so letting a
-   * player character fall Unconscious here would strand it with no way to
-   * resolve that state. Tracked as a known gap; see RULES_REFERENCE.md §8.
+   * true for monsters. A `Combatant` without a `characterId` is a monster —
+   * the sole production caller, `encounter/` `resolve.ts`, reads this off
+   * `characterId`'s presence rather than pinning it.
    */
   diesAtZeroHp?: boolean;
 }
@@ -154,7 +150,10 @@ export function rollDeathSave(state: DeathSaveState, rng: Rng): DeathSaveResult 
   }
 
   let { successes, failures } = state;
-  if (result === 1) failures += 2;
+  // A natural 1 counts as two failures, which can overshoot 3 from a single
+  // roll (e.g. 2 -> 4) — clamped here so `DeathSaveTally`'s `max(3)` schema
+  // (`@ai-dm/schemas`) never rejects a legitimately resolved "dead" tally.
+  if (result === 1) failures = Math.min(3, failures + 2);
   else if (result >= 10) successes += 1;
   else failures += 1;
 

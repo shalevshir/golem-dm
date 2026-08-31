@@ -910,6 +910,7 @@ describe("App (scene mode, out-of-combat free text)", () => {
     relations: [],
     npcAffinities: [],
     day: 1,
+    heroHp: 10,
   };
 
   function sceneSnapshot(): CampaignState {
@@ -1131,6 +1132,7 @@ describe("App (?world= query param)", () => {
     relations: [],
     npcAffinities: [],
     day: 1,
+    heroHp: 10,
   };
 
   function sceneSnapshot(): CampaignState {

@@ -112,7 +112,7 @@ describe("WorldPredicate and WorldEffect", () => {
     ).toBe(true);
   });
 
-  it("accepts the four effect kinds", () => {
+  it("accepts the five effect kinds", () => {
     expect(
       WorldEffect.safeParse({
         kind: "shift_faction_relation",
@@ -133,6 +133,7 @@ describe("WorldPredicate and WorldEffect", () => {
         fact: "helped broker the reckoning",
       }).success,
     ).toBe(true);
+    expect(WorldEffect.safeParse({ kind: "long_rest" }).success).toBe(true);
   });
 
   // Same reason shift_faction_relation's delta is checked: FACTION_BANDS[3.5]

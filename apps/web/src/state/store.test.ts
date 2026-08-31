@@ -41,6 +41,7 @@ const sceneGenesis: CampaignState = {
       relations: [],
       npcAffinities: [],
       day: 1,
+      heroHp: 10,
     },
   },
   encounter: null,
