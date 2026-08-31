@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   affinityOf,
+  availableDetours,
   availableEdges,
   completeCurrentNode,
   evaluatePredicate,
@@ -9,6 +10,7 @@ import {
   shiftBand,
   startScene,
   traverseEdge,
+  validateMove,
 } from "./index.js";
 import type {
   AuthoredWorld,
@@ -18,7 +20,7 @@ import type {
   SceneState,
   SceneTransition,
 } from "./index.js";
-import { blockedWorld, linearWorld } from "./test-fixtures.js";
+import { blockedWorld, linearWorld, loadFixtureWorld } from "./test-fixtures.js";
 import type { FactionBand } from "@ai-dm/schemas";
 
 function stateWith(relations: readonly (readonly [string, string, FactionBand])[]): SceneState {
@@ -867,5 +869,187 @@ describe("acting from a state whose current node does not exist", () => {
     let state = stateOf(traverseEdge(world, stateOf(startScene(world)), "middle"));
     state = stateOf(traverseEdge(world, state, "end"));
     expect(edgesOf(availableEdges(world, state))).toEqual([]);
+  });
+});
+
+describe("validateMove — none", () => {
+  it("is a true no-op", () => {
+    const world = loadFixtureWorld();
+    const state = stateOf(startScene(world));
+    const result = validateMove(world, state, { kind: "none" });
+    expect(result.valid).toBe(true);
+    if (result.valid) expect(result.state).toEqual(state);
+  });
+});
+
+describe("validateMove — the door guard", () => {
+  // The shipped arc's own shape: reckoning gates on ashen-guild/river-wardens
+  // >= hostile, and hostile is the LOWEST band reachable before it. One
+  // improvised -1 would make the arc's ending permanently unenterable.
+  it("refuses a shift that closes a currently-open precondition on an uncompleted node", () => {
+    const world = loadFixtureWorld();
+    const state = { ...stateOf(startScene(world)), relations: new Map([[pairKey("guild", "wardens"), "hostile" as const]]) };
+    const result = validateMove(world, state, {
+      kind: "world",
+      effects: [{ kind: "shift_faction_relation", factionA: "guild", factionB: "wardens", delta: -1 }],
+      reasonEnglish: "the player sided loudly with the kilns",
+    });
+    expect(result.valid).toBe(false);
+    if (!result.valid) expect(result.rejections[0]?.reason).toBe("would_close_door");
+  });
+
+  it("allows a shift that OPENS a gate — improvisation may make the world more reachable", () => {
+    const world = loadFixtureWorld();
+    const state = { ...stateOf(startScene(world)), relations: new Map([[pairKey("guild", "wardens"), "war" as const]]) };
+    const result = validateMove(world, state, {
+      kind: "world",
+      effects: [{ kind: "shift_faction_relation", factionA: "guild", factionB: "wardens", delta: 1 }],
+      reasonEnglish: "the player talked them down",
+    });
+    expect(result.valid).toBe(true);
+  });
+
+  it("ignores preconditions on nodes already completed", () => {
+    const world = loadFixtureWorld();
+    const base = stateOf(startScene(world));
+    const state = {
+      ...base,
+      completedNodeIds: new Set([...base.completedNodeIds, "gated"]),
+      relations: new Map([[pairKey("guild", "wardens"), "hostile" as const]]),
+    };
+    const result = validateMove(world, state, {
+      kind: "world",
+      effects: [{ kind: "shift_faction_relation", factionA: "guild", factionB: "wardens", delta: -1 }],
+      reasonEnglish: "no longer matters",
+    });
+    expect(result.valid).toBe(true);
+  });
+
+  it("refuses the WHOLE move when only one of two effects would close a door", () => {
+    const world = loadFixtureWorld();
+    const state = { ...stateOf(startScene(world)), relations: new Map([[pairKey("guild", "wardens"), "hostile" as const]]) };
+    const result = validateMove(world, state, {
+      kind: "world",
+      effects: [
+        { kind: "add_npc_fact", npcId: "tobin", fact: "was thanked" },
+        { kind: "shift_faction_relation", factionA: "guild", factionB: "wardens", delta: -1 },
+      ],
+      reasonEnglish: "mixed",
+    });
+    expect(result.valid).toBe(false);
+  });
+});
+
+describe("validateMove — the improvised magnitude ceiling", () => {
+  it("refuses |delta| > 1 on a faction shift", () => {
+    const world = loadFixtureWorld();
+    const state = stateOf(startScene(world));
+    const result = validateMove(world, state, {
+      kind: "world",
+      effects: [{ kind: "shift_faction_relation", factionA: "guild", factionB: "wardens", delta: 3 }],
+      reasonEnglish: "the player was very charming",
+    });
+    expect(result.valid).toBe(false);
+  });
+
+  it("refuses |delta| > 1 on an npc shift, and allows exactly 1", () => {
+    const world = loadFixtureWorld();
+    const state = stateOf(startScene(world));
+    const big = validateMove(world, state, {
+      kind: "world",
+      effects: [{ kind: "shift_npc_affinity", npcId: "tobin", delta: -2 }],
+      reasonEnglish: "r",
+    });
+    expect(big.valid).toBe(false);
+    const ok = validateMove(world, state, {
+      kind: "world",
+      effects: [{ kind: "shift_npc_affinity", npcId: "tobin", delta: 1 }],
+      reasonEnglish: "r",
+    });
+    expect(ok.valid).toBe(true);
+  });
+});
+
+describe("validateMove — enter_detour", () => {
+  it("enters a detour node and records where to return", () => {
+    const world = loadFixtureWorld();
+    const state = stateOf(startScene(world));
+    const result = validateMove(world, state, {
+      kind: "enter_detour",
+      nodeId: "side-errand",
+      reasonEnglish: "he asked for help",
+    });
+    expect(result.valid).toBe(true);
+    if (result.valid) {
+      expect(result.state.currentNodeId).toBe("side-errand");
+      expect(result.state.detourReturnNodeId).toBe(state.currentNodeId);
+    }
+  });
+
+  it("refuses a node that is not marked detour — the GM tier cannot jump the spine", () => {
+    const world = loadFixtureWorld();
+    const state = stateOf(startScene(world));
+    const result = validateMove(world, state, {
+      kind: "enter_detour",
+      nodeId: "gated",
+      reasonEnglish: "skip ahead",
+    });
+    expect(result.valid).toBe(false);
+    if (!result.valid) expect(result.rejections[0]?.reason).toBe("not_a_detour");
+  });
+
+  it("refuses an unknown node", () => {
+    const world = loadFixtureWorld();
+    const result = validateMove(world, stateOf(startScene(world)), {
+      kind: "enter_detour",
+      nodeId: "no-such-thing",
+      reasonEnglish: "r",
+    });
+    expect(result.valid).toBe(false);
+    if (!result.valid) expect(result.rejections[0]?.reason).toBe("no_such_node");
+  });
+
+  it("refuses a detour whose own preconditions are unmet", () => {
+    const world = loadFixtureWorld();
+    const result = validateMove(world, stateOf(startScene(world)), {
+      kind: "enter_detour",
+      nodeId: "gated-detour",
+      reasonEnglish: "r",
+    });
+    expect(result.valid).toBe(false);
+    if (!result.valid) expect(result.rejections[0]?.reason).toBe("precondition_unmet");
+  });
+
+  it("does not nest — no detour from inside a detour", () => {
+    const world = loadFixtureWorld();
+    const inDetour = { ...stateOf(startScene(world)), detourReturnNodeId: "start" };
+    const result = validateMove(world, inDetour, {
+      kind: "enter_detour",
+      nodeId: "side-errand",
+      reasonEnglish: "r",
+    });
+    expect(result.valid).toBe(false);
+  });
+
+  it("does not complete the node being left — a detour is a departure, not a conclusion", () => {
+    const world = loadFixtureWorld();
+    const state = stateOf(startScene(world));
+    const result = validateMove(world, state, {
+      kind: "enter_detour",
+      nodeId: "side-errand",
+      reasonEnglish: "r",
+    });
+    expect(result.valid).toBe(true);
+    if (result.valid) expect(result.state.completedNodeIds.has(state.currentNodeId)).toBe(false);
+  });
+});
+
+describe("availableDetours", () => {
+  it("lists only detour-marked nodes, each with whether it is enterable", () => {
+    const world = loadFixtureWorld();
+    const options = availableDetours(world, stateOf(startScene(world)));
+    expect(options.map((each) => each.node.nodeId).sort()).toEqual(["gated-detour", "side-errand"]);
+    expect(options.find((each) => each.node.nodeId === "side-errand")?.open).toBe(true);
+    expect(options.find((each) => each.node.nodeId === "gated-detour")?.open).toBe(false);
   });
 });
