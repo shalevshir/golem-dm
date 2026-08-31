@@ -337,17 +337,18 @@ describe("sceneFromGenesis", () => {
     });
   });
 
-  it("falls back to 0 HP when the caller omits heroMaxHp for a real quartet", () => {
-    const scene = sceneFromGenesis(
-      {
-        rootSeed: 1,
-        worldId: "riverbend",
-        startingNodeId: "find-the-trail",
-        startingDay: 1,
-        characterId: "hero",
-      },
-      undefined,
-    );
-    expect(scene?.heroHp).toBe(0);
+  it("throws rather than silently defaulting when the caller omits heroMaxHp for a real quartet", () => {
+    expect(() =>
+      sceneFromGenesis(
+        {
+          rootSeed: 1,
+          worldId: "riverbend",
+          startingNodeId: "find-the-trail",
+          startingDay: 1,
+          characterId: "hero",
+        },
+        undefined,
+      ),
+    ).toThrow(/heroMaxHp/);
   });
 });

@@ -90,9 +90,8 @@ export type WorldState = z.infer<typeof WorldState>;
  * load a `CharacterSheet` — so the caller (`apps/server`'s
  * `initialWorldState`, the one place a starting `WorldState` is built)
  * resolves the character once and passes its `maxHp` in. It is present
- * exactly when the quartet is: `heroMaxHp ?? 0` only ever falls back to `0`
- * for a caller that (incorrectly) omits it, never for a genuine
- * combat-only campaign, which returns `null` above instead.
+ * exactly when the quartet is — a caller that gets that pairing wrong throws
+ * here rather than silently spawning a 0-HP, already-unconscious hero.
  */
 export function sceneFromGenesis(
   payload: CampaignStartedPayload,
@@ -107,6 +106,11 @@ export function sceneFromGenesis(
   ) {
     return null;
   }
+  if (heroMaxHp === undefined) {
+    throw new Error(
+      `sceneFromGenesis: characterId "${characterId}" is present but heroMaxHp was not supplied`,
+    );
+  }
   return {
     worldId,
     currentNodeId: startingNodeId,
@@ -114,7 +118,7 @@ export function sceneFromGenesis(
     relations: [],
     npcAffinities: [],
     day: startingDay,
-    heroHp: heroMaxHp ?? 0,
+    heroHp: heroMaxHp,
   };
 }
 

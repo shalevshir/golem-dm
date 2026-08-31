@@ -86,11 +86,18 @@ export function hasEncounter(encounterId: string): boolean {
  * to carry the hero's HP forward across encounters (death-saves-persistent-
  * hp spec, Decision 7); absent for a combat-only campaign, which spawns
  * exactly as it does today.
+ *
+ * Floored at 1 here, once, rather than by every caller: a persisted
+ * `scene.heroHp` of 0 (a hero who last won only by stabilizing) must never
+ * spawn an already-unconscious combatant, and the one function that actually
+ * writes `currentHp` onto the spawn is the one place that invariant can't be
+ * forgotten by a future caller.
  */
 export function buildEncounterById(encounterId: string, heroCurrentHp?: number): BuiltEncounter {
   const definition = encounterById(encounterId);
   const statBlocks = new Map<string, MonsterStatBlock>();
   const characters = new Map<string, DerivedCharacter>();
+  const flooredHeroHp = heroCurrentHp === undefined ? undefined : Math.max(1, heroCurrentHp);
 
   for (const spawn of definition.spawns) {
     if ("characterId" in spawn) {
@@ -98,7 +105,7 @@ export function buildEncounterById(encounterId: string, heroCurrentHp?: number):
         const derived = loadCharacter(spawn.characterId);
         characters.set(
           spawn.characterId,
-          heroCurrentHp === undefined ? derived : { ...derived, currentHp: heroCurrentHp },
+          flooredHeroHp === undefined ? derived : { ...derived, currentHp: flooredHeroHp },
         );
       }
       continue;

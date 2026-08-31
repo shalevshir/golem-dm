@@ -8,7 +8,7 @@ import {
   traverseEdge,
   validateExecuteTurn,
 } from "@ai-dm/rules-engine";
-import type { SceneState, SceneTransition } from "@ai-dm/rules-engine";
+import type { AuthoredWorld, SceneState, SceneTransition } from "@ai-dm/rules-engine";
 import type {
   AdapterError,
   IntentAgent,
@@ -44,6 +44,7 @@ import type {
   ExecuteTurn,
   GameEvent,
   IntentClassification,
+  QuestNode,
   SceneSnapshot,
   ServerFrame,
   Skill,
@@ -3232,6 +3233,80 @@ describe("handleCommand — end of combat", () => {
       .find((each) => each.type === "encounter_resolved");
     expect(resolved?.payload).toMatchObject({ outcome: "victory", heroHp: 10 });
     expect(campaign.state.world.scene?.heroHp).toBe(10);
+  });
+
+  // Regression: `resolveIfConcluded`'s `before` used to read the scene's
+  // PRE-fight `heroHp` (`currentScene()`, not yet folded with this fight's
+  // own `encounter_resolved`), so a `long_rest` effect on the node this
+  // victory completes could diff to "no change" whenever the hero started
+  // the fight at full HP — silently dropping the heal and leaving
+  // `scene.heroHp` stuck at the fight's wounded ending value. A hand-built
+  // one-node world stands in for `data/world/`, which declares no
+  // `long_rest` effect anywhere (spec's own non-goal).
+  it("heals to max via a long_rest on the node a victory completes, not the pre-fight HP", async () => {
+    const questNode: QuestNode = {
+      nodeId: "camp",
+      titleEnglish: "Camp",
+      sceneEnglish: "A fixture node that rests the hero after a fight.",
+      locationId: "here",
+      preconditions: [],
+      effects: [{ kind: "long_rest" }],
+      edges: [],
+      encounterId: "goblin-ambush",
+    };
+    const longRestWorld: AuthoredWorld = {
+      worldId: "fixture",
+      startingDay: 1,
+      startingNodeId: "camp",
+      factions: new Map(),
+      locations: new Map([
+        [
+          "here",
+          {
+            locationId: "here",
+            nameEnglish: "Here",
+            nameHebrew: "כאן",
+            descriptionEnglish: "A fixture location.",
+          },
+        ],
+      ]),
+      npcs: new Map(),
+      questNodes: new Map([["camp", questNode]]),
+      relations: new Map(),
+    };
+
+    const store = createInMemoryEventStore();
+    const ports = { store, clock: () => "2026-08-19T10:00:00.000Z", uuid: uuids() };
+    const campaign = await createCampaign({
+      campaignId: "s1",
+      rootSeed: 42,
+      ...ports,
+      scene: { authored: longRestWorld, character: loadCharacter("hero") },
+    });
+    // Hero starts this (first) encounter at full HP — the common case the
+    // stale-`before` bug depended on.
+    expect(campaign.state.world.scene?.heroHp).toBe(28);
+    await startEncounter({ campaign, encounterId: "goblin-ambush", ...ports });
+    poseBoard(campaign, (each) =>
+      each.faction === "hostile"
+        ? { ...each, status: "dead", currentHp: 0 }
+        : { ...each, currentHp: 10 },
+    );
+
+    const frames = await drain(
+      handleCommand(campaign, dodge("hero", "c-heal"), portsWith(store)),
+    );
+
+    expect(eventTypesOf(frames)).toContain("world_delta_applied");
+    const resolved = frames
+      .filter((each): each is Extract<ServerFrame, { type: "event" }> => each.type === "event")
+      .map((each) => each.event)
+      .find((each) => each.type === "encounter_resolved");
+    // The fight's own ending HP, wounded — correct on its own regardless of
+    // this bug.
+    expect(resolved?.payload).toMatchObject({ outcome: "victory", heroHp: 10 });
+    // The node's long_rest effect must still heal it back to max afterward.
+    expect(campaign.state.world.scene?.heroHp).toBe(28);
   });
 
   it("resolves with defeat and leaves the node uncompleted", async () => {

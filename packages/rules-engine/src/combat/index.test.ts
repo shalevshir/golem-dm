@@ -223,6 +223,15 @@ describe("rollDeathSave", () => {
     expect(result.outcome).toBe("dead");
   });
 
+  // A second natural 1 would otherwise push failures to 2 + 2 = 4, which
+  // `DeathSaveTally`'s schema (`@ai-dm/schemas`) caps at 3 — clamped here so
+  // the returned state always satisfies it, not just usually.
+  it("clamps failures at 3 when a natural 1 would otherwise push it to 4", () => {
+    const result = rollDeathSave({ successes: 0, failures: 2 }, scripted([d20Exactly(1)]));
+    expect(result.outcome).toBe("dead");
+    expect(result.state.failures).toBe(3);
+  });
+
   it("revives with 1 hit point on a natural 20 and clears the tally", () => {
     const result = rollDeathSave({ successes: 1, failures: 2 }, scripted([d20Exactly(20)]));
     expect(result.outcome).toBe("revived");

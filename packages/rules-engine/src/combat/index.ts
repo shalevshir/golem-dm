@@ -150,7 +150,10 @@ export function rollDeathSave(state: DeathSaveState, rng: Rng): DeathSaveResult 
   }
 
   let { successes, failures } = state;
-  if (result === 1) failures += 2;
+  // A natural 1 counts as two failures, which can overshoot 3 from a single
+  // roll (e.g. 2 -> 4) — clamped here so `DeathSaveTally`'s `max(3)` schema
+  // (`@ai-dm/schemas`) never rejects a legitimately resolved "dead" tally.
+  if (result === 1) failures = Math.min(3, failures + 2);
   else if (result >= 10) successes += 1;
   else failures += 1;
 

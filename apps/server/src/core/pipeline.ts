@@ -30,7 +30,7 @@ import {
   traverseEdge,
   validateExecuteTurn,
 } from "@ai-dm/rules-engine";
-import type { AuthoredWorld, SceneTransition, TurnEffect } from "@ai-dm/rules-engine";
+import type { AuthoredWorld, SceneDelta, SceneTransition, TurnEffect } from "@ai-dm/rules-engine";
 import {
   availableActionsFor,
   buildNarrationBrief,
@@ -618,6 +618,35 @@ function assertNever(value: never): never {
   throw new Error(`unreachable: ${JSON.stringify(value)}`);
 }
 
+/**
+ * A `world_delta_applied` event for `delta`, or `null` when nothing in it
+ * actually changed — the one definition of "which `SceneDelta` fields are
+ * optional and how they're spread into the payload," shared by the
+ * combat-victory and exploration branches below rather than duplicated in
+ * each, so a future `SceneDelta` field needs adding here once, not twice.
+ */
+function worldDeltaEventOrNull(
+  delta: SceneDelta,
+): { type: "world_delta_applied"; payload: Record<string, unknown> } | null {
+  if (
+    delta.relations.length === 0 &&
+    delta.npcAffinities.length === 0 &&
+    delta.day === undefined &&
+    delta.heroHp === undefined
+  ) {
+    return null;
+  }
+  return {
+    type: "world_delta_applied",
+    payload: {
+      relations: delta.relations,
+      npcAffinities: delta.npcAffinities,
+      ...(delta.day === undefined ? {} : { day: delta.day }),
+      ...(delta.heroHp === undefined ? {} : { heroHp: delta.heroHp }),
+    },
+  };
+}
+
 export async function* handleCommand(
   campaign: Campaign,
   command: ClientMessage,
@@ -1191,8 +1220,15 @@ export async function* handleCommand(
     const combatants = encounter.combatants.map((each) =>
       each.combatantId === actorId ? { ...each, status, currentHp, deathSaves: result.state } : each,
     );
-    yield* emit("state_delta_applied", { combatants });
-    yield* emit("scene_changed", { kind: "turn_advanced" });
+    // One append, not two: nothing runs between these events (no narration,
+    // unlike `enemyTurn`), so a store failure between separate `emit` calls
+    // could durably write the death-save outcome without ever advancing the
+    // turn — the same partial-write hazard `emitAll` exists elsewhere in
+    // this file to close.
+    yield* emitAll([
+      { type: "state_delta_applied", payload: { combatants } },
+      { type: "scene_changed", payload: { kind: "turn_advanced" } },
+    ]);
   }
 
   /**
@@ -1279,8 +1315,13 @@ export async function* handleCommand(
           : null;
     if (outcome === null) return;
 
+    // "alive" alone under-counts a won fight: `conclusionOf` (spec Decision
+    // 4) lets a Stable-but-unconscious combatant stand as a winner, so
+    // "survived" has to match its own definition of standing — alive or
+    // unconscious — or a hero who won by stabilizing shows up as having
+    // survived nothing.
     const survivorIds = encounter.combatants
-      .filter((each) => each.status === "alive")
+      .filter((each) => each.status === "alive" || each.status === "unconscious")
       .map((each) => each.combatantId);
 
     // A fresh budget, not a stale one: nothing upstream in this turn (the
@@ -1345,7 +1386,19 @@ export async function* handleCommand(
 
     if (outcome === "victory") {
       const statics = sceneStaticsOf(campaign);
-      const before = sceneStateFrom(currentScene());
+      // `currentScene()` still reflects the PRE-fight `heroHp` — this
+      // encounter's own `encounter_resolved` (with the fight's real ending
+      // HP, computed above) has not been folded into `campaign.state` yet;
+      // that only happens once `emitAll` runs below. Patched in here so a
+      // `long_rest` effect on this same node diffs against the hero's
+      // actual combat-ending HP, not a stale pre-fight snapshot — otherwise
+      // a hero who started the fight at max HP and won by resting would
+      // diff to "no change" and the heal `encounter_resolved` about to
+      // apply would never be corrected back up.
+      const before = {
+        ...sceneStateFrom(currentScene()),
+        ...(hero === undefined ? {} : { heroHp: hero.currentHp }),
+      };
       const transition = completeCurrentNode(statics.authored, before, statics.character.maxHp);
       // Invalid means the node's own entry gate no longer holds, which cannot
       // happen for a node already entered — `completeCurrentNode` short-
@@ -1394,21 +1447,9 @@ export async function* handleCommand(
         type: "quest_node_completed",
         payload: { nodeId: before.currentNodeId, summaryEnglish: nodeSummaryEnglish },
       });
-      if (
-        delta.relations.length > 0 ||
-        delta.npcAffinities.length > 0 ||
-        delta.day !== undefined ||
-        delta.heroHp !== undefined
-      ) {
-        events.push({
-          type: "world_delta_applied",
-          payload: {
-            relations: delta.relations,
-            npcAffinities: delta.npcAffinities,
-            ...(delta.day === undefined ? {} : { day: delta.day }),
-            ...(delta.heroHp === undefined ? {} : { heroHp: delta.heroHp }),
-          },
-        });
+      const worldDeltaEvent = worldDeltaEventOrNull(delta);
+      if (worldDeltaEvent !== null) {
+        events.push(worldDeltaEvent);
       }
 
       completedNode = { nodeId: before.currentNodeId, summaryEnglish: nodeSummaryEnglish };
@@ -1842,21 +1883,9 @@ export async function* handleCommand(
                 payload: { nodeId: before.currentNodeId, summaryEnglish: nodeSummaryEnglish },
               },
             ];
-            if (
-              delta.relations.length > 0 ||
-              delta.npcAffinities.length > 0 ||
-              delta.day !== undefined ||
-              delta.heroHp !== undefined
-            ) {
-              sceneEvents.push({
-                type: "world_delta_applied",
-                payload: {
-                  relations: delta.relations,
-                  npcAffinities: delta.npcAffinities,
-                  ...(delta.day === undefined ? {} : { day: delta.day }),
-                  ...(delta.heroHp === undefined ? {} : { heroHp: delta.heroHp }),
-                },
-              });
+            const worldDeltaEvent = worldDeltaEventOrNull(delta);
+            if (worldDeltaEvent !== null) {
+              sceneEvents.push(worldDeltaEvent);
             }
             if (targetNodeId !== null) {
               sceneEvents.push({ type: "quest_node_entered", payload: { nodeId: targetNodeId } });
@@ -1877,15 +1906,12 @@ export async function* handleCommand(
             const enteredNode = statics.authored.questNodes.get(enteredNodeId);
             // `transition.state.heroHp`, not `before`'s: this node's own
             // effects (a `long_rest` alongside its `encounterId`, however
-            // unlikely) have already been applied by this point. Floored the
-            // same way `campaign.ts`'s `startEncounter` floors a retry.
+            // unlikely) have already been applied by this point.
+            // `buildEncounterById` owns the floor-at-1.
             const bridged =
               enteredNode?.encounterId === undefined
                 ? null
-                : buildEncounterById(
-                    enteredNode.encounterId,
-                    Math.max(1, transition.state.heroHp),
-                  );
+                : buildEncounterById(enteredNode.encounterId, transition.state.heroHp);
             if (bridged !== null) {
               sceneEvents.push({
                 type: "encounter_started",

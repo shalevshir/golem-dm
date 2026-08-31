@@ -335,17 +335,12 @@ export async function createCampaign(input: CreateCampaignInput): Promise<Campai
 export async function startEncounter(input: StartEncounterInput): Promise<Campaign> {
   const { campaign } = input;
   const campaignId = campaign.state.world.campaignId;
-  // Floored at 1, never at the persisted value directly: a hero who last won
-  // a fight only by stabilizing (Unconscious, 0 HP) would otherwise spawn
-  // already face-down. Natural recovery from Stable stays out of scope; this
-  // floor is what keeps that gap from cascading into an unplayable spawn
-  // (death-saves-persistent-hp spec, Decision 7). `undefined` for a
-  // combat-only campaign — `scene` is always null for one — keeps spawning
-  // byte-for-byte unchanged.
+  // `undefined` for a combat-only campaign — `scene` is always null for one
+  // — keeps spawning byte-for-byte unchanged. `buildEncounterById` owns the
+  // floor-at-1 (a hero who last won only by stabilizing at 0 HP must not
+  // spawn already face-down; death-saves-persistent-hp spec, Decision 7).
   const heroCurrentHp =
-    campaign.state.world.scene === null
-      ? undefined
-      : Math.max(1, campaign.state.world.scene.heroHp);
+    campaign.state.world.scene === null ? undefined : campaign.state.world.scene.heroHp;
   const built = buildEncounterById(input.encounterId, heroCurrentHp);
 
   const event = envelope({
