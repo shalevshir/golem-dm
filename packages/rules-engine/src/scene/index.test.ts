@@ -24,6 +24,7 @@ import type { FactionBand } from "@ai-dm/schemas";
 function stateWith(relations: readonly (readonly [string, string, FactionBand])[]): SceneState {
   return {
     currentNodeId: "start",
+    detourReturnNodeId: null,
     completedNodeIds: new Set<string>(),
     relations: new Map(relations.map(([a, b, band]) => [pairKey(a, b), band])),
     npcAffinities: new Map(),
@@ -335,6 +336,7 @@ describe("completeCurrentNode", () => {
     // recorded no change to it yet, so the pair is absent from the state.
     const partial: SceneState = {
       currentNodeId: "solo",
+      detourReturnNodeId: null,
       completedNodeIds: new Set<string>(),
       relations: new Map(),
       npcAffinities: new Map(),
@@ -394,6 +396,7 @@ describe("completeCurrentNode", () => {
     const world = linearWorld();
     const stranded: SceneState = {
       currentNodeId: "middle",
+      detourReturnNodeId: null,
       completedNodeIds: new Set<string>(),
       relations: world.relations,
       npcAffinities: new Map(),
@@ -582,6 +585,7 @@ describe("evaluatePredicate", () => {
   const world = linearWorld();
   const state: SceneState = {
     currentNodeId: "start",
+    detourReturnNodeId: null,
     completedNodeIds: new Set<string>(),
     relations: new Map([[pairKey("alpha", "beta"), "hostile"]]),
     npcAffinities: new Map(),
@@ -821,6 +825,7 @@ describe("acting from a state whose current node does not exist", () => {
   function ghostState(): SceneState {
     return {
       currentNodeId: "ghost",
+      detourReturnNodeId: null,
       completedNodeIds: new Set<string>(),
       relations: new Map(),
       npcAffinities: new Map(),

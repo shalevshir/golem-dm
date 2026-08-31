@@ -36,6 +36,8 @@ export * from "./snapshot.js";
  */
 export interface SceneState {
   readonly currentNodeId: string;
+  /** The node to return to on leaving a detour; `null` on the spine. */
+  readonly detourReturnNodeId: string | null;
   readonly completedNodeIds: ReadonlySet<string>;
   /** Keyed by `pairKey`. */
   readonly relations: ReadonlyMap<string, FactionBand>;
@@ -330,6 +332,7 @@ function completed(
 export function startScene(world: AuthoredWorld): SceneTransition {
   const state: SceneState = {
     currentNodeId: world.startingNodeId,
+    detourReturnNodeId: null,
     completedNodeIds: new Set<string>(),
     relations: world.relations,
     npcAffinities: new Map(),

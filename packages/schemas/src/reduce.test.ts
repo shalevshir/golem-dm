@@ -25,6 +25,7 @@ const base: CampaignState = {
 const baseScene: SceneSnapshot = {
   worldId: "riverbend",
   currentNodeId: "find-the-trail",
+  detourReturnNodeId: null,
   completedNodeIds: [],
   relations: [{ factionA: "millers", factionB: "raiders", band: "neutral" }],
   npcAffinities: [],
@@ -650,6 +651,7 @@ describe("fold", () => {
     expect(next.world.scene).toEqual({
       worldId: "riverbend",
       currentNodeId: "cross-the-bridge",
+      detourReturnNodeId: null,
       completedNodeIds: ["find-the-trail"],
       relations: [{ factionA: "raiders", factionB: "millers", band: "hostile" }],
       npcAffinities: [],
@@ -718,5 +720,33 @@ describe("reduce — encounter_started with a board", () => {
       payload: { kind: "turn_advanced" },
     });
     expect(advanced.encounter?.currentActorIndex).toBe(1);
+  });
+});
+
+describe("quest_node_entered — the detour return pointer", () => {
+  it("sets the pointer when the payload carries one", () => {
+    const state = withScene({});
+    const after = reduce(
+      state,
+      event(100, "quest_node_entered", {
+        nodeId: "tobins-daughter",
+        detourReturnNodeId: "the-weir",
+      }),
+    );
+    expect(after.world.scene?.currentNodeId).toBe("tobins-daughter");
+    expect(after.world.scene?.detourReturnNodeId).toBe("the-weir");
+  });
+
+  it("clears the pointer when the payload carries none, so a spine traversal resets it", () => {
+    const state = withScene({});
+    const inDetour = reduce(
+      state,
+      event(101, "quest_node_entered", {
+        nodeId: "tobins-daughter",
+        detourReturnNodeId: "the-weir",
+      }),
+    );
+    const back = reduce(inDetour, event(102, "quest_node_entered", { nodeId: "the-weir" }));
+    expect(back.world.scene?.detourReturnNodeId).toBeNull();
   });
 });

@@ -871,6 +871,7 @@ describe("handleCommand — free text", () => {
     const before: SceneSnapshot = {
       worldId: "emberfall",
       currentNodeId: "guild-offer",
+      detourReturnNodeId: null,
       completedNodeIds: ["arrival"],
       relations: [],
       npcAffinities: [],
@@ -972,6 +973,7 @@ describe("handleCommand — free text", () => {
     const before: SceneSnapshot = {
       worldId: "emberfall",
       currentNodeId: "guild-offer",
+      detourReturnNodeId: null,
       completedNodeIds: ["arrival"],
       relations: [],
       npcAffinities: [],
@@ -1015,6 +1017,7 @@ describe("handleCommand — free text", () => {
     const before: SceneSnapshot = {
       worldId: "emberfall",
       currentNodeId: "saboteurs",
+      detourReturnNodeId: null,
       completedNodeIds: ["arrival", "guild-offer", "the-weir"],
       relations: [{ factionA: "ashen-guild", factionB: "river-wardens", band: "war" }],
       npcAffinities: [],
@@ -1054,6 +1057,7 @@ describe("handleCommand — free text", () => {
     const before: SceneSnapshot = {
       worldId: "emberfall",
       currentNodeId: "guild-offer",
+      detourReturnNodeId: null,
       completedNodeIds: ["arrival"],
       relations: [],
       npcAffinities: [],
@@ -1085,6 +1089,7 @@ describe("handleCommand — free text", () => {
     const before: SceneSnapshot = {
       worldId: "emberfall",
       currentNodeId: "reckoning",
+      detourReturnNodeId: null,
       completedNodeIds: ["arrival", "guild-offer", "the-weir"],
       relations: [{ factionA: "ashen-guild", factionB: "river-wardens", band: "hostile" }],
       npcAffinities: [],
@@ -1119,6 +1124,7 @@ describe("handleCommand — free text", () => {
     const before: SceneSnapshot = {
       worldId: "emberfall",
       currentNodeId: "reckoning",
+      detourReturnNodeId: null,
       completedNodeIds: ["arrival", "guild-offer", "the-weir"],
       relations: [{ factionA: "ashen-guild", factionB: "river-wardens", band: "hostile" }],
       npcAffinities: [],
@@ -1177,6 +1183,7 @@ describe("handleCommand — free text", () => {
     const before: SceneSnapshot = {
       worldId: "emberfall",
       currentNodeId: "reckoning",
+      detourReturnNodeId: null,
       completedNodeIds: ["arrival", "guild-offer", "the-weir"],
       relations: [{ factionA: "ashen-guild", factionB: "river-wardens", band: "hostile" }],
       npcAffinities: [],
@@ -1264,6 +1271,7 @@ describe("handleCommand — free text", () => {
     const before: SceneSnapshot = {
       worldId: "emberfall",
       currentNodeId: "reckoning",
+      detourReturnNodeId: null,
       completedNodeIds: ["arrival", "guild-offer", "the-weir"],
       relations: [{ factionA: "ashen-guild", factionB: "river-wardens", band: "hostile" }],
       npcAffinities: [],
@@ -1294,6 +1302,7 @@ describe("handleCommand — free text", () => {
     const before: SceneSnapshot = {
       worldId: "emberfall",
       currentNodeId: "reckoning",
+      detourReturnNodeId: null,
       completedNodeIds: ["arrival", "guild-offer", "the-weir"],
       relations: [{ factionA: "ashen-guild", factionB: "river-wardens", band: "hostile" }],
       npcAffinities: [],

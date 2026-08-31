@@ -230,10 +230,20 @@ export function reduce(state: CampaignState, event: GameEvent): CampaignState {
     // world lookup: mechanical, like every branch below it.
     case "quest_node_entered": {
       const scene = sceneOrThrow(state, event);
-      const { nodeId } = QuestNodeEnteredPayload.parse(event.payload);
+      const { nodeId, detourReturnNodeId } = QuestNodeEnteredPayload.parse(event.payload);
       return {
         ...state,
-        world: { ...state.world, scene: { ...scene, currentNodeId: nodeId } },
+        world: {
+          ...state.world,
+          scene: {
+            ...scene,
+            currentNodeId: nodeId,
+            // Absent means "on the spine", so this CLEARS rather than
+            // preserving. A traversal back out of a detour carries no
+            // pointer and therefore resets it with no extra event.
+            detourReturnNodeId: detourReturnNodeId ?? null,
+          },
+        },
       };
     }
 

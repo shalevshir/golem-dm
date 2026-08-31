@@ -308,7 +308,16 @@ export type ActionValidatedPayload = z.infer<typeof ActionValidatedPayload>;
  * is `traverseEdge`'s job in `@ai-dm/rules-engine` (invariant 1). The event
  * log only ever records what the engine already decided.
  */
-export const QuestNodeEnteredPayload = z.object({ nodeId: ContentId });
+export const QuestNodeEnteredPayload = z.object({
+  nodeId: ContentId,
+  /**
+   * Present only when this entry is a validated `enter_detour`. `reduce` sets
+   * `scene.detourReturnNodeId` from it and CLEARS that pointer when it is
+   * absent — which is why a detour needs no event of its own and why an
+   * ordinary spine traversal resets the pointer for free.
+   */
+  detourReturnNodeId: ContentId.optional(),
+});
 export type QuestNodeEnteredPayload = z.infer<typeof QuestNodeEnteredPayload>;
 
 /**
