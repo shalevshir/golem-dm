@@ -25,6 +25,10 @@ export const he = {
   },
   scene: {
     optionsTitle: "מה אפשר לעשות כאן",
+    /** The closing beat of a terminal node, pressed rather than fired on entry. */
+    conclude: "לסיים את הפרק",
+    /** After it is pressed: the arc is complete and there is nothing further. */
+    storyOver: "הסיפור הגיע לסופו",
   },
   actions: {
     dodge: "התחמקות",

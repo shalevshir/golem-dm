@@ -1529,6 +1529,71 @@ describe("handleCommand — free text: narrate-only categories", () => {
         { to: "guild-offer", labelHebrew: "להקשיב לנציג הגילדה", open: true },
         { to: "warden-warning", labelHebrew: "להקשיב לשומר הנהר", open: true },
       ],
+      // Mid-arc: the ending is not on offer, and `edges.length` is not what
+      // decides that.
+      canConclude: false,
+    });
+  });
+
+  // The end of the arc. `reckoning` is node six of six and has no edges, so
+  // before `canConclude` the affordance panel simply emptied and the player
+  // could not tell a finished story from a broken one — that is exactly what
+  // a live playthrough hit. The closing beat is a real transition
+  // (`completeCurrentNode`) carrying the arc's payoff: the Guild/Warden
+  // relation shift, two days, and Sela's fact.
+  it("offers the closing beat on the terminal node, and stops offering it once rung", async () => {
+    const store = createInMemoryEventStore();
+    // `reckoning` gates its own entry on `the-weir`, and `completeCurrentNode`
+    // re-checks that gate — so a fixture that teleports to the last node with
+    // nothing completed is a state no playthrough can reach, and the engine
+    // rightly refuses to conclude it.
+    const campaign = await sceneCampaign(store, {
+      currentNodeId: "reckoning",
+      completedNodeIds: ["arrival", "guild-offer", "the-weir", "saboteurs"],
+    });
+    const ports: TurnPorts = { ...portsWith(store), intent: classifiedAs({ category: "social" }) };
+
+    const before = await drain(
+      handleCommand(
+        campaign,
+        { type: "free_text", clientMessageId: "c1", text: "hello there" },
+        ports,
+      ),
+    );
+    expect(before.find((each) => each.type === "scene_affordances")).toMatchObject({
+      nodeId: "reckoning",
+      edges: [],
+      canConclude: true,
+    });
+
+    // Ring it: `exploration` with a null target is "conclude the current
+    // node", the one path a terminal node has.
+    const concluding: TurnPorts = {
+      ...portsWith(store),
+      intent: classifiedAs({ category: "exploration", targetNodeId: null }),
+    };
+    const rung = await drain(
+      handleCommand(
+        campaign,
+        { type: "free_text", clientMessageId: "c2", text: "I finish here" },
+        concluding,
+      ),
+    );
+    expect(eventTypesOf(rung)).toContain("quest_node_completed");
+
+    const after = await drain(
+      handleCommand(
+        campaign,
+        { type: "free_text", clientMessageId: "c3", text: "anything else?" },
+        ports,
+      ),
+    );
+    // Still sent, now saying something different: the story is over, rather
+    // than the panel vanishing and leaving the player to guess.
+    expect(after.find((each) => each.type === "scene_affordances")).toMatchObject({
+      nodeId: "reckoning",
+      edges: [],
+      canConclude: false,
     });
   });
 

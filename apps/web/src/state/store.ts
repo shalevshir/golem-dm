@@ -282,7 +282,11 @@ export function applyFrame(state: ClientState, frame: ServerFrame): ClientState 
       if (frame.forSequence < state.sequence) return state;
       return {
         ...state,
-        sceneAffordances: { nodeId: frame.nodeId, edges: frame.edges },
+        sceneAffordances: {
+          nodeId: frame.nodeId,
+          edges: frame.edges,
+          canConclude: frame.canConclude,
+        },
       };
     }
 

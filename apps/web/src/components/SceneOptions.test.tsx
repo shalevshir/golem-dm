@@ -11,6 +11,21 @@ const ARRIVAL: SceneAffordances = {
     { to: "guild-offer", labelHebrew: "להקשיב לנציג הגילדה", open: true },
     { to: "warden-warning", labelHebrew: "להקשיב לשומר הנהר", open: false },
   ],
+  canConclude: false,
+};
+
+/** The last node of the arc, its closing beat not yet rung. */
+const RECKONING_PENDING: SceneAffordances = {
+  nodeId: "reckoning",
+  edges: [],
+  canConclude: true,
+};
+
+/** The same node once concluded: nothing left, and the game should say so. */
+const RECKONING_DONE: SceneAffordances = {
+  nodeId: "reckoning",
+  edges: [],
+  canConclude: false,
 };
 
 describe("SceneOptions", () => {
@@ -48,22 +63,45 @@ describe("SceneOptions", () => {
     expect(screen.getByRole("button", { name: "להקשיב לנציג הגילדה" })).toBeDisabled();
   });
 
-  // A terminal node has nowhere to go, and no frame has arrived before the
-  // first turn. An empty "what can you do here" heading over no choices would
-  // read as a bug rather than as an ending.
-  it("renders nothing before the first frame or on a terminal node", () => {
-    const { container: empty } = render(
+  it("renders nothing before the first frame arrives", () => {
+    const { container } = render(
       <SceneOptions affordances={null} disabled={false} onChoose={() => undefined} />,
     );
-    expect(empty).toBeEmptyDOMElement();
 
-    const { container: terminal } = render(
-      <SceneOptions
-        affordances={{ nodeId: "reckoning", edges: [] }}
-        disabled={false}
-        onChoose={() => undefined}
-      />,
+    expect(container).toBeEmptyDOMElement();
+  });
+
+  // The end of the arc, and the reason this component has a third state. A
+  // terminal node has no edges, so rendering edges alone made the options
+  // silently vanish — from the player's seat, indistinguishable from the game
+  // breaking. Live: reaching `reckoning` left an empty panel and the closing
+  // beat unrung, with nothing on screen saying which had happened.
+  it("offers the closing beat on a terminal node whose ending has not fired", async () => {
+    const onChoose = vi.fn();
+    render(
+      <SceneOptions affordances={RECKONING_PENDING} disabled={false} onChoose={onChoose} />,
     );
-    expect(terminal).toBeEmptyDOMElement();
+
+    await userEvent.click(screen.getByRole("button", { name: he.scene.conclude }));
+
+    expect(onChoose).toHaveBeenCalledWith(he.scene.conclude);
+    expect(screen.queryByText(he.scene.storyOver)).not.toBeInTheDocument();
+  });
+
+  it("says the story is over once the closing beat has fired", () => {
+    render(<SceneOptions affordances={RECKONING_DONE} disabled={false} onChoose={() => undefined} />);
+
+    expect(screen.getByText(he.scene.storyOver)).toBeInTheDocument();
+    // Nothing left to press — an enabled button here would invite a turn that
+    // the engine would only refuse.
+    expect(screen.queryByRole("button")).not.toBeInTheDocument();
+  });
+
+  // `canConclude` is the server's judgment, not `edges.length`: a mid-arc node
+  // never offers the ending even though this component only ever sees a list.
+  it("never offers the closing beat mid-arc", () => {
+    render(<SceneOptions affordances={ARRIVAL} disabled={false} onChoose={() => undefined} />);
+
+    expect(screen.queryByRole("button", { name: he.scene.conclude })).not.toBeInTheDocument();
   });
 });

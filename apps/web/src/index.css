@@ -139,3 +139,14 @@ main {
   opacity: 0.45;
   cursor: not-allowed;
 }
+
+/* The closing beat reads as an ending, not as one more errand. */
+.scene-option-buttons button.scene-conclude {
+  border-style: dashed;
+}
+
+.scene-story-over {
+  font-style: italic;
+  opacity: 0.75;
+  margin: 0;
+}

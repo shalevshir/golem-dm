@@ -361,6 +361,19 @@ export const ServerFrame = z.discriminatedUnion("type", [
         open: z.boolean(),
       }),
     ),
+    /**
+     * The closing beat is available: this node is terminal (no edges) and has
+     * not been completed yet, so `completeCurrentNode` is a legal move.
+     *
+     * Server-computed rather than inferred client-side from `edges.length`,
+     * even though the client holds `completedNodeIds` and could: which
+     * transitions are legal is the engine's judgment (invariant 1), and a
+     * client that re-derives the rule is a second implementation to keep in
+     * step. The end of an arc is also the one place where guessing wrong is
+     * unrecoverable — it is the difference between "press this to finish" and
+     * "this story is over".
+     */
+    canConclude: z.boolean(),
     /** Same contract as `turn_affordances.forSequence` — see its comment. */
     forSequence: z.number().int().min(0),
   }),

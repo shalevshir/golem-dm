@@ -1213,8 +1213,26 @@ export async function* handleCommand(
       // runs at the END of an otherwise-complete turn, and the corrupt-content
       // throw belongs to `free_text`, which reads the same edges before doing
       // anything the player would lose.
-      const options = availableEdges(sceneStaticsOf(campaign).authored, sceneStateFrom(scene));
+      const authored = sceneStaticsOf(campaign).authored;
+      const state = sceneStateFrom(scene);
+      const options = availableEdges(authored, state);
       if (!options.valid) return;
+
+      // Terminal, not already concluded, and legal — the last clause asked of
+      // the engine rather than re-derived here. `completeCurrentNode` also
+      // re-checks the node's OWN entry preconditions, so a terminal node can
+      // be un-concludable for reasons no edge list shows; a button offered on
+      // `edges.length` alone would be one the engine then refuses, which is a
+      // worse lie at the end of an arc than no button at all. The
+      // already-completed check has to come first: `completeCurrentNode` is
+      // deliberately idempotent and answers `valid` for a node already past,
+      // which would leave the ending on offer forever.
+      const node = authored.questNodes.get(scene.currentNodeId);
+      const canConclude =
+        node !== undefined &&
+        node.edges.length === 0 &&
+        !scene.completedNodeIds.includes(scene.currentNodeId) &&
+        completeCurrentNode(authored, state).valid;
 
       yield {
         type: "scene_affordances",
@@ -1224,6 +1242,7 @@ export async function* handleCommand(
           labelHebrew: each.edge.labelHebrew,
           open: each.open,
         })),
+        canConclude,
         forSequence: campaign.nextSequence - 1,
       };
       return;
