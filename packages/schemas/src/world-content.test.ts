@@ -31,12 +31,13 @@ describe("the authored world", () => {
   // than `toBeGreaterThan`. §4.7 sizes this world at one town, two factions
   // and three NPCs; the arc was five nodes until §4.7 step 5 added the one
   // that declares an encounter, which is the whole point of the combat
-  // bridge — moved deliberately, not drifted past.
+  // bridge — moved deliberately, not drifted past. §4.7 step 9 added two more
+  // as detours, reusing the existing cast, so the other three counts hold.
   it("parses every collection, and is still deliberately tiny", () => {
     expect(LocationDefinition.array().parse(readJson("locations.json"))).toHaveLength(1);
     expect(FactionDefinition.array().parse(readJson("factions.json"))).toHaveLength(2);
     expect(NpcDefinition.array().parse(readJson("npcs.json"))).toHaveLength(3);
-    expect(QuestNode.array().parse(readJson("arc.json"))).toHaveLength(6);
+    expect(QuestNode.array().parse(readJson("arc.json"))).toHaveLength(8);
   });
 
   // Exercised by real content rather than only by a unit fixture: an NPC who

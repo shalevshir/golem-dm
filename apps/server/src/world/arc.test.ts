@@ -11,6 +11,7 @@
 // now executable.
 import { describe, expect, it } from "vitest";
 import {
+  availableDetours,
   availableEdges,
   completeCurrentNode,
   relationBetween,
@@ -137,6 +138,37 @@ describe("the Emberfall arc", () => {
       const options = edgesOf(availableEdges(world, state));
       expect(options).toHaveLength(1);
       expect(options[0]?.open).toBe(true);
+    }
+  });
+
+  it("has exactly two detours, neither of them targeted by an authored edge", () => {
+    const world = loadWorld();
+    const detours = Array.from(world.questNodes.values()).filter((node) => node.detour);
+    expect(detours.map((node) => node.nodeId).sort()).toEqual(["after-the-reckoning", "tobins-errand"]);
+    const targeted = new Set(
+      Array.from(world.questNodes.values()).flatMap((node) => node.edges.map((edge) => edge.to)),
+    );
+    for (const detour of detours) expect(targeted.has(detour.nodeId)).toBe(false);
+  });
+
+  // The half of the problem this step exists for: before it, a concluded arc
+  // had nowhere left to go.
+  it("offers a detour once the arc has concluded", () => {
+    const world = loadWorld();
+    let state = stateOf(traverseEdge(world, stateOf(startScene(world)), "guild-offer"));
+    state = stateOf(traverseEdge(world, state, "the-weir"));
+    state = stateOf(traverseEdge(world, state, "saboteurs"));
+    state = stateOf(traverseEdge(world, state, "reckoning"));
+    state = stateOf(completeCurrentNode(world, state));
+    expect(availableEdges(world, state)).toEqual({ valid: true, edges: [] });
+    const open = availableDetours(world, state).filter((each) => each.open);
+    expect(open.map((each) => each.node.nodeId)).toContain("after-the-reckoning");
+  });
+
+  it("keeps every detour's own effects inside the improvised vocabulary's spirit", () => {
+    const world = loadWorld();
+    for (const node of Array.from(world.questNodes.values()).filter((each) => each.detour)) {
+      expect(node.encounterId).toBeUndefined();
     }
   });
 });

@@ -158,5 +158,43 @@
         "fact": "hosted and helped broker the reckoning between the Guild and the Wardens"
       }
     ]
+  },
+  {
+    "nodeId": "tobins-errand",
+    "titleEnglish": "What Tobin Keeps in the Boathouse",
+    "sceneEnglish": "Old Tobin does not so much invite you as start walking and assume. The boathouse is a lean-to full of things the river has given back over forty years, and one shelf of things it has not. He wants a second pair of hands and, it becomes clear, a second opinion he can afford to ignore.",
+    "locationId": "emberfall",
+    "detour": true,
+    "effects": [
+      { "kind": "shift_npc_affinity", "npcId": "old-tobin", "delta": 1 },
+      {
+        "kind": "add_npc_fact",
+        "npcId": "old-tobin",
+        "fact": "showed the player the boathouse shelf, which he has shown nobody from the Guild"
+      }
+    ],
+    "edges": [
+      {
+        "to": "the-weir",
+        "labelEnglish": "Walk back down to the weir",
+        "labelHebrew": "לחזור אל הסכר"
+      }
+    ]
+  },
+  {
+    "nodeId": "after-the-reckoning",
+    "titleEnglish": "The Morning After",
+    "sceneEnglish": "The long table has been wiped down and the ledgers are gone. Sela is counting something under her breath and stops when she sees you. Whatever was decided last night, somebody now has to be the one who goes and tells the lower kilns, and nobody in this room has volunteered.",
+    "locationId": "emberfall",
+    "detour": true,
+    "preconditions": [{ "kind": "node_completed", "nodeId": "reckoning" }],
+    "effects": [
+      { "kind": "advance_calendar", "days": 1 },
+      {
+        "kind": "add_npc_fact",
+        "npcId": "sela-the-innkeeper",
+        "fact": "asked the player to carry the reckoning's terms to the lower kilns"
+      }
+    ]
   }
 ]

@@ -28,7 +28,7 @@ describe("loadWorld", () => {
     expect(world.factions.size).toBe(2);
     expect(world.locations.size).toBe(1);
     expect(world.npcs.size).toBe(3);
-    expect(world.questNodes.size).toBe(6);
+    expect(world.questNodes.size).toBe(8);
   });
 
   // A relation is an unordered pair: `pairKey` sorts, so asking in either
