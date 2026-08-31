@@ -245,11 +245,14 @@ function describePredicate(predicate: WorldPredicate): string {
  * One declared world change, applied. Same exhaustiveness contract as
  * `evaluatePredicate`.
  *
- * Deliberately NOT exported. An effect is reachable only through a node
- * completing, which is what keeps invariant 1 intact one level above combat:
- * nothing can shift a faction band by asking. It is fully exercised through
- * `traverseEdge` and `completeCurrentNode`, which is a stronger test than
- * calling it directly would be.
+ * Deliberately NOT exported. An effect is reachable only two ways: a node
+ * completing, or a `validateMove` "world" move the door guard and magnitude
+ * ceiling have already adjudicated — never by a caller asking directly. That
+ * second path is what keeps invariant 1 intact one level above combat: a
+ * model can shift a faction band, but only within the ceiling `validateMove`
+ * enforces and never by closing a door `closedDoors` finds open. It is fully
+ * exercised through `traverseEdge`, `completeCurrentNode`, and `validateMove`,
+ * which is a stronger test than calling it directly would be.
  *
  * It takes `world` because a shift starts from the band `relationBetween`
  * reports, which is the authored relation overlaid by the state rather than
