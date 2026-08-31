@@ -529,11 +529,13 @@ export function App(props: AppProps): JSX.Element {
           ? he.app.defeat
           : conclusion === "victory"
             ? he.app.victory
-            : yourTurn
-              ? he.app.yourTurn
-              : status === "reconnecting"
-                ? he.app.reconnecting
-                : he.app.waiting}
+            : conclusion === "stalemate"
+              ? he.app.stalemate
+              : yourTurn
+                ? he.app.yourTurn
+                : status === "reconnecting"
+                  ? he.app.reconnecting
+                  : he.app.waiting}
       </p>
 
       <ErrorBanner

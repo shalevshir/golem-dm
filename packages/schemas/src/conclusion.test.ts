@@ -126,7 +126,7 @@ describe("conclusionOf", () => {
     ).toBe("victory");
   });
 
-  it("stays ongoing when the hero is Stable but a hostile is still up", () => {
+  it("is a stalemate when the hero is Stable but a hostile is still up — nothing can end it from here", () => {
     expect(
       conclusionOf(
         stateWith([
@@ -137,6 +137,24 @@ describe("conclusionOf", () => {
             currentHp: 0,
             deathSaves: { successes: 3, failures: 0 },
           }),
+          rawCombatant({ combatantId: "goblin", faction: "hostile" }),
+        ]),
+      ),
+    ).toBe("stalemate");
+  });
+
+  it("stays ongoing when one party member is Stable but another can still act", () => {
+    expect(
+      conclusionOf(
+        stateWith([
+          rawCombatant({
+            combatantId: "hero",
+            faction: "party",
+            status: "unconscious",
+            currentHp: 0,
+            deathSaves: { successes: 3, failures: 0 },
+          }),
+          rawCombatant({ combatantId: "ally", faction: "party" }),
           rawCombatant({ combatantId: "goblin", faction: "hostile" }),
         ]),
       ),

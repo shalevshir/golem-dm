@@ -36,7 +36,12 @@ import {
 } from "@ai-dm/agents";
 import { createInMemoryEpisodicStore, createInMemoryEventStore, EventStoreUnavailableError } from "@ai-dm/memory";
 import type { EpisodicStore, EventStore } from "@ai-dm/memory";
-import { CheckRolledPayload, DiceRolledPayload, NarrativeEmittedPayload } from "@ai-dm/schemas";
+import {
+  CheckRolledPayload,
+  conclusionOf,
+  DiceRolledPayload,
+  NarrativeEmittedPayload,
+} from "@ai-dm/schemas";
 import type {
   AbilityKey,
   ClientMessage,
@@ -2417,20 +2422,27 @@ describe("handleCommand — enemy turns", () => {
       },
       dodgeAs("goblin-b"),
     ];
-    // Padded well past this fixture's death save's own resolution (this
-    // seed reaches Stable in 4 rolls): a combat-only campaign has no other
-    // way to end a fight the goblins never lose (`resolveIfConcluded` is
-    // silent for one, by design), so once the hero stabilizes the sweep
-    // keeps running hostile turns — dodge in, dodge out — all the way to
-    // `runEnemyTurns`'s own bound (`turnOrder.length * (maxRounds + 1)`,
-    // §8's death-saves-persistent-hp spec Decision 5). 30 rounds of padding
-    // safely clears that bound for `goblin-ambush`'s `maxRounds: 20`.
-    for (let round = 0; round < 30; round += 1) {
+    // A little headroom past this fixture's death save's own resolution
+    // (this seed reaches Stable in 4 rolls, i.e. 4 more goblin-a/goblin-b
+    // pairs): `conclusionOf` now reports "stalemate" the instant the hero
+    // stabilizes with a hostile still up, so `runEnemyTurns` stops right
+    // there instead of grinding on toward its own bound
+    // (`turnOrder.length * (maxRounds + 1)`) the way it used to. 6 rounds
+    // of padding is generous cover, not a bound this test relies on.
+    for (let round = 0; round < 6; round += 1) {
       scripted.push(dodgeAs("goblin-a"), dodgeAs("goblin-b"));
     }
+    const underlyingTactical = agentProposing(scripted);
+    let proposeTurnCalls = 0;
+    const countingTactical: TacticalAgent = {
+      proposeTurn: (input) => {
+        proposeTurnCalls += 1;
+        return underlyingTactical.proposeTurn(input);
+      },
+    };
 
     const frames = await drain(
-      handleCommand(campaign, dodge("hero", "c-down"), portsWith(store, agentProposing(scripted))),
+      handleCommand(campaign, dodge("hero", "c-down"), portsWith(store, countingTactical)),
     );
 
     // The hero fell unconscious, and never sent (or could send) a second
@@ -2458,6 +2470,18 @@ describe("handleCommand — enemy turns", () => {
     expect(hero?.status).toBe("unconscious");
     expect(hero?.currentHp).toBe(0);
     expect(hero?.deathSaves).toEqual({ successes: 3, failures: 1 });
+
+    // The point of this fixture: once the hero stabilizes with a hostile
+    // still alive, `conclusionOf` now reports "stalemate" immediately
+    // (schemas' `conclusion.test.ts`), so `runEnemyTurns` stops right there
+    // instead of spending a real tactical call on every remaining hostile
+    // turn up to its own bound. 8 calls is goblin-a/goblin-b alternating
+    // across the 4 rounds the death save takes to resolve (round 1 knocks
+    // the hero out; rounds 2-4 roll pending; round 5's roll reaches Stable,
+    // and the sweep returns before either goblin gets a 5th turn) — not the
+    // dozens a bound-driven exhaustion would have cost.
+    expect(proposeTurnCalls).toBe(8);
+    expect(conclusionOf(encounterOf(campaign))).toBe("stalemate");
   });
 });
 

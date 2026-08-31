@@ -16,6 +16,7 @@ export const he = {
     waiting: "ממתין…",
     victory: "ניצחתם",
     defeat: "הובסתם",
+    stalemate: "הקרב הגיע למבוי סתום",
     startFight: "התחל קרב",
     reconnect: "התחבר מחדש",
   },

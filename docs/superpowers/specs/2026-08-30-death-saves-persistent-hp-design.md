@@ -537,3 +537,24 @@ need a golden test per `packages/rules-engine/CLAUDE.md`'s bar.
   fixture, not by new authored content.
 - Permadeath and campaign-end semantics beyond what the combat-bridge spec
   already accepted as a known ceiling for defeat.
+
+## Addendum (2026-08-31) — the Decision 5 known ceiling is closed
+
+Decision 5's "known ceiling" — a Stable hero next to a surviving hostile,
+which neither side could ever end without `runEnemyTurns` grinding a real
+tactical call for every remaining hostile turn up to its own bound
+(`turnOrder.length * (maxRounds + 1)`, up to ~20 rounds of live LLM calls for
+one player action) — is now closed at the source: `conclusionOf`
+(`packages/schemas/src/conclusion.ts`) gained a fourth `Conclusion` value,
+`"stalemate"`, returned the instant no party combatant left standing can
+still act (alive) while an opposing faction remains. `runEnemyTurns`'s
+existing `conclusionOf(...) !== "ongoing"` check and `resolveIfConcluded`'s
+existing `conclusion !== "ongoing" ? conclusion : ...` fallback both already
+treated any non-"ongoing" result as terminal, so neither needed to change —
+the fight now ends the round the hero stabilizes rather than up to 19 rounds
+later. `apps/web/src/App.tsx` gained a dedicated `he.app.stalemate` status
+branch, since a combat-only campaign never gets an `encounter_resolved`
+event (`resolveIfConcluded` is silent when there's no scene) and reads
+`conclusionOf` directly. `resolveIfConcluded`'s `round > maxRounds` fallback
+is left in place as a harmless backstop, though this closes what was
+practically its only reachable trigger.
