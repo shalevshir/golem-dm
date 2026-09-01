@@ -3355,6 +3355,69 @@ describe("handleCommand — free text: the combat bridge", () => {
     // the board has nothing to render the turn on.
     expect(affordancesAt).toBeGreaterThan(bracketAt);
   });
+  // Ordering alone did not answer the player's actual question. Live
+  // playtesting after the frame-order fix still produced "where did the
+  // goblins come from?", because the beat handed to the narrator was a plain
+  // `arrived` — it named the location and nothing else, and the system
+  // prompt's noun rule forbids naming anyone not in the brief. So the
+  // narration described a calm arrival and the board appeared a frame later
+  // with nothing in the prose connecting them. The bridge must tell the
+  // narrator who is attacking.
+  it("hands the narrator an ambushed beat naming the hostiles, not a bare arrival", async () => {
+    const store = createInMemoryEventStore();
+    const campaign = await sceneCampaign(store, atTheWeir);
+    const briefs: SceneNarrationInput[] = [];
+    const ports: TurnPorts = {
+      ...portsWith(store),
+      intent: classifiedAs({ category: "exploration", targetNodeId: "saboteurs" }),
+      sceneNarrative: recordingSceneNarrative(briefs),
+    };
+
+    await drain(
+      handleCommand(
+        campaign,
+        { type: "free_text", clientMessageId: "c1", text: "search the forced gate" },
+        ports,
+      ),
+    );
+
+    expect(briefs).toHaveLength(1);
+    const beat = briefs[0]?.beat;
+    expect(beat?.kind).toBe("ambushed");
+    if (beat?.kind !== "ambushed")
+      throw new Error(`expected an ambushed beat, got ${String(beat?.kind)}`);
+    // `goblin-ambush` fields two goblins off one stat block: one name, once.
+    expect(beat.hostileNamesHebrew).toHaveLength(1);
+    expect(beat.hostileNamesHebrew[0]).toMatch(/[֐-׿]/);
+    expect(beat.locationNameHebrew).toMatch(/[֐-׿]/);
+  });
+
+  it("keeps a plain arrival beat for a traversal that opens no bracket", async () => {
+    const store = createInMemoryEventStore();
+    const campaign = await sceneCampaign(store, {
+      currentNodeId: "arrival",
+      completedNodeIds: [],
+      relations: [],
+      day: 1,
+    });
+    const briefs: SceneNarrationInput[] = [];
+    const ports: TurnPorts = {
+      ...portsWith(store),
+      intent: classifiedAs({ category: "exploration", targetNodeId: "guild-offer" }),
+      sceneNarrative: recordingSceneNarrative(briefs),
+    };
+
+    await drain(
+      handleCommand(
+        campaign,
+        { type: "free_text", clientMessageId: "c1", text: "hear out the factor" },
+        ports,
+      ),
+    );
+
+    expect(briefs[0]?.beat.kind).toBe("arrived");
+  });
+
   it("does not open a bracket for a node that declares no encounter", async () => {
     const store = createInMemoryEventStore();
     const campaign = await sceneCampaign(store, {

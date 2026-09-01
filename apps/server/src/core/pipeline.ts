@@ -2262,11 +2262,43 @@ export async function* handleCommand(
             // place they were already standing in, so it gets its own beat
             // instead (whole-branch review finding 2).
             const card = questNodeCard(statics.authored, currentScene().currentNodeId);
+            // Deduplicated by name, not by combatant: `goblin-ambush` fields
+            // two goblins off ONE stat block, and a brief listing the same
+            // Hebrew word twice invites the narrator to count them — which the
+            // prompt's numbers rule forbids anyway. Keyed off `statBlocks`
+            // (which `buildEncounterById` keys by `combatantId`) rather than
+            // the catalogue, so a hostile with no stat block is skipped rather
+            // than named as `undefined`.
+            const hostileNamesHebrew =
+              bridged === null
+                ? []
+                : [
+                    ...new Set(
+                      bridged.world.combatants
+                        .filter((each) => each.faction === "hostile")
+                        .map((each) => bridged.statBlocks.get(each.combatantId)?.nameHebrew)
+                        .filter((name): name is string => name !== undefined),
+                    ),
+                  ];
+            // The `ambushed` beat, not `arrived`, whenever this traversal
+            // opened a bracket. `arrived` describes a place; it has no way to
+            // say a fight is starting, so the player used to read a calm
+            // arrival paragraph and then watch a board appear with nothing
+            // connecting the two ("where did the goblins come from?"). Falls
+            // back to `arrived` when the encounter somehow named no hostile:
+            // an ambush beat with an empty HOSTILES list would tell the
+            // narrator to name attackers that were never given.
             yield* sceneNarrate(
               statics.character.characterId,
               targetNodeId === null
                 ? { kind: "concluded", locationNameHebrew: card.locationNameHebrew }
-                : { kind: "arrived", locationNameHebrew: card.locationNameHebrew },
+                : hostileNamesHebrew.length > 0
+                  ? {
+                      kind: "ambushed",
+                      locationNameHebrew: card.locationNameHebrew,
+                      hostileNamesHebrew,
+                    }
+                  : { kind: "arrived", locationNameHebrew: card.locationNameHebrew },
               deadline,
             );
 
