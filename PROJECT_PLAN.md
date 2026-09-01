@@ -1103,6 +1103,91 @@ combat with a UI that can still send them.
      builds the prompt slot that both authored facts and retrieval land in.
 8. **Closed beta (step 11).**
 
+**Two post-step-7 fix waves, merged 2026-08-31.** Both came out of the same
+event — the first end-to-end Emberfall playthrough — and between them they
+close the gap between "the loop runs" and "the loop is playable".
+
+**Wave 1: the intent router, merged as `844e9a9` (PR
+[#17](https://github.com/shalevshir/golem-dm/pull/17)), CI green at 1673
+passed / 31 skipped.** The first live Emberfall session died on its first
+free-text turn, and fixing it surfaced three further faults that only a real
+playthrough could have found:
+
+- *`DEFAULT_MODEL_ROUTING` named a model that never existed.* `intent` and
+  `summary` both pointed at google `gemini-3-flash`, a plan-time guess no live
+  call had ever exercised (404 `Model is not found`). Correcting the id moved
+  the failure to a 400: `IntentClassification` is a `z.discriminatedUnion`,
+  which compiles to `anyOf`, and that is outside Google's function-calling
+  schema subset. `intent` therefore moves to openai `gpt-5.4-nano` at `low`
+  effort; `summary`, which is text-only, stays google on
+  `gemini-3.1-flash-lite`. Both verified live. Flattening the schema was
+  rejected — the `check` arm's fields exist only because the union carries
+  them.
+- *The metrics records dropped the provider's message,* which is why the above
+  took a manual bisect: `outcome` is the failure CLASS, so a 404 on a model id
+  and a 400 on a tool schema are both just `provider_error`. `message?` now
+  rides on the intent, summary and embedding records.
+- *The scene layer went silent on the player.* `playerAffordances()` yielded
+  nothing out of combat by design (step 4 spec), so a scene showed a paragraph
+  of Hebrew and an empty text box while the node's edges lived only in
+  `data/world/` and the router's prompt. Worse, the router had no way to
+  connect a person to a way forward: `arrival`'s edges name a ROLE ("Hear out
+  the guild factor") and the player names a PERSON ("מארן וס") — a name the
+  narrator had just shown them. New `scene_affordances` frame, authored
+  `QuestEdge.labelHebrew`, a `SceneOptions` component, `IntentPromptInput.npcs`,
+  and `intent-v2` widening `exploration` from "reach a place" to "take up any
+  edge, including a conversation".
+- *The same silence at the end of the arc.* A terminal node has no edges, so
+  the panel simply emptied at `reckoning` with the closing beat unrung.
+  `canConclude` is asked of the engine (`completeCurrentNode(...).valid`), not
+  inferred from `edges.length` — a terminal node can be un-concludable because
+  it re-checks its own entry preconditions.
+
+The wave confirms this section's premise from the other direction: everything
+outside the authored edge set is narrate-only, so **the arc is the only thing
+that can happen.** A player who says anything the DAG has no branch for gets
+fluent Hebrew and no world change. That is the `NarrativeMove` gap named under
+"The governing constraint" above, now observed live rather than predicted.
+
+**Wave 2: death saves, persistent HP and the long rest, merged as `bfaf0a2`
+(PR [#16](https://github.com/shalevshir/golem-dm/pull/16)), CI green at 1691
+passed / 31 skipped without Postgres.** Where wave 1 was about the player
+being able to say anything at all, this one is about the consequences of what
+they said outliving the scene they said it in.
+
+- *A PC died at 0 HP like a goblin.* `diesAtZeroHp` was pinned `true` rather
+  than read off a combatant's `characterId`, so the hero never fell
+  Unconscious and never rolled a death save — the gap `RULES_REFERENCE.md` §8
+  named as "every combatant dies at 0 HP, PCs included." Monsters still die
+  instantly; only the PC branch changed.
+- *Nothing could roll the save.* There is no `structured_action` an
+  Unconscious actor can ever send, so the encounter pipeline now drives
+  `rollDeathSave` on a downed party member's own turn. `conclusionOf` keeps
+  the fight `"ongoing"` while a save is pending and counts an
+  Unconscious-but-Stable combatant as still standing, so a won fight can now
+  end with the hero down but alive — an outcome the previous code could not
+  represent.
+- *HP reset between fights.* The hero's current HP now rides
+  `SceneSnapshot.heroHp`, leaves a bracket on `EncounterResolvedPayload.heroHp`
+  and is read back — floored at 1 — through `buildEncounterById`'s existing
+  "spawn below full HP" seam.
+- *So attrition needed an off-switch.* `long_rest` is a new zero-field
+  `WorldEffect` kind, applied by the scene engine's `applyEffect` and diffed
+  into `WorldDeltaAppliedPayload` exactly as `advance_calendar` already is.
+  It restores to max and does nothing else; a rest that should also cost
+  narrative time composes it with a separate `advance_calendar` on the same
+  node, because the two are orthogonal facts.
+
+This wave is what makes "the campaign is the log; an encounter is a span
+within it" true of the **character** and not only of the world. Until HP
+survived a bracket, the section's own framing held for factions and the
+calendar while every fight still started the hero fresh — which is to say the
+campaign was continuous everywhere except in the one place a player would
+feel it.
+
+A new §8 gap is recorded in its place: a long rest does not reduce
+exhaustion, because exhaustion has no cross-encounter persistence at all yet.
+
 Two items are independent of this ordering. The
 `cache_read_input_tokens`-plus-pricing-relocation fix described for step 11
 becomes *more* urgent, not less, because this sequence adds two model tiers
