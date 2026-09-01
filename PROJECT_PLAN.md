@@ -1101,7 +1101,67 @@ combat with a UI that can still send them.
      `SceneNarrationInput` had no memory field at all — affinity reached the
      client through the protocol snapshot and never reached a prompt. Step 7
      builds the prompt slot that both authored facts and retrieval land in.
-8. **Closed beta (step 11).**
+8. **The GM tier, `NarrativeMove`, and authored detours.** The piece "The
+   governing constraint" above names and the intent-router spec defers in one
+   line. Before it, out of combat **only authored edges could change the
+   world**: `check` rolled and logged, `social`/`ooc`/`combat` narrated and
+   changed nothing, and a concluded arc was simply over. A fourth model role
+   (`gm`) now proposes a `NarrativeMove` — `none`, a `world` move of one or
+   two effects, or `enter_detour` — and the scene engine's `validateMove`
+   adjudicates it before anything becomes an event. Same shape as
+   `validateExecuteTurn`, two levels up.
+   [`docs/superpowers/specs/2026-08-31-narrative-move-design.md`](docs/superpowers/specs/2026-08-31-narrative-move-design.md),
+   plan at
+   [`docs/superpowers/plans/2026-08-31-narrative-move.md`](docs/superpowers/plans/2026-08-31-narrative-move.md).
+   Verified at 1773 passed / 31 skipped without Postgres, typecheck and lint
+   clean. (The spec, written before this landed, calls it unnumbered; it
+   earns a number here because it shipped as a full step — spec, plan, nine
+   tasks and a review wave — not as a fix.)
+   - *The improvised vocabulary is `WorldEffect` minus `long_rest`,* composed
+     from that union's own members rather than re-declared (invariant 4).
+     Faction shifts and calendar advances are deliberately IN, which is what
+     makes the guard below load-bearing rather than decorative.
+   - *The safety net is one rule: a move may not close a door that is
+     currently open.* For every uncompleted node, a precondition true before
+     must still be true after; any `true → false` flip refuses the whole
+     move. It is written over `evaluatePredicate`, so it covers every
+     `WorldPredicate` kind added later — the deferred check-gated traversal
+     included — for free. This matters concretely: `arc.test.ts` records that
+     `reckoning` gates on at least `hostile` and `hostile` is the LOWEST band
+     reachable before it, so a single improvised `-1` would have made the
+     arc's own ending permanently unenterable. The guard makes that
+     structurally impossible while knowing nothing about `reckoning`.
+     Alongside it, an improvised shift moves at most one band — enforced in
+     the validator, not the schema, so `ImprovisedEffect` stays a pure subset.
+   - *`QuestNode.detour` pays for itself twice.* It bounds the GM tier to
+     off-spine content, so a move can never jump the player along the spine;
+     and it is what finally let `loadWorld` assert that every spine node has
+     an inbound edge. Before the marker existed, an orphan and a typo'd edge
+     target were indistinguishable, so that check could not be written at all.
+   - *A detour has no lifecycle state.* It is an ordinary `QuestNode` reached
+     by a validated move, with one new field — `SceneState.detourReturnNodeId`
+     — riding on `quest_node_entered`'s payload, so an ordinary spine
+     traversal clears the pointer with no extra event. Abandoning is leaving
+     without completing, and "did they finish it" is already answerable by the
+     existing `node_completed` predicate.
+   - *One new event, and it is audit-only.* `narrative_move_applied` is a
+     no-op in `reduce`, exactly like `intent_classified`: the state change
+     rides on the `world_delta_applied`/`quest_node_entered` emitted beside
+     it, and this carries the reason §4.7 demands. A REFUSED move emits
+     nothing and is reported through `recordGmCall` — the same
+     audit-versus-metrics split `IntentCallMetrics` established.
+   - *The tier runs on every `free_text` turn,* against the post-transition
+     state, so on `exploration` the DAG moves first and improvisation only
+     decorates. It shares the turn's existing budget, and a timeout, provider
+     failure or engine refusal all degrade to no move — a turn never fails
+     because improvisation did not work out. `NarrativeMove` is a
+     discriminated union, so like `intent` this tier must route to openai.
+   - *Review wave.* Five fixes after the nine tasks: a mid-turn combat window,
+     engine/fold pointer parity, real npc ids validated into the GM tier,
+     `gmStep` given its own timeout signal, `tobins-errand` re-gated on
+     `the-weir` rather than the town at large, and arrival narration ordered
+     before the combat bracket.
+9. **Closed beta (step 11).**
 
 **Two post-step-7 fix waves, merged 2026-08-31.** Both came out of the same
 event — the first end-to-end Emberfall playthrough — and between them they
