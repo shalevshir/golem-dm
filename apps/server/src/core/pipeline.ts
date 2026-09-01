@@ -592,7 +592,11 @@ function questNodeCard(
   locationNameHebrew: string;
   npcNamesHebrew: string[];
   npcIds: string[];
-  npcs: IntentNpcPresent[];
+  // Widened over `IntentNpcPresent[]` to carry the real id too — the GM tier
+  // needs it (a model cannot propose a legal `shift_npc_affinity`/
+  // `add_npc_fact` without it) but the intent router does not, so
+  // `IntentNpcPresent` itself stays untouched.
+  npcs: (IntentNpcPresent & { npcId: string })[];
 } {
   const node = authored.questNodes.get(nodeId);
   if (node === undefined) {
@@ -614,6 +618,7 @@ function questNodeCard(
     // already computed here, so the router and the narrator cannot disagree
     // about who is standing in the scene.
     npcs: present.map((npc) => ({
+      npcId: npc.npcId,
       nameEnglish: npc.nameEnglish,
       nameHebrew: npc.nameHebrew,
       descriptionEnglish: npc.descriptionEnglish,

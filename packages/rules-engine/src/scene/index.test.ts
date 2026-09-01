@@ -1001,6 +1001,51 @@ describe("validateMove — the improvised magnitude ceiling", () => {
   });
 });
 
+describe("validateMove — unknown npcId", () => {
+  // `loadFixtureWorld()` registers only "tobin" (see its own doc comment).
+  // A model can guess wrong the same way a hand-typed slug can, and nothing
+  // upstream of `validateMove` catches it.
+  it("refuses a shift_npc_affinity naming an npc the world does not have", () => {
+    const world = loadFixtureWorld();
+    const state = stateOf(startScene(world));
+    const result = validateMove(world, state, {
+      kind: "world",
+      effects: [{ kind: "shift_npc_affinity", npcId: "maren_vess", delta: 1 }],
+      reasonEnglish: "the player did Maren a favour",
+    });
+    expect(result.valid).toBe(false);
+    if (!result.valid) {
+      expect(result.rejections[0]?.reason).toBe("no_such_npc");
+      expect(result.rejections[0]?.subjectId).toBe("maren_vess");
+    }
+  });
+
+  it("refuses an add_npc_fact naming an npc the world does not have", () => {
+    const world = loadFixtureWorld();
+    const state = stateOf(startScene(world));
+    const result = validateMove(world, state, {
+      kind: "world",
+      effects: [{ kind: "add_npc_fact", npcId: "maren_vess", fact: "was helped" }],
+      reasonEnglish: "r",
+    });
+    expect(result.valid).toBe(false);
+    if (!result.valid) expect(result.rejections[0]?.reason).toBe("no_such_npc");
+  });
+
+  // Regression guard: the real, registered npcId must still work exactly as
+  // before — this check must not over-refuse.
+  it("still allows a shift naming the real, registered npcId", () => {
+    const world = loadFixtureWorld();
+    const state = stateOf(startScene(world));
+    const result = validateMove(world, state, {
+      kind: "world",
+      effects: [{ kind: "shift_npc_affinity", npcId: "tobin", delta: 1 }],
+      reasonEnglish: "the player helped tobin",
+    });
+    expect(result.valid).toBe(true);
+  });
+});
+
 describe("validateMove — enter_detour", () => {
   it("enters a detour node and records where to return", () => {
     const world = loadFixtureWorld();

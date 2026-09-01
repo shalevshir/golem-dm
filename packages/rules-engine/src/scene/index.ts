@@ -151,7 +151,12 @@ export function evaluatePredicate(
 }
 
 export type SceneRejectionReason =
-  "no_such_node" | "no_such_edge" | "precondition_unmet" | "would_close_door" | "not_a_detour";
+  | "no_such_node"
+  | "no_such_edge"
+  | "precondition_unmet"
+  | "would_close_door"
+  | "not_a_detour"
+  | "no_such_npc";
 
 export interface SceneRejection {
   reason: SceneRejectionReason;
@@ -498,6 +503,26 @@ function magnitudeRejection(effect: ImprovisedEffect): SceneRejection | null {
 }
 
 /**
+ * A model proposing `shift_npc_affinity`/`add_npc_fact` names an npcId by
+ * hand — nothing upstream guarantees it is real. Authored content has no
+ * equivalent check (`applyEffect`'s `affinityOf` fallback tolerates an
+ * unknown id on purpose, per its own comment), but a human author's typo is
+ * caught by review; a model's is not. This is what would have caught
+ * `npcId: "maren_vess"` (underscore) when the real id is `maren-vess`
+ * (hyphenated) — silently accepted before this check existed, writing a
+ * phantom affinity record nothing else in the game will ever read.
+ */
+function unknownNpcRejection(world: AuthoredWorld, effect: ImprovisedEffect): SceneRejection | null {
+  if (effect.kind !== "shift_npc_affinity" && effect.kind !== "add_npc_fact") return null;
+  if (world.npcs.has(effect.npcId)) return null;
+  return {
+    reason: "no_such_npc",
+    message: `no npc "${effect.npcId}"`,
+    subjectId: effect.npcId,
+  };
+}
+
+/**
  * The door guard, and the whole reason improvisation is safe: **a move may not
  * close a door that is currently open.**
  *
@@ -572,6 +597,14 @@ export function validateMove(
         .map((effect) => magnitudeRejection(effect))
         .filter((each): each is SceneRejection => each !== null);
       if (magnitude.length > 0) return { valid: false, rejections: magnitude };
+
+      // Checked before `applyEffect` ever runs, same as the magnitude ceiling
+      // above: an unknown npcId is refused upfront, so a phantom affinity
+      // record is never even transiently created.
+      const unknownNpcs = move.effects
+        .map((effect) => unknownNpcRejection(world, effect))
+        .filter((each): each is SceneRejection => each !== null);
+      if (unknownNpcs.length > 0) return { valid: false, rejections: unknownNpcs };
 
       // `applyEffect` stays unexported and is reached only from here and from
       // `completed()`: a move gets no privileged path into world state that a

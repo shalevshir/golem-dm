@@ -17,6 +17,7 @@ const usage: TokenUsage = { promptTokens: 50, completionTokens: 10, totalTokens:
 /** One NPC present, so the roster the GM reads is never empty in a test. */
 const NPCS = [
   {
+    npcId: "sela-the-innkeeper",
     nameEnglish: "Sela the Innkeeper",
     nameHebrew: "סלה הפונדקאית",
     descriptionEnglish: "Keeps the only inn in town.",

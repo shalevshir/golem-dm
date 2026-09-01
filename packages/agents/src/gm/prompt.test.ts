@@ -10,6 +10,7 @@ function joined(tier: readonly string[] | undefined): string {
 /** One NPC present, so the roster the GM reads is never empty in a test. */
 const NPCS = [
   {
+    npcId: "sela-the-innkeeper",
     nameEnglish: "Sela the Innkeeper",
     nameHebrew: "סלה הפונדקאית",
     descriptionEnglish: "Keeps the only inn in town.",
@@ -42,6 +43,15 @@ describe("buildGmPrompt", () => {
     expect(joined(prompt.semiStatic)).toContain("A dusty tavern common room.");
     expect(joined(prompt.semiStatic)).toContain("Sela the Innkeeper");
     expect(joined(prompt.semiStatic)).toContain("social");
+  });
+
+  // The bug this fix exists for: a model with no real id to copy guessed one
+  // (`maren_vess` for the real `maren-vess`) and it was silently accepted.
+  // The roster must carry the real id, verbatim, for the model to copy.
+  it("includes each npc's real id in the roster, not just its display name", () => {
+    const prompt = buildGmPrompt(baseInput());
+
+    expect(joined(prompt.semiStatic)).toContain("sela-the-innkeeper");
   });
 
   it("puts the player's text in the dynamic tier and never in the system tier", () => {

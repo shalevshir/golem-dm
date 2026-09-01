@@ -22,8 +22,8 @@ const PROMPT_SURFACE = [GM_TOOL_NAME, GM_TOOL_DESCRIPTION, GM_SYSTEM_PROMPT].joi
 
 /** Bump `GM_PROMPT_VERSION` and re-pin this together, never separately. */
 const PINNED = {
-  version: "gm-v1",
-  sha256: "5aafed4aaf8911a4636326bb21d52f994473a9e9b27410014bba508a542701f7",
+  version: "gm-v2",
+  sha256: "6d033f9264a9394bda825e50f878479f890d3e1b5a44816a062ffcccbee31fe9",
 };
 
 describe("prompt version guard", () => {

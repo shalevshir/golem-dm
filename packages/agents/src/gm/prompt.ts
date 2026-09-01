@@ -9,6 +9,19 @@ import type { IntentNpcPresent } from "../intent/prompt.js";
 import { GM_SYSTEM_PROMPT } from "./prompt-text.js";
 
 /**
+ * An NPC present, as the GM tier needs to see it: `IntentNpcPresent` plus the
+ * real, machine-readable id. The GM tier — unlike the intent router — must
+ * name an npcId back in a `shift_npc_affinity`/`add_npc_fact` effect, and a
+ * display name alone gives the model nothing to copy: it has to guess a slug,
+ * which is exactly how a real proposal once named `maren_vess` (underscore)
+ * for the real `maren-vess` (hyphenated) and was silently accepted before
+ * `validateMove` learned to check.
+ */
+export interface GmNpcPresent extends IntentNpcPresent {
+  npcId: string;
+}
+
+/**
  * A detour's shape as the GM tier needs to see it — deliberately its own
  * type rather than an import of `@ai-dm/rules-engine`'s `DetourOption`
  * (invariant 5: `@ai-dm/agents` never imports `@ai-dm/rules-engine`). Kept
@@ -30,8 +43,8 @@ export interface GmPromptInput {
   /** The player's Hebrew, untrusted. */
   text: string;
   sceneEnglish: string;
-  /** Everyone in the current location, in the same shape the router reads. */
-  npcs: readonly IntentNpcPresent[];
+  /** Everyone in the current location, in the same shape the router reads, plus their real id. */
+  npcs: readonly GmNpcPresent[];
   /** What the intent router made of the player's message — a hint, not an instruction. */
   category: string;
   /** The result of a roll the player just made, when the turn rolled one. */
@@ -46,9 +59,9 @@ export interface GmPromptInput {
   detours: readonly GmDetourOption[];
 }
 
-function renderNpcs(npcs: readonly IntentNpcPresent[]): string {
+function renderNpcs(npcs: readonly GmNpcPresent[]): string {
   const lines = npcs.map(
-    (npc) => `- ${npc.nameEnglish} (${npc.nameHebrew}): ${npc.descriptionEnglish}`,
+    (npc) => `- ${npc.npcId} — ${npc.nameEnglish} (${npc.nameHebrew}): ${npc.descriptionEnglish}`,
   );
   return ["NPCS PRESENT", ...lines].join("\n");
 }
