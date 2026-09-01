@@ -2218,7 +2218,27 @@ export async function* handleCommand(
             // since `emitAll` returns no sequence of its own.
             const completedSequence = campaign.nextSequence;
 
-            yield* emitAll(sceneEvents);
+            // Not a plain `yield*`. The bracket is appended AND folded with
+            // the rest of the group — atomicity above, and `gmStep`'s own
+            // open-bracket guard reads `campaign.state.encounter` a few lines
+            // below — but its FRAME is the thing that flips the client onto
+            // the combat board, and delivering that before the arrival
+            // narration has streamed a single token leaves the player
+            // watching a fight appear out of nowhere and only then reading
+            // the line that was supposed to walk them into it (live
+            // playtesting: "it felt completely random, where did the goblins
+            // come from?"). So the one frame is held here and yielded after
+            // `sceneNarrate` below. Frame ORDER only: the single append, the
+            // fold, the snapshot cadence and the event log's own sequence are
+            // all exactly what they were.
+            const bracketFrames: ServerFrame[] = [];
+            for await (const frame of emitAll(sceneEvents)) {
+              if (frame.type === "event" && frame.event.type === "encounter_started") {
+                bracketFrames.push(frame);
+              } else {
+                yield frame;
+              }
+            }
 
             // `emitAll` moves `campaign.state` but never `built` — the
             // fourth-writer hazard `Campaign.built`'s doc comment names. Set
@@ -2249,6 +2269,14 @@ export async function* handleCommand(
                 : { kind: "arrived", locationNameHebrew: card.locationNameHebrew },
               deadline,
             );
+
+            // The bracket frame held back above, released now that the beat
+            // leading into the ambush has streamed. Before `playerAffordances`
+            // at the end of this case, not after: those affordances are the
+            // hero's combat turn on the very board this frame carries, so a
+            // client handed the turn before the board has nothing to render
+            // it on.
+            yield* bracketFrames;
 
             // Fire-and-forget, not `await`ed: `indexEpisode` needs nothing
             // from `sceneNarrate` (the summary it writes is already durable
@@ -2297,10 +2325,11 @@ export async function* handleCommand(
               },
             });
 
-            // For symmetry with `structured_action`'s ending — out of combat
-            // (guaranteed by guard 2 above) this yields nothing; the
-            // client's input re-enables on the `narrative_emitted` fold
-            // instead.
+            // For symmetry with `structured_action`'s ending. On a turn that
+            // opened no bracket this yields nothing and the client's input
+            // re-enables on the `narrative_emitted` fold instead; on one that
+            // DID (the bridge above), it offers the hero's first combat turn
+            // on the board released just above.
             yield* playerAffordances();
             return;
           }

@@ -5,7 +5,7 @@
 // interpolated here (`apps/server/CLAUDE.md`'s injection rule).
 
 /** Bump whenever a prompt string in this file changes; see `INTENT_PROMPT_VERSION`. */
-export const GM_PROMPT_VERSION = "gm-v2";
+export const GM_PROMPT_VERSION = "gm-v3";
 
 export const GM_TOOL_NAME = "propose_move";
 
@@ -28,6 +28,7 @@ Rules you cannot talk your way around:
 - A shift moves ONE band at most. A single conversation nudges how someone feels; it does not turn an enemy into an ally.
 - You cannot heal anyone, move the player along the main story, or start a fight.
 - A proposal that would make part of the authored story unreachable will be refused and nothing will happen. Prefer changes that open things up over changes that shut them down.
+- Everything you write inside the tool call is for the game's own records, never shown to the player: the reason on every proposal, and the text of any fact you have an NPC remember, must be written in English. The player writes Hebrew and the names below are Hebrew; your own words are not.
 - Earning a change should be proportionate. Being polite is not a favour. A player who spends something — time, risk, a secret, a good roll — has earned more than one who says hello.
 
 Reading the turn:

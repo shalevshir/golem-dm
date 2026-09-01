@@ -3309,6 +3309,52 @@ describe("handleCommand — free text: the combat bridge", () => {
     expect(appendSizes).toContain(3);
   });
 
+  // The player's read of the turn, not the store's: the bridge is atomic
+  // with the scene-entry group by design (the test above pins that append),
+  // but the FRAME that opens the bracket is what flips the client into the
+  // combat board, and live playtesting found it arriving before the
+  // narration describing the arrival had streamed a single token — "it felt
+  // completely random, where did the goblins come from?". The atmospheric
+  // beat that leads INTO the ambush must reach the player first; the board
+  // must still reach them before the affordances that address it.
+  it("streams the arrival narration before the bracket reaches the client", async () => {
+    const store = createInMemoryEventStore();
+    const campaign = await sceneCampaign(store, atTheWeir);
+    const ports: TurnPorts = {
+      ...portsWith(store),
+      intent: classifiedAs({ category: "exploration", targetNodeId: "saboteurs" }),
+      sceneNarrative: scriptedSceneNarrative(["השער ", "פרוץ."]),
+    };
+
+    const frames = await drain(
+      handleCommand(
+        campaign,
+        { type: "free_text", clientMessageId: "c1", text: "search the forced gate" },
+        ports,
+      ),
+    );
+
+    const kinds = frames.map((each) =>
+      each.type === "event" ? `event:${each.event.type}` : each.type,
+    );
+    const bracketAt = kinds.indexOf("event:encounter_started");
+    const narrationEndsAt = kinds.indexOf("event:narrative_emitted");
+    const lastTokenAt = kinds.lastIndexOf("narrative_token");
+    const affordancesAt = kinds.indexOf("turn_affordances");
+
+    expect(bracketAt).toBeGreaterThan(-1);
+    expect(lastTokenAt).toBeGreaterThan(-1);
+    expect(narrationEndsAt).toBeGreaterThan(-1);
+    // Every narration frame — each streamed token and the closing
+    // `narrative_emitted` alike — lands before the bracket.
+    expect(lastTokenAt).toBeLessThan(bracketAt);
+    expect(narrationEndsAt).toBeLessThan(bracketAt);
+    // And the bracket still lands before the affordances that describe it:
+    // `playerAffordances` offers the hero's combat turn off the very board
+    // this frame carries, so a client told whose turn it is before it has
+    // the board has nothing to render the turn on.
+    expect(affordancesAt).toBeGreaterThan(bracketAt);
+  });
   it("does not open a bracket for a node that declares no encounter", async () => {
     const store = createInMemoryEventStore();
     const campaign = await sceneCampaign(store, {
