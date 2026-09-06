@@ -999,6 +999,65 @@ describe("validateMove — the improvised magnitude ceiling", () => {
     });
     expect(ok.valid).toBe(true);
   });
+
+  // The ceiling is per SUBJECT per move, not per effect: splitting a two-band
+  // swing across two effects is the obvious way around a per-effect check.
+  it("sums repeated shifts on the same npc", () => {
+    const world = loadFixtureWorld();
+    const state = stateOf(startScene(world));
+    const result = validateMove(world, state, {
+      kind: "world",
+      effects: [
+        { kind: "shift_npc_affinity", npcId: "tobin", delta: -1 },
+        { kind: "shift_npc_affinity", npcId: "tobin", delta: -1 },
+      ],
+      reasonEnglish: "split across two effects",
+    });
+    expect(result.valid).toBe(false);
+    if (!result.valid) expect(result.rejections[0]?.subjectId).toBe("tobin");
+  });
+
+  it("folds a faction pair through pairKey, so (a,b) and (b,a) are one subject", () => {
+    const world = loadFixtureWorld();
+    const state = stateOf(startScene(world));
+    const result = validateMove(world, state, {
+      kind: "world",
+      effects: [
+        { kind: "shift_faction_relation", factionA: "guild", factionB: "wardens", delta: 1 },
+        { kind: "shift_faction_relation", factionA: "wardens", factionB: "guild", delta: 1 },
+      ],
+      reasonEnglish: "named both ways round",
+    });
+    expect(result.valid).toBe(false);
+  });
+
+  it("allows one band each on two different subjects", () => {
+    const world = loadFixtureWorld();
+    const state = stateOf(startScene(world));
+    const result = validateMove(world, state, {
+      kind: "world",
+      effects: [
+        { kind: "shift_npc_affinity", npcId: "tobin", delta: 1 },
+        { kind: "shift_faction_relation", factionA: "guild", factionB: "wardens", delta: 1 },
+      ],
+      reasonEnglish: "unrelated subjects",
+    });
+    expect(result.valid).toBe(true);
+  });
+
+  it("allows a shift that nets back to zero", () => {
+    const world = loadFixtureWorld();
+    const state = stateOf(startScene(world));
+    const result = validateMove(world, state, {
+      kind: "world",
+      effects: [
+        { kind: "shift_npc_affinity", npcId: "tobin", delta: 1 },
+        { kind: "shift_npc_affinity", npcId: "tobin", delta: -1 },
+      ],
+      reasonEnglish: "warmed then cooled",
+    });
+    expect(result.valid).toBe(true);
+  });
 });
 
 describe("validateMove — unknown npcId", () => {

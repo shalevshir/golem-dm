@@ -485,7 +485,8 @@ export function availableDetours(world: AuthoredWorld, state: SceneState): reado
 }
 
 /**
- * The improvised ceiling. Authored content keeps `WorldEffect`'s full -6..+6
+ * The improvised ceiling, per subject per move. Authored content keeps
+ * `WorldEffect`'s full -6..+6
  * range — an author declaring "as hostile as this gets" is deliberate — but a
  * model swinging a town from `cold` to `allied` because the player was polite
  * is not. Enforced here rather than in `ImprovisedEffect` so that schema stays
@@ -493,13 +494,39 @@ export function availableDetours(world: AuthoredWorld, state: SceneState): reado
  */
 const MAX_IMPROVISED_DELTA = 1;
 
-function magnitudeRejection(effect: ImprovisedEffect): SceneRejection | null {
-  if (effect.kind !== "shift_faction_relation" && effect.kind !== "shift_npc_affinity") return null;
-  if (Math.abs(effect.delta) <= MAX_IMPROVISED_DELTA) return null;
-  return {
-    reason: "precondition_unmet",
-    message: `an improvised shift may move at most ${String(MAX_IMPROVISED_DELTA)} band, not ${String(effect.delta)}`,
+/**
+ * Summed per subject rather than checked per effect: two `-1` shifts on the
+ * same npc inside one move are a two-band swing, and a per-effect check waves
+ * both through. Faction pairs fold through `pairKey`, so a move naming
+ * (a, b) and (b, a) is one subject and not two.
+ *
+ * A move that shifts the same subject up and back nets to zero and is allowed
+ * — the ceiling is on what the world ends up doing, not on how many effects
+ * the model wrote to get there.
+ */
+function magnitudeRejections(effects: readonly ImprovisedEffect[]): SceneRejection[] {
+  const totals = new Map<string, { delta: number; subjectId?: string }>();
+  const add = (key: string, delta: number, subjectId?: string): void => {
+    const running = totals.get(key);
+    totals.set(key, { delta: (running?.delta ?? 0) + delta, ...(subjectId ? { subjectId } : {}) });
   };
+  for (const effect of effects) {
+    if (effect.kind === "shift_faction_relation") {
+      add(`factions:${pairKey(effect.factionA, effect.factionB)}`, effect.delta);
+    } else if (effect.kind === "shift_npc_affinity") {
+      add(`npc:${effect.npcId}`, effect.delta, effect.npcId);
+    }
+  }
+  const rejections: SceneRejection[] = [];
+  for (const [, total] of totals) {
+    if (Math.abs(total.delta) <= MAX_IMPROVISED_DELTA) continue;
+    rejections.push({
+      reason: "precondition_unmet",
+      message: `an improvised shift may move at most ${String(MAX_IMPROVISED_DELTA)} band, not ${String(total.delta)}`,
+      ...(total.subjectId === undefined ? {} : { subjectId: total.subjectId }),
+    });
+  }
+  return rejections;
 }
 
 /**
@@ -593,9 +620,7 @@ export function validateMove(
       return { valid: true, state };
 
     case "world": {
-      const magnitude = move.effects
-        .map((effect) => magnitudeRejection(effect))
-        .filter((each): each is SceneRejection => each !== null);
+      const magnitude = magnitudeRejections(move.effects);
       if (magnitude.length > 0) return { valid: false, rejections: magnitude };
 
       // Checked before `applyEffect` ever runs, same as the magnitude ceiling
