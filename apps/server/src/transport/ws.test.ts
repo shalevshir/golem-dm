@@ -63,6 +63,9 @@ async function startServer(overrides?: { narrative?: NarrativePort }) {
     intent: {
       classify: () => Promise.reject(new Error("intent.classify not exercised by ws.test.ts")),
     },
+    gm: {
+      propose: () => Promise.reject(new Error("gm.propose not exercised by ws.test.ts")),
+    },
     sceneNarrative: createDeterministicSceneNarrative(),
     episodic: createInMemoryEpisodicStore(),
     embedding: createFakeEmbeddingPort(),

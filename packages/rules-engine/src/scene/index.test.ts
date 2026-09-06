@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   affinityOf,
+  availableDetours,
   availableEdges,
   completeCurrentNode,
   evaluatePredicate,
@@ -9,6 +10,7 @@ import {
   shiftBand,
   startScene,
   traverseEdge,
+  validateMove,
 } from "./index.js";
 import type {
   AuthoredWorld,
@@ -18,12 +20,13 @@ import type {
   SceneState,
   SceneTransition,
 } from "./index.js";
-import { blockedWorld, linearWorld } from "./test-fixtures.js";
+import { blockedWorld, linearWorld, loadFixtureWorld } from "./test-fixtures.js";
 import type { FactionBand } from "@ai-dm/schemas";
 
 function stateWith(relations: readonly (readonly [string, string, FactionBand])[]): SceneState {
   return {
     currentNodeId: "start",
+    detourReturnNodeId: null,
     completedNodeIds: new Set<string>(),
     relations: new Map(relations.map(([a, b, band]) => [pairKey(a, b), band])),
     npcAffinities: new Map(),
@@ -188,6 +191,20 @@ describe("traverseEdge", () => {
     expect(before.currentNodeId).toBe("start");
     expect(before.completedNodeIds.size).toBe(0);
   });
+
+  // Fix 2 (final whole-branch review): `reduce.ts`'s fold clears
+  // `detourReturnNodeId` on a `quest_node_entered` whose payload carries no
+  // pointer — a normal spine traversal resets it for free. The engine's own
+  // `traverseEdge` must match that, or a state coming out of a detour (via
+  // `validateMove`'s `enter_detour`, never through this function itself)
+  // would still read as "on a detour" after a completely ordinary next move,
+  // and wrongly trip `validateMove`'s no-nesting guard.
+  it("clears a stale detourReturnNodeId on an ordinary traversal", () => {
+    const world = linearWorld();
+    const onADetour = { ...stateOf(startScene(world)), detourReturnNodeId: "somewhere-else" };
+    const after = stateOf(traverseEdge(world, onADetour, "middle"));
+    expect(after.detourReturnNodeId).toBeNull();
+  });
 });
 
 describe("completeCurrentNode", () => {
@@ -221,6 +238,7 @@ describe("completeCurrentNode", () => {
             preconditions: [],
             effects: [{ kind: "long_rest" }],
             edges: [],
+            detour: false,
           },
         ],
       ]),
@@ -248,6 +266,7 @@ describe("completeCurrentNode", () => {
             preconditions: [],
             effects: [{ kind: "long_rest" }],
             edges: [],
+            detour: false,
           },
         ],
       ]),
@@ -292,6 +311,7 @@ describe("completeCurrentNode", () => {
               { kind: "shift_faction_relation", factionA: "gamma", factionB: "delta", delta: 1 },
             ],
             edges: [],
+            detour: false,
           },
         ],
       ]),
@@ -323,6 +343,7 @@ describe("completeCurrentNode", () => {
               { kind: "shift_faction_relation", factionA: "alpha", factionB: "beta", delta: -1 },
             ],
             edges: [],
+            detour: false,
           },
         ],
       ]),
@@ -331,6 +352,7 @@ describe("completeCurrentNode", () => {
     // recorded no change to it yet, so the pair is absent from the state.
     const partial: SceneState = {
       currentNodeId: "solo",
+      detourReturnNodeId: null,
       completedNodeIds: new Set<string>(),
       relations: new Map(),
       npcAffinities: new Map(),
@@ -371,6 +393,7 @@ describe("completeCurrentNode", () => {
               { kind: "shift_faction_relation", factionA: "alpha", factionB: "beta", delta: -4 },
             ],
             edges: [],
+            detour: false,
           },
         ],
       ]),
@@ -389,6 +412,7 @@ describe("completeCurrentNode", () => {
     const world = linearWorld();
     const stranded: SceneState = {
       currentNodeId: "middle",
+      detourReturnNodeId: null,
       completedNodeIds: new Set<string>(),
       relations: world.relations,
       npcAffinities: new Map(),
@@ -420,6 +444,7 @@ describe("completeCurrentNode", () => {
             preconditions: [],
             effects: [{ kind: "shift_npc_affinity", npcId: "sela-the-innkeeper", delta: 1 }],
             edges: [],
+            detour: false,
           },
         ],
       ]),
@@ -450,6 +475,7 @@ describe("completeCurrentNode", () => {
               },
             ],
             edges: [],
+            detour: false,
           },
         ],
       ]),
@@ -480,6 +506,7 @@ describe("completeCurrentNode", () => {
               { kind: "add_npc_fact", npcId: "sela-the-innkeeper", fact: "second fact" },
             ],
             edges: [],
+            detour: false,
           },
         ],
       ]),
@@ -504,6 +531,7 @@ describe("completeCurrentNode", () => {
             preconditions: [],
             effects: [{ kind: "shift_npc_affinity", npcId: "sela-the-innkeeper", delta: 1 }],
             edges: [],
+            detour: false,
           },
         ],
       ]),
@@ -573,6 +601,7 @@ describe("evaluatePredicate", () => {
   const world = linearWorld();
   const state: SceneState = {
     currentNodeId: "start",
+    detourReturnNodeId: null,
     completedNodeIds: new Set<string>(),
     relations: new Map([[pairKey("alpha", "beta"), "hostile"]]),
     npcAffinities: new Map(),
@@ -728,6 +757,7 @@ describe("refusing a traversal", () => {
             ],
             effects: [],
             edges: [],
+            detour: false,
           },
         ],
       ]),
@@ -783,6 +813,7 @@ describe("startScene on a world it cannot open", () => {
             preconditions: [{ kind: "node_completed", nodeId: "start" }],
             effects: [],
             edges: [],
+            detour: false,
           },
         ],
       ]),
@@ -810,6 +841,7 @@ describe("acting from a state whose current node does not exist", () => {
   function ghostState(): SceneState {
     return {
       currentNodeId: "ghost",
+      detourReturnNodeId: null,
       completedNodeIds: new Set<string>(),
       relations: new Map(),
       npcAffinities: new Map(),
@@ -851,5 +883,249 @@ describe("acting from a state whose current node does not exist", () => {
     let state = stateOf(traverseEdge(world, stateOf(startScene(world)), "middle"));
     state = stateOf(traverseEdge(world, state, "end"));
     expect(edgesOf(availableEdges(world, state))).toEqual([]);
+  });
+});
+
+describe("validateMove — none", () => {
+  it("is a true no-op", () => {
+    const world = loadFixtureWorld();
+    const state = stateOf(startScene(world));
+    const result = validateMove(world, state, { kind: "none" });
+    expect(result.valid).toBe(true);
+    if (result.valid) expect(result.state).toEqual(state);
+  });
+});
+
+describe("validateMove — the door guard", () => {
+  // The shipped arc's own shape: reckoning gates on ashen-guild/river-wardens
+  // >= hostile, and hostile is the LOWEST band reachable before it. One
+  // improvised -1 would make the arc's ending permanently unenterable.
+  it("refuses a shift that closes a currently-open precondition on an uncompleted node", () => {
+    const world = loadFixtureWorld();
+    const state = {
+      ...stateOf(startScene(world)),
+      relations: new Map([[pairKey("guild", "wardens"), "hostile" as const]]),
+    };
+    const result = validateMove(world, state, {
+      kind: "world",
+      effects: [
+        { kind: "shift_faction_relation", factionA: "guild", factionB: "wardens", delta: -1 },
+      ],
+      reasonEnglish: "the player sided loudly with the kilns",
+    });
+    expect(result.valid).toBe(false);
+    if (!result.valid) expect(result.rejections[0]?.reason).toBe("would_close_door");
+  });
+
+  it("allows a shift that OPENS a gate — improvisation may make the world more reachable", () => {
+    const world = loadFixtureWorld();
+    const state = {
+      ...stateOf(startScene(world)),
+      relations: new Map([[pairKey("guild", "wardens"), "war" as const]]),
+    };
+    const result = validateMove(world, state, {
+      kind: "world",
+      effects: [
+        { kind: "shift_faction_relation", factionA: "guild", factionB: "wardens", delta: 1 },
+      ],
+      reasonEnglish: "the player talked them down",
+    });
+    expect(result.valid).toBe(true);
+  });
+
+  it("ignores preconditions on nodes already completed", () => {
+    const world = loadFixtureWorld();
+    const base = stateOf(startScene(world));
+    const state = {
+      ...base,
+      completedNodeIds: new Set([...base.completedNodeIds, "gated"]),
+      relations: new Map([[pairKey("guild", "wardens"), "hostile" as const]]),
+    };
+    const result = validateMove(world, state, {
+      kind: "world",
+      effects: [
+        { kind: "shift_faction_relation", factionA: "guild", factionB: "wardens", delta: -1 },
+      ],
+      reasonEnglish: "no longer matters",
+    });
+    expect(result.valid).toBe(true);
+  });
+
+  it("refuses the WHOLE move when only one of two effects would close a door", () => {
+    const world = loadFixtureWorld();
+    const state = {
+      ...stateOf(startScene(world)),
+      relations: new Map([[pairKey("guild", "wardens"), "hostile" as const]]),
+    };
+    const result = validateMove(world, state, {
+      kind: "world",
+      effects: [
+        { kind: "add_npc_fact", npcId: "tobin", fact: "was thanked" },
+        { kind: "shift_faction_relation", factionA: "guild", factionB: "wardens", delta: -1 },
+      ],
+      reasonEnglish: "mixed",
+    });
+    expect(result.valid).toBe(false);
+  });
+});
+
+describe("validateMove — the improvised magnitude ceiling", () => {
+  it("refuses |delta| > 1 on a faction shift", () => {
+    const world = loadFixtureWorld();
+    const state = stateOf(startScene(world));
+    const result = validateMove(world, state, {
+      kind: "world",
+      effects: [
+        { kind: "shift_faction_relation", factionA: "guild", factionB: "wardens", delta: 3 },
+      ],
+      reasonEnglish: "the player was very charming",
+    });
+    expect(result.valid).toBe(false);
+  });
+
+  it("refuses |delta| > 1 on an npc shift, and allows exactly 1", () => {
+    const world = loadFixtureWorld();
+    const state = stateOf(startScene(world));
+    const big = validateMove(world, state, {
+      kind: "world",
+      effects: [{ kind: "shift_npc_affinity", npcId: "tobin", delta: -2 }],
+      reasonEnglish: "r",
+    });
+    expect(big.valid).toBe(false);
+    const ok = validateMove(world, state, {
+      kind: "world",
+      effects: [{ kind: "shift_npc_affinity", npcId: "tobin", delta: 1 }],
+      reasonEnglish: "r",
+    });
+    expect(ok.valid).toBe(true);
+  });
+});
+
+describe("validateMove — unknown npcId", () => {
+  // `loadFixtureWorld()` registers only "tobin" (see its own doc comment).
+  // A model can guess wrong the same way a hand-typed slug can, and nothing
+  // upstream of `validateMove` catches it.
+  it("refuses a shift_npc_affinity naming an npc the world does not have", () => {
+    const world = loadFixtureWorld();
+    const state = stateOf(startScene(world));
+    const result = validateMove(world, state, {
+      kind: "world",
+      effects: [{ kind: "shift_npc_affinity", npcId: "maren_vess", delta: 1 }],
+      reasonEnglish: "the player did Maren a favour",
+    });
+    expect(result.valid).toBe(false);
+    if (!result.valid) {
+      expect(result.rejections[0]?.reason).toBe("no_such_npc");
+      expect(result.rejections[0]?.subjectId).toBe("maren_vess");
+    }
+  });
+
+  it("refuses an add_npc_fact naming an npc the world does not have", () => {
+    const world = loadFixtureWorld();
+    const state = stateOf(startScene(world));
+    const result = validateMove(world, state, {
+      kind: "world",
+      effects: [{ kind: "add_npc_fact", npcId: "maren_vess", fact: "was helped" }],
+      reasonEnglish: "r",
+    });
+    expect(result.valid).toBe(false);
+    if (!result.valid) expect(result.rejections[0]?.reason).toBe("no_such_npc");
+  });
+
+  // Regression guard: the real, registered npcId must still work exactly as
+  // before — this check must not over-refuse.
+  it("still allows a shift naming the real, registered npcId", () => {
+    const world = loadFixtureWorld();
+    const state = stateOf(startScene(world));
+    const result = validateMove(world, state, {
+      kind: "world",
+      effects: [{ kind: "shift_npc_affinity", npcId: "tobin", delta: 1 }],
+      reasonEnglish: "the player helped tobin",
+    });
+    expect(result.valid).toBe(true);
+  });
+});
+
+describe("validateMove — enter_detour", () => {
+  it("enters a detour node and records where to return", () => {
+    const world = loadFixtureWorld();
+    const state = stateOf(startScene(world));
+    const result = validateMove(world, state, {
+      kind: "enter_detour",
+      nodeId: "side-errand",
+      reasonEnglish: "he asked for help",
+    });
+    expect(result.valid).toBe(true);
+    if (result.valid) {
+      expect(result.state.currentNodeId).toBe("side-errand");
+      expect(result.state.detourReturnNodeId).toBe(state.currentNodeId);
+    }
+  });
+
+  it("refuses a node that is not marked detour — the GM tier cannot jump the spine", () => {
+    const world = loadFixtureWorld();
+    const state = stateOf(startScene(world));
+    const result = validateMove(world, state, {
+      kind: "enter_detour",
+      nodeId: "gated",
+      reasonEnglish: "skip ahead",
+    });
+    expect(result.valid).toBe(false);
+    if (!result.valid) expect(result.rejections[0]?.reason).toBe("not_a_detour");
+  });
+
+  it("refuses an unknown node", () => {
+    const world = loadFixtureWorld();
+    const result = validateMove(world, stateOf(startScene(world)), {
+      kind: "enter_detour",
+      nodeId: "no-such-thing",
+      reasonEnglish: "r",
+    });
+    expect(result.valid).toBe(false);
+    if (!result.valid) expect(result.rejections[0]?.reason).toBe("no_such_node");
+  });
+
+  it("refuses a detour whose own preconditions are unmet", () => {
+    const world = loadFixtureWorld();
+    const result = validateMove(world, stateOf(startScene(world)), {
+      kind: "enter_detour",
+      nodeId: "gated-detour",
+      reasonEnglish: "r",
+    });
+    expect(result.valid).toBe(false);
+    if (!result.valid) expect(result.rejections[0]?.reason).toBe("precondition_unmet");
+  });
+
+  it("does not nest — no detour from inside a detour", () => {
+    const world = loadFixtureWorld();
+    const inDetour = { ...stateOf(startScene(world)), detourReturnNodeId: "start" };
+    const result = validateMove(world, inDetour, {
+      kind: "enter_detour",
+      nodeId: "side-errand",
+      reasonEnglish: "r",
+    });
+    expect(result.valid).toBe(false);
+  });
+
+  it("does not complete the node being left — a detour is a departure, not a conclusion", () => {
+    const world = loadFixtureWorld();
+    const state = stateOf(startScene(world));
+    const result = validateMove(world, state, {
+      kind: "enter_detour",
+      nodeId: "side-errand",
+      reasonEnglish: "r",
+    });
+    expect(result.valid).toBe(true);
+    if (result.valid) expect(result.state.completedNodeIds.has(state.currentNodeId)).toBe(false);
+  });
+});
+
+describe("availableDetours", () => {
+  it("lists only detour-marked nodes, each with whether it is enterable", () => {
+    const world = loadFixtureWorld();
+    const options = availableDetours(world, stateOf(startScene(world)));
+    expect(options.map((each) => each.node.nodeId).sort()).toEqual(["gated-detour", "side-errand"]);
+    expect(options.find((each) => each.node.nodeId === "side-errand")?.open).toBe(true);
+    expect(options.find((each) => each.node.nodeId === "gated-detour")?.open).toBe(false);
   });
 });

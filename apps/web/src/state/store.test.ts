@@ -37,6 +37,7 @@ const sceneGenesis: CampaignState = {
     scene: {
       worldId: "emberfall",
       currentNodeId: "market-square",
+      detourReturnNodeId: null,
       completedNodeIds: [],
       relations: [],
       npcAffinities: [],

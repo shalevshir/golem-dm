@@ -230,10 +230,20 @@ export function reduce(state: CampaignState, event: GameEvent): CampaignState {
     // world lookup: mechanical, like every branch below it.
     case "quest_node_entered": {
       const scene = sceneOrThrow(state, event);
-      const { nodeId } = QuestNodeEnteredPayload.parse(event.payload);
+      const { nodeId, detourReturnNodeId } = QuestNodeEnteredPayload.parse(event.payload);
       return {
         ...state,
-        world: { ...state.world, scene: { ...scene, currentNodeId: nodeId } },
+        world: {
+          ...state.world,
+          scene: {
+            ...scene,
+            currentNodeId: nodeId,
+            // Absent means "on the spine", so this CLEARS rather than
+            // preserving. A traversal back out of a detour carries no
+            // pointer and therefore resets it with no extra event.
+            detourReturnNodeId: detourReturnNodeId ?? null,
+          },
+        },
       };
     }
 
@@ -309,6 +319,11 @@ export function reduce(state: CampaignState, event: GameEvent): CampaignState {
     // already does: the roll is already resolved by the time this event
     // exists, and the event exists for replay, audit and metrics, not to
     // change `CampaignState`.
+    //
+    // `narrative_move_applied` joins for the same reason `intent_classified`
+    // already does: the move's state change is already carried by the
+    // `world_delta_applied` / `quest_node_entered` events emitted alongside
+    // it, and this event exists purely as the audit record.
     case "campaign_started":
     case "intent_classified":
     case "action_proposed":
@@ -317,6 +332,7 @@ export function reduce(state: CampaignState, event: GameEvent): CampaignState {
     case "dice_rolled":
     case "narrative_emitted":
     case "check_rolled":
+    case "narrative_move_applied":
       return state;
   }
 }

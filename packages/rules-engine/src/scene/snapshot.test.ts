@@ -34,6 +34,20 @@ function stateOf(transition: SceneTransition): SceneState {
   return transition.state;
 }
 
+/** Bare-minimum snapshot: an empty overlay, day 1, full HP. */
+function baseSnapshot(): SceneSnapshot {
+  return {
+    worldId: "fixture",
+    currentNodeId: "start",
+    detourReturnNodeId: null,
+    completedNodeIds: [],
+    relations: [],
+    npcAffinities: [],
+    day: 1,
+    heroHp: 10,
+  };
+}
+
 describe("splitPairKey", () => {
   it("inverts pairKey", () => {
     expect(splitPairKey(pairKey("b", "a"))).toEqual(["a", "b"]);
@@ -45,6 +59,7 @@ describe("round trip: snapshotOf(sceneStateFrom(s))", () => {
     const snapshot: SceneSnapshot = {
       worldId: "fixture",
       currentNodeId: "start",
+      detourReturnNodeId: null,
       completedNodeIds: [],
       relations: [],
       npcAffinities: [],
@@ -64,6 +79,7 @@ describe("round trip: snapshotOf(sceneStateFrom(s))", () => {
     const snapshot: SceneSnapshot = {
       worldId: "fixture",
       currentNodeId: "middle",
+      detourReturnNodeId: null,
       completedNodeIds: ["start"],
       relations: [
         { factionA: "alpha", factionB: "beta", band: "cold" },
@@ -82,6 +98,7 @@ describe("round trip: snapshotOf(sceneStateFrom(s))", () => {
     const snapshot: SceneSnapshot = {
       worldId: "fixture",
       currentNodeId: "end",
+      detourReturnNodeId: null,
       completedNodeIds: ["middle", "start"],
       relations: [{ factionA: "alpha", factionB: "beta", band: "war" }],
       npcAffinities: [],
@@ -97,6 +114,7 @@ describe("round trip: snapshotOf(sceneStateFrom(s))", () => {
     const snapshot: SceneSnapshot = {
       worldId: "fixture",
       currentNodeId: "middle",
+      detourReturnNodeId: null,
       completedNodeIds: ["start"],
       relations: [],
       npcAffinities: [
@@ -114,6 +132,7 @@ describe("round trip: snapshotOf(sceneStateFrom(s))", () => {
   it("snapshotOf emits relations and completedNodeIds already sorted", () => {
     const state: SceneState = {
       currentNodeId: "end",
+      detourReturnNodeId: null,
       completedNodeIds: new Set(["zeta", "alpha"]),
       relations: new Map([
         [pairKey("zulu", "yankee"), "friendly"],
@@ -147,6 +166,7 @@ describe("sceneStateFrom", () => {
     const snapshot: SceneSnapshot = {
       worldId: "fixture",
       currentNodeId: "start",
+      detourReturnNodeId: null,
       completedNodeIds: [],
       relations: [{ factionA: "raiders", factionB: "millers", band: "hostile" }],
       npcAffinities: [],
@@ -241,6 +261,7 @@ describe("diffScene", () => {
               { kind: "shift_npc_affinity" as const, npcId: "sela-the-innkeeper", delta: 1 },
             ],
             edges: [],
+            detour: false,
           },
         ],
       ]),
@@ -299,6 +320,7 @@ describe("diffScene", () => {
               { kind: "shift_npc_affinity" as const, npcId: "sela-the-innkeeper", delta: 1 },
             ],
             edges: [{ to: "npc-node-2", labelEnglish: "Talk again", labelHebrew: "לדבר שוב" }],
+            detour: false,
           },
         ],
         [
@@ -313,6 +335,7 @@ describe("diffScene", () => {
               { kind: "shift_npc_affinity" as const, npcId: "sela-the-innkeeper", delta: 0 },
             ],
             edges: [],
+            detour: false,
           },
         ],
       ]),
@@ -322,5 +345,22 @@ describe("diffScene", () => {
     const before = stateOf(traverseEdge(npcWorld, touched, "npc-node-2"));
     const after = stateOf(completeCurrentNode(npcWorld, before));
     expect(diffScene(before, after).npcAffinities).toEqual([]);
+  });
+});
+
+describe("detourReturnNodeId round-trips", () => {
+  it("survives sceneStateFrom -> snapshotOf unchanged", () => {
+    const snapshot = { ...baseSnapshot(), detourReturnNodeId: "the-weir" };
+    expect(snapshotOf(sceneStateFrom(snapshot), snapshot.worldId).detourReturnNodeId).toBe(
+      "the-weir",
+    );
+  });
+
+  it("is diffed only when it changes, and null is a real value not an absence", () => {
+    const before = { ...sceneStateFrom(baseSnapshot()), detourReturnNodeId: null };
+    const entered = { ...before, detourReturnNodeId: "the-weir" };
+    expect(diffScene(before, entered).detourReturnNodeId).toBe("the-weir");
+    expect(diffScene(entered, before).detourReturnNodeId).toBeNull();
+    expect("detourReturnNodeId" in diffScene(before, before)).toBe(false);
   });
 });

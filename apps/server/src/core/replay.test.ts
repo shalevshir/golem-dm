@@ -96,6 +96,20 @@ function portsWith(store: EventStore): TurnPorts {
     intent: {
       classify: () => Promise.reject(new Error("intent.classify not exercised by replay.test.ts")),
     },
+    // Unlike `intent` above, `gmStep` (`pipeline.ts`) runs on EVERY
+    // `free_text` category regardless of what `intent` returns, so this
+    // file's scene replay-equivalence property does reach it — a real
+    // always-resolving `{ kind: "none" }` double, not a rejecting one.
+    gm: {
+      propose: () =>
+        Promise.resolve({
+          ok: true,
+          move: { kind: "none" },
+          provider: "test",
+          modelId: "test",
+          usage: [],
+        }),
+    },
     sceneNarrative: createDeterministicSceneNarrative(),
     episodic: createInMemoryEpisodicStore(),
     embedding: createFakeEmbeddingPort(),

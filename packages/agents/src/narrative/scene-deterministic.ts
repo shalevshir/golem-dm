@@ -20,6 +20,7 @@ const FORMS: Readonly<Record<string, GenderedForms>> = {
   concludes: { masculine: "מסיים", feminine: "מסיימת" },
   succeeds: { masculine: "מצליח", feminine: "מצליחה" },
   fails: { masculine: "נכשל", feminine: "נכשלת" },
+  onThem: { masculine: "עליו", feminine: "עליה" },
 };
 
 function form(key: string, gender: GrammaticalGender): string {
@@ -44,6 +45,23 @@ function sentenceFor(input: SceneNarrationInput): string {
   switch (beat.kind) {
     case "arrived":
       return `${playerNameHebrew} ${form("arrives", playerGender)} אל ${beat.locationNameHebrew}.`;
+    // Names the attackers, unlike `refused`'s deliberately generic line:
+    // these are Hebrew values off the stat blocks, not English brief text, so
+    // invariant 2 has nothing to object to here — and a fallback rung that
+    // said only "the player arrives" would reproduce the exact bug this beat
+    // exists to fix, on the turn where the provider happened to fail.
+    case "ambushed": {
+      // Deduplication upstream means one stat block is one name, so a
+      // two-goblin ambush reads as a single attacker here and the verb has to
+      // agree with the NAMES, not with the combatant count. Masculine plural
+      // for a group: Hebrew's default for a mixed or unknown-gender set, and
+      // the stat blocks carry no grammatical gender to do better with.
+      const pounces = beat.hostileNamesHebrew.length === 1 ? "מתנפל" : "מתנפלים";
+      return (
+        `${playerNameHebrew} ${form("arrives", playerGender)} אל ${beat.locationNameHebrew}, ` +
+        `ו${beat.hostileNamesHebrew.join(" ו")} ${pounces} ${form("onThem", playerGender)}.`
+      );
+    }
     case "concluded":
       return `${playerNameHebrew} ${form("concludes", playerGender)} את העניין ליד ${beat.locationNameHebrew}.`;
     // Generic on purpose — see the file header. `beat.messages` is never read.

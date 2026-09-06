@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { fold, reduce } from "./reduce.js";
 import { ActionEconomy, Combatant } from "./world.js";
+import { NarrativeMoveAppliedPayload } from "./events.js";
 import type { GameEvent } from "./events.js";
 import type { CampaignState, EncounterState, SceneSnapshot } from "./protocol.js";
 
@@ -25,6 +26,7 @@ const base: CampaignState = {
 const baseScene: SceneSnapshot = {
   worldId: "riverbend",
   currentNodeId: "find-the-trail",
+  detourReturnNodeId: null,
   completedNodeIds: [],
   relations: [{ factionA: "millers", factionB: "raiders", band: "neutral" }],
   npcAffinities: [],
@@ -650,6 +652,7 @@ describe("fold", () => {
     expect(next.world.scene).toEqual({
       worldId: "riverbend",
       currentNodeId: "cross-the-bridge",
+      detourReturnNodeId: null,
       completedNodeIds: ["find-the-trail"],
       relations: [{ factionA: "raiders", factionB: "millers", band: "hostile" }],
       npcAffinities: [],
@@ -718,5 +721,67 @@ describe("reduce — encounter_started with a board", () => {
       payload: { kind: "turn_advanced" },
     });
     expect(advanced.encounter?.currentActorIndex).toBe(1);
+  });
+});
+
+describe("quest_node_entered — the detour return pointer", () => {
+  it("sets the pointer when the payload carries one", () => {
+    const state = withScene({});
+    const after = reduce(
+      state,
+      event(100, "quest_node_entered", {
+        nodeId: "tobins-daughter",
+        detourReturnNodeId: "the-weir",
+      }),
+    );
+    expect(after.world.scene?.currentNodeId).toBe("tobins-daughter");
+    expect(after.world.scene?.detourReturnNodeId).toBe("the-weir");
+  });
+
+  it("clears the pointer when the payload carries none, so a spine traversal resets it", () => {
+    const state = withScene({});
+    const inDetour = reduce(
+      state,
+      event(101, "quest_node_entered", {
+        nodeId: "tobins-daughter",
+        detourReturnNodeId: "the-weir",
+      }),
+    );
+    const back = reduce(inDetour, event(102, "quest_node_entered", { nodeId: "the-weir" }));
+    expect(back.world.scene?.detourReturnNodeId).toBeNull();
+  });
+});
+
+describe("narrative_move_applied", () => {
+  it("is an audit no-op — the state change rides on the events emitted alongside it", () => {
+    const state = withScene({});
+    const next = reduce(
+      state,
+      event(103, "narrative_move_applied", {
+        actorId: "hero",
+        move: {
+          kind: "world",
+          effects: [{ kind: "shift_npc_affinity", npcId: "tobin", delta: 1 }],
+          reasonEnglish: "r",
+        },
+        reasonEnglish: "r",
+        provider: "openai",
+        modelId: "gpt-5.4-nano",
+        promptVersion: "gm-v1",
+      }),
+    );
+    expect(next).toEqual(state);
+  });
+
+  it("parses its payload", () => {
+    const payload = {
+      actorId: "hero",
+      move: { kind: "enter_detour", nodeId: "side-errand", reasonEnglish: "he asked" },
+      reasonEnglish: "he asked",
+      provider: "openai",
+      modelId: "gpt-5.4-nano",
+      promptVersion: "gm-v1",
+    };
+    expect(NarrativeMoveAppliedPayload.parse(payload)).toEqual(payload);
   });
 });

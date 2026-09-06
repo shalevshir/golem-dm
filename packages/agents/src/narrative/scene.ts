@@ -10,7 +10,11 @@ import type { AgentRuntime } from "../providers/runtime.js";
 import type { NarrativeFinish } from "./hebrew.js";
 import { HEBREW_GLOSSARY } from "./prompt-text.js";
 import type { SceneBeat, SceneNarrationInput, SceneNarrativePort } from "./scene-port.js";
-import { SCENE_MEMORY_HEADING, SCENE_PROMPT_VERSION, SCENE_SYSTEM_PROMPT } from "./scene-prompt-text.js";
+import {
+  SCENE_MEMORY_HEADING,
+  SCENE_PROMPT_VERSION,
+  SCENE_SYSTEM_PROMPT,
+} from "./scene-prompt-text.js";
 
 /**
  * The beat as English system material for the dynamic tier. Hebrew fields
@@ -22,6 +26,17 @@ function renderBeat(beat: SceneBeat): string {
   switch (beat.kind) {
     case "arrived":
       return `- arrived: the player reached ${beat.locationNameHebrew}`;
+    // The hostiles ride in the beat (the DYNAMIC tier) rather than in
+    // `semiStatic`'s NPCS PRESENT: they are true for exactly this turn, not
+    // for as long as the campaign stands at the node, so the cached tier
+    // would keep them in the prompt for every later turn of the fight and
+    // its aftermath.
+    case "ambushed":
+      return [
+        `- ambushed: the player reached ${beat.locationNameHebrew} and is attacked there the moment they arrive`,
+        "HOSTILES (attacking right now; name them exactly as written)",
+        ...beat.hostileNamesHebrew.map((name) => `- ${name}`),
+      ].join("\n");
     case "concluded":
       return `- concluded: the player concluded matters at ${beat.locationNameHebrew} without leaving it`;
     case "refused":
@@ -42,7 +57,10 @@ function renderNpcs(npcNamesHebrew: readonly string[]): string {
 }
 
 export function buildScenePrompt(input: SceneNarrationInput): LayeredPrompt {
-  const semiStatic = [`SCENE\n${input.sceneEnglish}`, `PLAYER\nName: ${input.playerNameHebrew}\nGender: ${input.playerGender}`];
+  const semiStatic = [
+    `SCENE\n${input.sceneEnglish}`,
+    `PLAYER\nName: ${input.playerNameHebrew}\nGender: ${input.playerGender}`,
+  ];
 
   // Omitted rather than sent empty: an empty "NPCS PRESENT" section is a line
   // of uncached tokens naming nobody. Mirrors `prompt.ts`'s treatment of
@@ -114,7 +132,9 @@ async function* streamSceneNarration(
   }
 }
 
-export function createHebrewSceneNarrative(options: HebrewSceneNarrativeOptions): SceneNarrativePort {
+export function createHebrewSceneNarrative(
+  options: HebrewSceneNarrativeOptions,
+): SceneNarrativePort {
   return {
     stream(input: SceneNarrationInput): AsyncIterable<string> {
       return streamSceneNarration(options, input);

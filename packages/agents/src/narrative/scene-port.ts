@@ -7,6 +7,15 @@ import type { AbilityKey, GrammaticalGender, Skill } from "@ai-dm/schemas";
 
 export type SceneBeat =
   | { kind: "arrived"; locationNameHebrew: string }
+  // `arrived`'s twin for a node whose entry ALSO opens a combat bracket (the
+  // encounter bridge in `pipeline.ts`). A separate variant rather than a flag
+  // on `arrived`, so every renderer's exhaustive switch is forced to decide
+  // what to do with it: live playtesting found the arrival paragraph
+  // describing a quiet walk up to a gate while a fight was already waiting
+  // one frame later, purely because nothing in the brief had ever mentioned
+  // the ambush. `hostileNamesHebrew` is deduplicated by the caller — two
+  // goblins off one stat block are one name here, not the same word twice.
+  | { kind: "ambushed"; locationNameHebrew: string; hostileNamesHebrew: readonly string[] }
   | { kind: "concluded"; locationNameHebrew: string }
   | { kind: "refused"; messages: readonly string[] }
   | { kind: "check"; ability: AbilityKey; skill?: Skill; success: boolean }

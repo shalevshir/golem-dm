@@ -3,6 +3,7 @@ import { ExecuteTurn } from "./actions.js";
 import { AbilityKey, Skill } from "./character.js";
 import { ContentId, FactionRelationEntry, NpcAffinityEntry } from "./content.js";
 import { CheckDifficulty, IntentClassification } from "./intent.js";
+import { NarrativeMove } from "./narrative-move.js";
 import { Combatant, EntityStatus, GridMap } from "./world.js";
 import { DiceNotation } from "./primitives.js";
 
@@ -21,6 +22,7 @@ export const GameEvent = z.object({
     "scene_changed",
     "campaign_started", "encounter_started", "encounter_resolved",
     "quest_node_entered", "quest_node_completed", "world_delta_applied", "check_rolled",
+    "narrative_move_applied",
   ]),
   /**
    * English machine payload. Hebrew is allowed in exactly two fields:
@@ -308,7 +310,16 @@ export type ActionValidatedPayload = z.infer<typeof ActionValidatedPayload>;
  * is `traverseEdge`'s job in `@ai-dm/rules-engine` (invariant 1). The event
  * log only ever records what the engine already decided.
  */
-export const QuestNodeEnteredPayload = z.object({ nodeId: ContentId });
+export const QuestNodeEnteredPayload = z.object({
+  nodeId: ContentId,
+  /**
+   * Present only when this entry is a validated `enter_detour`. `reduce` sets
+   * `scene.detourReturnNodeId` from it and CLEARS that pointer when it is
+   * absent — which is why a detour needs no event of its own and why an
+   * ordinary spine traversal resets the pointer for free.
+   */
+  detourReturnNodeId: ContentId.optional(),
+});
 export type QuestNodeEnteredPayload = z.infer<typeof QuestNodeEnteredPayload>;
 
 /**
@@ -380,3 +391,30 @@ export const IntentClassifiedPayload = z.object({
   promptVersion: z.string(),
 });
 export type IntentClassifiedPayload = z.infer<typeof IntentClassifiedPayload>;
+
+/**
+ * Payload for `narrative_move_applied`. A **no-op in `reduce`**, exactly like
+ * `intent_classified`: the state change a move produces is already carried by
+ * the `world_delta_applied` / `quest_node_entered` events emitted alongside
+ * it, and this exists purely as the audit record §4.7 asks for — "declared
+ * effects of specific logged choices, with a reason — not a hidden morality
+ * meter."
+ *
+ * `reasonEnglish` is duplicated out of `move` deliberately: it is the field a
+ * human reads when asking "why did my character become this", and burying it
+ * inside a discriminated union means a log reader has to narrow a union to
+ * find it. English, so invariant 2 is untouched.
+ *
+ * A REFUSED move produces no event at all — it is reported through
+ * `MetricsPort.recordGmCall`, the same audit-versus-metrics split
+ * `IntentCallMetrics` already established.
+ */
+export const NarrativeMoveAppliedPayload = z.object({
+  actorId: z.string().min(1),
+  move: NarrativeMove,
+  reasonEnglish: z.string().min(1),
+  provider: z.string().min(1),
+  modelId: z.string().min(1),
+  promptVersion: z.string().min(1),
+});
+export type NarrativeMoveAppliedPayload = z.infer<typeof NarrativeMoveAppliedPayload>;

@@ -11,18 +11,15 @@
 // now executable.
 import { describe, expect, it } from "vitest";
 import {
+  availableDetours,
   availableEdges,
   completeCurrentNode,
   relationBetween,
   startScene,
   traverseEdge,
+  validateMove,
 } from "@ai-dm/rules-engine";
-import type {
-  EdgeOption,
-  SceneOptions,
-  SceneState,
-  SceneTransition,
-} from "@ai-dm/rules-engine";
+import type { EdgeOption, SceneOptions, SceneState, SceneTransition } from "@ai-dm/rules-engine";
 import { loadWorld } from "./index.js";
 
 function stateOf(transition: SceneTransition): SceneState {
@@ -55,10 +52,7 @@ describe("the Emberfall arc", () => {
   it("offers both branches from arrival, both open", () => {
     const world = loadWorld();
     const options = edgesOf(availableEdges(world, stateOf(startScene(world))));
-    expect(options.map((each) => each.edge.to).sort()).toEqual([
-      "guild-offer",
-      "warden-warning",
-    ]);
+    expect(options.map((each) => each.edge.to).sort()).toEqual(["guild-offer", "warden-warning"]);
     expect(options.every((each) => each.open)).toBe(true);
   });
 
@@ -118,9 +112,9 @@ describe("the Emberfall arc", () => {
     const guild = play("guild-offer");
     const warden = play("warden-warning");
     expect(guild.day).not.toBe(warden.day);
-    expect(
-      relationBetween(world, guild, "ashen-guild", "river-wardens"),
-    ).not.toBe(relationBetween(world, warden, "ashen-guild", "river-wardens"));
+    expect(relationBetween(world, guild, "ashen-guild", "river-wardens")).not.toBe(
+      relationBetween(world, warden, "ashen-guild", "river-wardens"),
+    );
   });
 
   // reckoning's gate asks for at least `hostile`, and `hostile` is the LOWEST
@@ -138,5 +132,90 @@ describe("the Emberfall arc", () => {
       expect(options).toHaveLength(1);
       expect(options[0]?.open).toBe(true);
     }
+  });
+
+  it("has exactly two detours, neither of them targeted by an authored edge", () => {
+    const world = loadWorld();
+    const detours = Array.from(world.questNodes.values()).filter((node) => node.detour);
+    expect(detours.map((node) => node.nodeId).sort()).toEqual([
+      "after-the-reckoning",
+      "tobins-errand",
+    ]);
+    const targeted = new Set(
+      Array.from(world.questNodes.values()).flatMap((node) => node.edges.map((edge) => edge.to)),
+    );
+    for (const detour of detours) expect(targeted.has(detour.nodeId)).toBe(false);
+  });
+
+  // The half of the problem this step exists for: before it, a concluded arc
+  // had nowhere left to go.
+  it("offers a detour once the arc has concluded", () => {
+    const world = loadWorld();
+    let state = stateOf(traverseEdge(world, stateOf(startScene(world)), "guild-offer"));
+    state = stateOf(traverseEdge(world, state, "the-weir"));
+    state = stateOf(traverseEdge(world, state, "saboteurs"));
+    state = stateOf(traverseEdge(world, state, "reckoning"));
+    state = stateOf(completeCurrentNode(world, state));
+    expect(availableEdges(world, state)).toEqual({ valid: true, edges: [] });
+    const open = availableDetours(world, state).filter((each) => each.open);
+    expect(open.map((each) => each.node.nodeId)).toContain("after-the-reckoning");
+  });
+
+  // Regression: `tobins-errand` originally had no precondition, so it was
+  // enterable straight from `arrival` — before the player had taken either
+  // branch, and before `the-weir` (whose own precondition only checks
+  // `arrival`) was reachable any other way. That let a detour visit stand in
+  // for the branch choice, and its one edge back required `the-weir`
+  // completed, which a turn-one entrant could never satisfy — a permanent
+  // soft-lock. Gating `tobins-errand` on `the-weir` itself closes both holes.
+  it("keeps tobins-errand closed until the-weir is completed", () => {
+    const world = loadWorld();
+    const startState = stateOf(startScene(world));
+    expect(
+      availableDetours(world, startState).find((each) => each.node.nodeId === "tobins-errand")
+        ?.open,
+    ).toBe(false);
+
+    let state = stateOf(traverseEdge(world, startState, "guild-offer"));
+    state = stateOf(traverseEdge(world, state, "the-weir"));
+    state = stateOf(completeCurrentNode(world, state));
+    const open = availableDetours(world, state).filter((each) => each.open);
+    expect(open.map((each) => each.node.nodeId)).toContain("tobins-errand");
+  });
+
+  it("keeps every detour's own effects inside the improvised vocabulary's spirit", () => {
+    const world = loadWorld();
+    for (const node of Array.from(world.questNodes.values()).filter((each) => each.detour)) {
+      expect(node.encounterId).toBeUndefined();
+    }
+  });
+
+  // The spec's own motivating example for the door guard: `guild-offer`
+  // shifts ashen-guild/river-wardens from `cold` to exactly `hostile`, which
+  // is precisely what `reckoning`'s gate demands — zero margin. Nothing else
+  // in this file calls `validateMove`, so nothing else protects the real
+  // content this guard exists for.
+  it("the door guard protects reckoning's real zero-margin gate", () => {
+    const world = loadWorld();
+    // `guild-offer`'s own effect does not apply until it is COMPLETED — i.e.
+    // on leaving it for `the-weir` (see "plays the guild branch to day 4 and
+    // neutral" above) — so the band is only actually `hostile`, the exact
+    // floor `reckoning` requires, once this second traversal has happened.
+    let state = stateOf(traverseEdge(world, stateOf(startScene(world)), "guild-offer"));
+    state = stateOf(traverseEdge(world, state, "the-weir"));
+    const result = validateMove(world, state, {
+      kind: "world",
+      effects: [
+        {
+          kind: "shift_faction_relation",
+          factionA: "ashen-guild",
+          factionB: "river-wardens",
+          delta: -1,
+        },
+      ],
+      reasonEnglish: "the player sided loudly with the kilns",
+    });
+    expect(result.valid).toBe(false);
+    if (!result.valid) expect(result.rejections[0]?.reason).toBe("would_close_door");
   });
 });

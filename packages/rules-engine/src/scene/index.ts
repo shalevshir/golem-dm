@@ -13,6 +13,8 @@
 import { FACTION_BANDS } from "@ai-dm/schemas";
 import type {
   FactionBand,
+  ImprovisedEffect,
+  NarrativeMove,
   QuestEdge,
   QuestNode,
   WorldEffect,
@@ -36,6 +38,8 @@ export * from "./snapshot.js";
  */
 export interface SceneState {
   readonly currentNodeId: string;
+  /** The node to return to on leaving a detour; `null` on the spine. */
+  readonly detourReturnNodeId: string | null;
   readonly completedNodeIds: ReadonlySet<string>;
   /** Keyed by `pairKey`. */
   readonly relations: ReadonlyMap<string, FactionBand>;
@@ -146,7 +150,13 @@ export function evaluatePredicate(
   }
 }
 
-export type SceneRejectionReason = "no_such_node" | "no_such_edge" | "precondition_unmet";
+export type SceneRejectionReason =
+  | "no_such_node"
+  | "no_such_edge"
+  | "precondition_unmet"
+  | "would_close_door"
+  | "not_a_detour"
+  | "no_such_npc";
 
 export interface SceneRejection {
   reason: SceneRejectionReason;
@@ -236,11 +246,14 @@ function describePredicate(predicate: WorldPredicate): string {
  * One declared world change, applied. Same exhaustiveness contract as
  * `evaluatePredicate`.
  *
- * Deliberately NOT exported. An effect is reachable only through a node
- * completing, which is what keeps invariant 1 intact one level above combat:
- * nothing can shift a faction band by asking. It is fully exercised through
- * `traverseEdge` and `completeCurrentNode`, which is a stronger test than
- * calling it directly would be.
+ * Deliberately NOT exported. An effect is reachable only two ways: a node
+ * completing, or a `validateMove` "world" move the door guard and magnitude
+ * ceiling have already adjudicated — never by a caller asking directly. That
+ * second path is what keeps invariant 1 intact one level above combat: a
+ * model can shift a faction band, but only within the ceiling `validateMove`
+ * enforces and never by closing a door `closedDoors` finds open. It is fully
+ * exercised through `traverseEdge`, `completeCurrentNode`, and `validateMove`,
+ * which is a stronger test than calling it directly would be.
  *
  * It takes `world` because a shift starts from the band `relationBetween`
  * reports, which is the authored relation overlaid by the state rather than
@@ -330,6 +343,7 @@ function completed(
 export function startScene(world: AuthoredWorld): SceneTransition {
   const state: SceneState = {
     currentNodeId: world.startingNodeId,
+    detourReturnNodeId: null,
     completedNodeIds: new Set<string>(),
     relations: world.relations,
     npcAffinities: new Map(),
@@ -407,7 +421,7 @@ export function traverseEdge(
   const after = completed(world, current, state, heroMaxHp);
   const rejections = entryRejections(world, after, to);
   if (rejections.length > 0) return { valid: false, rejections };
-  return { valid: true, state: { ...after, currentNodeId: to } };
+  return { valid: true, state: { ...after, currentNodeId: to, detourReturnNodeId: null } };
 }
 
 /**
@@ -441,4 +455,219 @@ export function completeCurrentNode(
   const rejections = entryRejections(world, state, state.currentNodeId);
   if (rejections.length > 0) return { valid: false, rejections };
   return { valid: true, state: completed(world, current, state, heroMaxHp) };
+}
+
+export interface DetourOption {
+  node: QuestNode;
+  /** True exactly when `validateMove`'s `enter_detour` to this node would succeed. */
+  open: boolean;
+  /** Empty when `open`. Why not, otherwise. */
+  rejections: readonly SceneRejection[];
+}
+
+/**
+ * Every detour-marked node in the world, each with whether it can be entered
+ * right now. What the GM tier's prompt is built from — the engine enumerates
+ * the legal reach and the model picks from it, the same contract
+ * `availableEdges` gives the intent router.
+ *
+ * Detours are world-wide rather than per-node: a detour has no authored
+ * inbound edge, so there is no "out of here" relation to filter by. Its own
+ * preconditions are the whole gate.
+ */
+export function availableDetours(world: AuthoredWorld, state: SceneState): readonly DetourOption[] {
+  return Array.from(world.questNodes.values())
+    .filter((node) => node.detour)
+    .map((node) => {
+      const rejections = entryRejections(world, state, node.nodeId);
+      return { node, open: rejections.length === 0, rejections };
+    });
+}
+
+/**
+ * The improvised ceiling. Authored content keeps `WorldEffect`'s full -6..+6
+ * range — an author declaring "as hostile as this gets" is deliberate — but a
+ * model swinging a town from `cold` to `allied` because the player was polite
+ * is not. Enforced here rather than in `ImprovisedEffect` so that schema stays
+ * a pure subset of `WorldEffect` with no divergent bound to keep in sync.
+ */
+const MAX_IMPROVISED_DELTA = 1;
+
+function magnitudeRejection(effect: ImprovisedEffect): SceneRejection | null {
+  if (effect.kind !== "shift_faction_relation" && effect.kind !== "shift_npc_affinity") return null;
+  if (Math.abs(effect.delta) <= MAX_IMPROVISED_DELTA) return null;
+  return {
+    reason: "precondition_unmet",
+    message: `an improvised shift may move at most ${String(MAX_IMPROVISED_DELTA)} band, not ${String(effect.delta)}`,
+  };
+}
+
+/**
+ * A model proposing `shift_npc_affinity`/`add_npc_fact` names an npcId by
+ * hand — nothing upstream guarantees it is real. Authored content has no
+ * equivalent check (`applyEffect`'s `affinityOf` fallback tolerates an
+ * unknown id on purpose, per its own comment), but a human author's typo is
+ * caught by review; a model's is not. This is what would have caught
+ * `npcId: "maren_vess"` (underscore) when the real id is `maren-vess`
+ * (hyphenated) — silently accepted before this check existed, writing a
+ * phantom affinity record nothing else in the game will ever read.
+ */
+function unknownNpcRejection(world: AuthoredWorld, effect: ImprovisedEffect): SceneRejection | null {
+  if (effect.kind !== "shift_npc_affinity" && effect.kind !== "add_npc_fact") return null;
+  if (world.npcs.has(effect.npcId)) return null;
+  return {
+    reason: "no_such_npc",
+    message: `no npc "${effect.npcId}"`,
+    subjectId: effect.npcId,
+  };
+}
+
+/**
+ * The door guard, and the whole reason improvisation is safe: **a move may not
+ * close a door that is currently open.**
+ *
+ * For every node not yet completed, a precondition that evaluates `true`
+ * before must still evaluate `true` after. Three properties earn this its
+ * place over a faction-specific rule:
+ *
+ *   - It is written over `evaluatePredicate`, so it covers every
+ *     `WorldPredicate` kind that exists now and every one added later — the
+ *     check-gated traversal the intent-router spec defers included — with no
+ *     change here.
+ *   - It refuses only CLOSING. A gate already shut staying shut is fine, and
+ *     a gate opening is fine. Improvisation may make the world more reachable
+ *     and never less.
+ *   - It knows nothing about the shipped arc, yet makes that arc's
+ *     zero-margin `reckoning` gate structurally unbreakable.
+ *
+ * ponytail: scans ALL uncompleted nodes, not only reachable ones — a node the
+ * player can no longer get to still constrains what may be improvised.
+ * Over-strict, and irrelevant at this graph size; add reachability analysis if
+ * the world ever grows enough for it to bite.
+ *
+ * Called only from `validateMove`'s `world` branch — `enter_detour` changes no
+ * `completedNodeIds` or relation, so it has nothing for this guard to check,
+ * though a future predicate kind that reads scene position would need this
+ * called there too.
+ */
+function closedDoors(
+  world: AuthoredWorld,
+  before: SceneState,
+  after: SceneState,
+): SceneRejection[] {
+  const rejections: SceneRejection[] = [];
+  for (const node of world.questNodes.values()) {
+    if (before.completedNodeIds.has(node.nodeId)) continue;
+    for (const precondition of node.preconditions) {
+      if (!evaluatePredicate(world, before, precondition)) continue;
+      if (evaluatePredicate(world, after, precondition)) continue;
+      rejections.push({
+        reason: "would_close_door",
+        message: `this would make "${node.nodeId}" unreachable: it requires ${describePredicate(precondition)}`,
+        subjectId: node.nodeId,
+      });
+    }
+  }
+  return rejections;
+}
+
+/**
+ * A proposed `NarrativeMove`, adjudicated. The sibling of `traverseEdge` for
+ * a move the authored graph did not enumerate, and the reason invariant 1
+ * survives one level above combat: the GM tier proposes, this decides.
+ *
+ * Refusal is data, never a throw — the caller is a pipeline that degrades to
+ * `{ kind: "none" }` and narrates on, not a retry loop.
+ *
+ * A `world` move is refused as a WHOLE when any effect offends. A partially
+ * applied two-effect move is a state neither the author nor the model asked
+ * for.
+ */
+export function validateMove(
+  world: AuthoredWorld,
+  state: SceneState,
+  move: NarrativeMove,
+): SceneTransition {
+  switch (move.kind) {
+    case "none":
+      return { valid: true, state };
+
+    case "world": {
+      const magnitude = move.effects
+        .map((effect) => magnitudeRejection(effect))
+        .filter((each): each is SceneRejection => each !== null);
+      if (magnitude.length > 0) return { valid: false, rejections: magnitude };
+
+      // Checked before `applyEffect` ever runs, same as the magnitude ceiling
+      // above: an unknown npcId is refused upfront, so a phantom affinity
+      // record is never even transiently created.
+      const unknownNpcs = move.effects
+        .map((effect) => unknownNpcRejection(world, effect))
+        .filter((each): each is SceneRejection => each !== null);
+      if (unknownNpcs.length > 0) return { valid: false, rejections: unknownNpcs };
+
+      // `applyEffect` stays unexported and is reached only from here and from
+      // `completed()`: a move gets no privileged path into world state that a
+      // completing node does not already have.
+      const after = move.effects.reduce<SceneState>(
+        (each, effect) => applyEffect(world, effect, each),
+        state,
+      );
+      const doors = closedDoors(world, state, after);
+      if (doors.length > 0) return { valid: false, rejections: doors };
+      return { valid: true, state: after };
+    }
+
+    case "enter_detour": {
+      // One level, by design. A stack would need its own serialized form and
+      // nothing has asked for one.
+      if (state.detourReturnNodeId !== null) {
+        return {
+          valid: false,
+          rejections: [
+            {
+              reason: "precondition_unmet",
+              message: "already on a detour; detours do not nest",
+              subjectId: move.nodeId,
+            },
+          ],
+        };
+      }
+      const node = world.questNodes.get(move.nodeId);
+      if (node === undefined) {
+        return {
+          valid: false,
+          rejections: [
+            {
+              reason: "no_such_node",
+              message: `no quest node "${move.nodeId}"`,
+              subjectId: move.nodeId,
+            },
+          ],
+        };
+      }
+      if (!node.detour) {
+        return {
+          valid: false,
+          rejections: [
+            {
+              reason: "not_a_detour",
+              message: `"${move.nodeId}" is a spine node and may only be reached by an authored edge`,
+              subjectId: move.nodeId,
+            },
+          ],
+        };
+      }
+      const rejections = entryRejections(world, state, move.nodeId);
+      if (rejections.length > 0) return { valid: false, rejections };
+      // The node being LEFT is deliberately not completed. A detour is a
+      // departure, not a conclusion — the player is expected to come back,
+      // and completing the spine node here would fire its effects early and
+      // let `completed()`'s short-circuit block the real traversal later.
+      return {
+        valid: true,
+        state: { ...state, currentNodeId: move.nodeId, detourReturnNodeId: state.currentNodeId },
+      };
+    }
+  }
 }

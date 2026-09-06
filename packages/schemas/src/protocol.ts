@@ -31,6 +31,13 @@ export const MAX_FREE_TEXT_LENGTH = 500;
 export const SceneSnapshot = z.object({
   worldId: ContentId,
   currentNodeId: ContentId,
+  /**
+   * The node to come back to when the player leaves a detour, or `null` when
+   * they are on the spine. Not optional: `null` is a real value here, and an
+   * absent field would make "on the spine" and "this snapshot predates
+   * detours" the same wire shape.
+   */
+  detourReturnNodeId: ContentId.nullable().default(null),
   completedNodeIds: z.array(ContentId),
   /** Overlay: ONLY pairs a completed node has shifted (absolute bands).
    *  Read through `relationBetween`'s authored baseline, never alone. */
@@ -114,6 +121,7 @@ export function sceneFromGenesis(
   return {
     worldId,
     currentNodeId: startingNodeId,
+    detourReturnNodeId: null,
     completedNodeIds: [],
     relations: [],
     npcAffinities: [],

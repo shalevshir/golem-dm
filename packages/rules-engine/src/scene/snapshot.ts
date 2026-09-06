@@ -27,6 +27,7 @@ import type { SceneState } from "./index.js";
 export function sceneStateFrom(snapshot: SceneSnapshot): SceneState {
   return {
     currentNodeId: snapshot.currentNodeId,
+    detourReturnNodeId: snapshot.detourReturnNodeId,
     completedNodeIds: new Set(snapshot.completedNodeIds),
     relations: new Map(
       snapshot.relations.map((entry) => [pairKey(entry.factionA, entry.factionB), entry.band]),
@@ -59,6 +60,7 @@ export function snapshotOf(state: SceneState, worldId: ContentId): SceneSnapshot
   return {
     worldId,
     currentNodeId: state.currentNodeId,
+    detourReturnNodeId: state.detourReturnNodeId,
     completedNodeIds: Array.from(state.completedNodeIds).sort(),
     relations,
     npcAffinities,
@@ -77,6 +79,7 @@ export interface SceneDelta {
   npcAffinities: NpcAffinityEntry[];
   day?: number;
   heroHp?: number;
+  detourReturnNodeId?: string | null;
 }
 
 /**
@@ -106,5 +109,8 @@ export function diffScene(before: SceneState, after: SceneState): SceneDelta {
   const delta: SceneDelta = { relations, npcAffinities };
   if (after.day !== before.day) delta.day = after.day;
   if (after.heroHp !== before.heroHp) delta.heroHp = after.heroHp;
+  if (after.detourReturnNodeId !== before.detourReturnNodeId) {
+    delta.detourReturnNodeId = after.detourReturnNodeId;
+  }
   return delta;
 }

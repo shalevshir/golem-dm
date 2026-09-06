@@ -11,6 +11,7 @@ import type {
   FactionBand,
   FactionDefinition,
   LocationDefinition,
+  NpcDefinition,
   QuestNode,
 } from "@ai-dm/schemas";
 import { pairKey } from "./authored-world.js";
@@ -32,6 +33,17 @@ function faction(factionId: string): FactionDefinition {
   };
 }
 
+function npc(npcId: string): NpcDefinition {
+  return {
+    npcId,
+    nameEnglish: npcId,
+    nameHebrew: "דמות",
+    grammaticalGender: "masculine",
+    locationId: "here",
+    descriptionEnglish: "A fixture NPC.",
+  };
+}
+
 function node(nodeId: string, rest: Partial<QuestNode> = {}): QuestNode {
   return {
     nodeId,
@@ -41,6 +53,7 @@ function node(nodeId: string, rest: Partial<QuestNode> = {}): QuestNode {
     preconditions: [],
     effects: [],
     edges: [],
+    detour: false,
     ...rest,
   };
 }
@@ -49,6 +62,7 @@ function world(
   nodes: readonly QuestNode[],
   options: {
     relations?: readonly (readonly [string, string, FactionBand])[];
+    npcIds?: readonly string[];
   } = {},
 ): AuthoredWorld {
   const factionIds = new Set(
@@ -60,7 +74,7 @@ function world(
     startingNodeId: nodes[0]?.nodeId ?? "start",
     factions: new Map(Array.from(factionIds, (id) => [id, faction(id)])),
     locations: new Map([["here", HERE]]),
-    npcs: new Map(),
+    npcs: new Map((options.npcIds ?? []).map((id) => [id, npc(id)])),
     questNodes: new Map(nodes.map((each) => [each.nodeId, each])),
     relations: new Map(
       (options.relations ?? []).map(([a, b, band]) => [pairKey(a, b), band]),
@@ -131,5 +145,49 @@ export function blockedWorld(): AuthoredWorld {
       }),
     ],
     { relations: [["alpha", "beta", "hostile"]] },
+  );
+}
+
+/**
+ * The `validateMove`/`availableDetours` fixture (task 4). Mirrors the shipped
+ * arc's own zero-margin shape (per the test file's comment: `reckoning` gates
+ * on >= `hostile`, the lowest band reachable before it) without depending on
+ * it, and adds the one shape neither `linearWorld` nor `blockedWorld` has: a
+ * detour node.
+ *
+ * - `start`: the entry point, gate-free so `startScene` always succeeds.
+ * - `gated`: a SPINE node (not a detour) whose precondition is exactly the
+ *   door the guard tests close and reopen — `guild`/`wardens` >= `hostile`,
+ *   met by the default relation below so it is open out of the box. Left
+ *   uncompleted by default; a test that wants the "already past this door"
+ *   case adds it to `completedNodeIds` itself.
+ * - `side-errand`: a detour with no preconditions — open unconditionally, the
+ *   `availableDetours`/`enter_detour` success case.
+ * - `gated-detour`: a detour gated on a node that is never completed by any
+ *   test — `node_completed` rather than a faction band, so exercising it
+ *   cannot be mistaken for the faction door guard above. Closed unconditionally.
+ *
+ * `tobin` is declared in `world.npcs` for the `add_npc_fact`/
+ * `shift_npc_affinity` test effects to name, even though `applyEffect`'s
+ * `affinityOf` fallback would tolerate an undeclared id — a fixture NPC that
+ * effects reference but the world never declared would be a broken world if
+ * this one ever went through `loadWorld`'s real cross-referencing.
+ */
+export function loadFixtureWorld(): AuthoredWorld {
+  return world(
+    [
+      node("start"),
+      node("gated", {
+        preconditions: [
+          { kind: "faction_band_at_least", factionA: "guild", factionB: "wardens", band: "hostile" },
+        ],
+      }),
+      node("side-errand", { detour: true }),
+      node("gated-detour", {
+        detour: true,
+        preconditions: [{ kind: "node_completed", nodeId: "never-completed" }],
+      }),
+    ],
+    { relations: [["guild", "wardens", "hostile"]], npcIds: ["tobin"] },
   );
 }

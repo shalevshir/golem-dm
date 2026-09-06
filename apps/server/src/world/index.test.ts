@@ -1,3 +1,5 @@
+import { mkdtemp, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { dataDir } from "../encounters/srd.js";
@@ -26,7 +28,7 @@ describe("loadWorld", () => {
     expect(world.factions.size).toBe(2);
     expect(world.locations.size).toBe(1);
     expect(world.npcs.size).toBe(3);
-    expect(world.questNodes.size).toBe(6);
+    expect(world.questNodes.size).toBe(8);
   });
 
   // A relation is an unordered pair: `pairKey` sorts, so asking in either
@@ -165,7 +167,14 @@ describe("loadWorld refusing faction relations", () => {
 
   // The complete set, so a check that starts reporting something extra —
   // or stops reporting something — fails here rather than passing quietly.
-  it("reports exactly these nineteen problems and no others", () => {
+  //
+  // Twenty, not nineteen: `startingNodeId` in this fixture's world.json is
+  // itself the dangling id under test, so it never resolves to "start" — the
+  // fixture's only quest node. That leaves "start" pointed at by no edge and
+  // not the (broken) starting node, which Task 7's orphan check now also
+  // and correctly reports; the fixture is not thereby "more broken", it was
+  // always missing this one, and cross-referencing alone could not see it.
+  it("reports exactly these twenty problems and no others", () => {
     expect(new Set(problemsFrom(BROKEN))).toEqual(
       new Set([
         'duplicate npc id "twin"',
@@ -181,6 +190,7 @@ describe("loadWorld refusing faction relations", () => {
         "quest node start precondition alpha/alpha relates a faction to itself",
         "quest node start effect alpha/alpha relates a faction to itself",
         'quest node start effect references unknown npc "no-such-npc"',
+        "quest node start has no inbound edge and is not a detour",
         'duplicate faction relation for "beta" and "alpha"',
         'faction relation alpha/no-such-faction references unknown faction "no-such-faction"',
         "faction relation gamma/gamma relates a faction to itself",
@@ -220,5 +230,98 @@ describe("loadWorld's start-node check", () => {
 
   it("still loads the authored world", () => {
     expect(loadWorld().startingNodeId).toBe("arrival");
+  });
+});
+
+/**
+ * Minimal valid content for every file `loadWorld` reads, so a test that
+ * cares about only ONE of them — usually `arc.json` — does not have to
+ * spell out a location, a faction list, and an npc list just to get past
+ * the parts of the loader it is not testing. Mirrors the shape of the
+ * on-disk `broken-references` / `unenterable-start` fixtures above, but
+ * built fresh per call instead of checked in, since the tests below shape
+ * their own quest-node graphs.
+ */
+const DEFAULT_FIXTURE_FILES: Record<string, unknown> = {
+  "world.json": {
+    worldId: "fixture",
+    startingDay: 1,
+    startingNodeId: "start",
+    factionRelations: [],
+  },
+  "factions.json": [],
+  "locations.json": [
+    { locationId: "town", nameEnglish: "Town", nameHebrew: "עיר", descriptionEnglish: "A fixture location." },
+  ],
+  "npcs.json": [],
+  "arc.json": [],
+};
+
+/**
+ * Writes a fresh temp directory containing `DEFAULT_FIXTURE_FILES`,
+ * overridden per-file by `files` — typically just `arc.json`, the only
+ * file the tests below need to control. Returns the directory, ready to
+ * pass straight to `loadWorld`.
+ */
+async function fixtureWith(files: Partial<Record<string, unknown>>): Promise<string> {
+  const dir = await mkdtemp(join(tmpdir(), "ai-dm-world-fixture-"));
+  for (const [name, content] of Object.entries({ ...DEFAULT_FIXTURE_FILES, ...files })) {
+    await writeFile(join(dir, name), JSON.stringify(content), "utf8");
+  }
+  return dir;
+}
+
+/**
+ * `loadWorld(dir)` must throw a `WorldContentError` with a problem
+ * CONTAINING `fragment` — not an exact match, since the two checks below
+ * push a fuller sentence than the fragment each test cares about naming.
+ *
+ * Not declared `async`: the check itself is synchronous, and an `async`
+ * function with no `await` inside it fails `require-await`. Returning the
+ * resolved promise directly keeps the `await expectLoadProblem(...)` call
+ * sites — which read naturally alongside the `await fixtureWith(...)` above
+ * them — valid without a no-op `await`.
+ */
+function expectLoadProblem(dir: string, fragment: string): Promise<void> {
+  const problems = problemsFrom(dir);
+  expect(problems.some((problem) => problem.includes(fragment))).toBe(true);
+  return Promise.resolve();
+}
+
+describe("loadWorld's detour checks", () => {
+  it("refuses a spine node nothing can reach — the check the detour marker makes possible", async () => {
+    const dir = await fixtureWith({
+      "arc.json": [
+        { nodeId: "start", titleEnglish: "S", sceneEnglish: "S", locationId: "town", edges: [] },
+        { nodeId: "stranded", titleEnglish: "X", sceneEnglish: "X", locationId: "town" },
+      ],
+    });
+    await expectLoadProblem(dir, "quest node stranded has no inbound edge");
+  });
+
+  it("refuses an authored edge pointing at a detour node", async () => {
+    const dir = await fixtureWith({
+      "arc.json": [
+        {
+          nodeId: "start",
+          titleEnglish: "S",
+          sceneEnglish: "S",
+          locationId: "town",
+          edges: [{ to: "aside", labelEnglish: "L", labelHebrew: "ל" }],
+        },
+        { nodeId: "aside", titleEnglish: "A", sceneEnglish: "A", locationId: "town", detour: true },
+      ],
+    });
+    await expectLoadProblem(dir, 'may not point at detour node "aside"');
+  });
+
+  it("accepts a detour node with no inbound edge", async () => {
+    const dir = await fixtureWith({
+      "arc.json": [
+        { nodeId: "start", titleEnglish: "S", sceneEnglish: "S", locationId: "town", edges: [] },
+        { nodeId: "aside", titleEnglish: "A", sceneEnglish: "A", locationId: "town", detour: true },
+      ],
+    });
+    expect(loadWorld(dir).questNodes.size).toBe(2);
   });
 });

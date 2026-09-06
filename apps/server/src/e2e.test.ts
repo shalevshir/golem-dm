@@ -130,6 +130,19 @@ async function startServer(): Promise<{ app: FastifyInstance; url: string; store
     }),
     narrative: createDeterministicNarrative(),
     intent: walkingIntentAgent(),
+    // `gmStep` (`pipeline.ts`) runs on every `free_text` category regardless
+    // of what `intent` classifies, so the walk test below needs a real
+    // always-resolving `{ kind: "none" }` double, not a rejecting one.
+    gm: {
+      propose: () =>
+        Promise.resolve({
+          ok: true,
+          move: { kind: "none" },
+          provider: "test",
+          modelId: "test",
+          usage: [],
+        }),
+    },
     sceneNarrative: createDeterministicSceneNarrative(),
     episodic: createInMemoryEpisodicStore(),
     embedding: createFakeEmbeddingPort(),

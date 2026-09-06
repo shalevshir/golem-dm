@@ -928,6 +928,7 @@ describe("App (scene mode, out-of-combat free text)", () => {
   const scene = {
     worldId: "emberfall",
     currentNodeId: "market-square",
+    detourReturnNodeId: null,
     completedNodeIds: [],
     relations: [],
     npcAffinities: [],
@@ -1150,6 +1151,7 @@ describe("App (?world= query param)", () => {
   const scene = {
     worldId: "emberfall",
     currentNodeId: "market-square",
+    detourReturnNodeId: null,
     completedNodeIds: [],
     relations: [],
     npcAffinities: [],

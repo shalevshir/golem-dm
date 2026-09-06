@@ -299,6 +299,7 @@ describe("WorldState.scene", () => {
     const scene = {
       worldId: "riverbend",
       currentNodeId: "goblin-camp",
+      detourReturnNodeId: null,
       completedNodeIds: ["find-the-trail"],
       relations: [{ factionA: "town-guard", factionB: "goblin-warband", band: "hostile" }],
       npcAffinities: [],
@@ -329,6 +330,7 @@ describe("sceneFromGenesis", () => {
     expect(scene).toStrictEqual({
       worldId: "riverbend",
       currentNodeId: "find-the-trail",
+      detourReturnNodeId: null,
       completedNodeIds: [],
       relations: [],
       npcAffinities: [],

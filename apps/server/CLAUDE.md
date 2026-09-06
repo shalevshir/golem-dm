@@ -14,7 +14,7 @@ The orchestrator: Fastify + `@fastify/websocket`. Owns the turn pipeline, the ca
 
 ## Latency & resilience requirements
 
-- Time-to-first-narrative-token < 1.5s p50; hard turn timeout 10s with a fallback terse narration from the rule outcome.
+- Time-to-first-narrative-token < 1.5s p50; hard turn timeout 20s with a fallback terse narration from the rule outcome. The cap was 10s while a turn meant one tactical call plus a short combat narration; the `free_text` scene path runs up to four sequential model calls under the same budget (classify → episode summary → GM tier → scene narration), and the narration, being last, inherits only the remainder. Measured 2026-09-01 against the live arc: scene narration alone is 6.7–7.7s, and under 10s roughly half of all narrations were truncated into the seam-and-fallback rung. See the comment on `turnTimeoutMs` in `src/main.ts`.
 - WS reconnect: client sends last seen `sequence`; server replays events since — full campaign restore from log + snapshot. Snapshot every 50 events.
 - The event store is selected in `main.ts` from `DATABASE_URL`: set means Postgres (probed at boot), absent means in-memory with a warning. Both implementations live in `@ai-dm/memory`; `apps/server` never imports a database driver.
 - Instrument per turn per agent: tokens in/out, cached tokens, latency, retries, cost. Emit as structured logs from day one (replaces guessed cost tables with data).

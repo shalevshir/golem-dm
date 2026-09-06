@@ -11,6 +11,8 @@ import {
 import type { AuthoredWorld, SceneState, SceneTransition } from "@ai-dm/rules-engine";
 import type {
   AdapterError,
+  GmAgent,
+  GmResult,
   IntentAgent,
   IntentResult,
   NarrativeFinish,
@@ -34,7 +36,11 @@ import {
   NARRATIVE_PROMPT_VERSION,
   SCENE_PROMPT_VERSION,
 } from "@ai-dm/agents";
-import { createInMemoryEpisodicStore, createInMemoryEventStore, EventStoreUnavailableError } from "@ai-dm/memory";
+import {
+  createInMemoryEpisodicStore,
+  createInMemoryEventStore,
+  EventStoreUnavailableError,
+} from "@ai-dm/memory";
 import type { EpisodicStore, EventStore } from "@ai-dm/memory";
 import {
   CheckRolledPayload,
@@ -49,6 +55,8 @@ import type {
   ExecuteTurn,
   GameEvent,
   IntentClassification,
+  NarrativeMove,
+  NpcDefinition,
   QuestNode,
   SceneSnapshot,
   ServerFrame,
@@ -57,7 +65,9 @@ import type {
 } from "@ai-dm/schemas";
 import { SNAPSHOT_EVERY, handleCommand } from "./pipeline.js";
 import type {
+  GmCallMetrics,
   IntentCallMetrics,
+  MetricsPort,
   NarrativeTurnMetrics,
   SnapshotFailureRecord,
   TacticalTurnMetrics,
@@ -138,12 +148,33 @@ function unreachableIntent(): IntentAgent {
   };
 }
 
+/**
+ * A GM double that always proposes `{ kind: "none" }` — the working default
+ * for every test that does not care about the GM tier specifically. Matches
+ * `gmStep`'s own no-op degradation, so every pre-existing `free_text` test's
+ * event stream is unaffected by the GM tier now running on every turn.
+ */
+function gmNone(): GmAgent {
+  return {
+    propose() {
+      return Promise.resolve({
+        ok: true,
+        move: { kind: "none" },
+        provider: "test",
+        modelId: "test",
+        usage: [],
+      } satisfies GmResult);
+    },
+  };
+}
+
 function portsWith(store: EventStore, tactical: TacticalAgent = defaultTactical()): TurnPorts {
   return {
     store,
     tactical,
     narrative: createDeterministicNarrative(),
     intent: unreachableIntent(),
+    gm: gmNone(),
     // Mirrors `narrative` above: the deterministic renderer stands in as the
     // "primary" port for every test that does not care about the scene
     // narration ladder specifically, exactly the way `createDeterministicNarrative()`
@@ -327,6 +358,13 @@ function eventTypesOf(frames: ServerFrame[]): string[] {
   return frames
     .filter((each): each is Extract<ServerFrame, { type: "event" }> => each.type === "event")
     .map((each) => each.event.type);
+}
+
+/** `eventTypesOf`'s sibling for tests that need a payload, not just a type. */
+function eventsOf(frames: ServerFrame[]): GameEvent[] {
+  return frames
+    .filter((each): each is Extract<ServerFrame, { type: "event" }> => each.type === "event")
+    .map((each) => each.event);
 }
 
 // `clientMessageId` defaults to "c1" for every existing call site; the
@@ -871,6 +909,7 @@ describe("handleCommand — free text", () => {
     const before: SceneSnapshot = {
       worldId: "emberfall",
       currentNodeId: "guild-offer",
+      detourReturnNodeId: null,
       completedNodeIds: ["arrival"],
       relations: [],
       npcAffinities: [],
@@ -972,6 +1011,7 @@ describe("handleCommand — free text", () => {
     const before: SceneSnapshot = {
       worldId: "emberfall",
       currentNodeId: "guild-offer",
+      detourReturnNodeId: null,
       completedNodeIds: ["arrival"],
       relations: [],
       npcAffinities: [],
@@ -1015,6 +1055,7 @@ describe("handleCommand — free text", () => {
     const before: SceneSnapshot = {
       worldId: "emberfall",
       currentNodeId: "saboteurs",
+      detourReturnNodeId: null,
       completedNodeIds: ["arrival", "guild-offer", "the-weir"],
       relations: [{ factionA: "ashen-guild", factionB: "river-wardens", band: "war" }],
       npcAffinities: [],
@@ -1035,7 +1076,11 @@ describe("handleCommand — free text", () => {
       ),
     );
 
-    expect(eventTypesOf(frames)).toEqual(["player_input", "intent_classified", "narrative_emitted"]);
+    expect(eventTypesOf(frames)).toEqual([
+      "player_input",
+      "intent_classified",
+      "narrative_emitted",
+    ]);
     expect(campaign.state.world.scene).toEqual(before);
   });
 
@@ -1054,6 +1099,7 @@ describe("handleCommand — free text", () => {
     const before: SceneSnapshot = {
       worldId: "emberfall",
       currentNodeId: "guild-offer",
+      detourReturnNodeId: null,
       completedNodeIds: ["arrival"],
       relations: [],
       npcAffinities: [],
@@ -1074,7 +1120,11 @@ describe("handleCommand — free text", () => {
       ),
     );
 
-    expect(eventTypesOf(frames)).toEqual(["player_input", "intent_classified", "narrative_emitted"]);
+    expect(eventTypesOf(frames)).toEqual([
+      "player_input",
+      "intent_classified",
+      "narrative_emitted",
+    ]);
     expect(campaign.state.world.scene).toEqual(before);
   });
 
@@ -1085,6 +1135,7 @@ describe("handleCommand — free text", () => {
     const before: SceneSnapshot = {
       worldId: "emberfall",
       currentNodeId: "reckoning",
+      detourReturnNodeId: null,
       completedNodeIds: ["arrival", "guild-offer", "the-weir"],
       relations: [{ factionA: "ashen-guild", factionB: "river-wardens", band: "hostile" }],
       npcAffinities: [],
@@ -1119,6 +1170,7 @@ describe("handleCommand — free text", () => {
     const before: SceneSnapshot = {
       worldId: "emberfall",
       currentNodeId: "reckoning",
+      detourReturnNodeId: null,
       completedNodeIds: ["arrival", "guild-offer", "the-weir"],
       relations: [{ factionA: "ashen-guild", factionB: "river-wardens", band: "hostile" }],
       npcAffinities: [],
@@ -1177,6 +1229,7 @@ describe("handleCommand — free text", () => {
     const before: SceneSnapshot = {
       worldId: "emberfall",
       currentNodeId: "reckoning",
+      detourReturnNodeId: null,
       completedNodeIds: ["arrival", "guild-offer", "the-weir"],
       relations: [{ factionA: "ashen-guild", factionB: "river-wardens", band: "hostile" }],
       npcAffinities: [],
@@ -1245,7 +1298,11 @@ describe("handleCommand — free text", () => {
     expect(embedCalls).toBe(1);
 
     await drain(
-      handleCommand(campaign, { type: "free_text", clientMessageId: "c2", text: "hi again" }, ports),
+      handleCommand(
+        campaign,
+        { type: "free_text", clientMessageId: "c2", text: "hi again" },
+        ports,
+      ),
     );
     // A latched failure would have left `memoriesForNodeId` matching the
     // current node after the first (failed) attempt, skipping this second
@@ -1264,6 +1321,7 @@ describe("handleCommand — free text", () => {
     const before: SceneSnapshot = {
       worldId: "emberfall",
       currentNodeId: "reckoning",
+      detourReturnNodeId: null,
       completedNodeIds: ["arrival", "guild-offer", "the-weir"],
       relations: [{ factionA: "ashen-guild", factionB: "river-wardens", band: "hostile" }],
       npcAffinities: [],
@@ -1286,7 +1344,9 @@ describe("handleCommand — free text", () => {
       ),
     );
 
-    expect(seen.map((each) => each.beat)).toEqual([{ kind: "concluded", locationNameHebrew: "אמברפול" }]);
+    expect(seen.map((each) => each.beat)).toEqual([
+      { kind: "concluded", locationNameHebrew: "אמברפול" },
+    ]);
   });
 
   it("does not re-apply a world delta when re-completing an already-completed node", async () => {
@@ -1294,6 +1354,7 @@ describe("handleCommand — free text", () => {
     const before: SceneSnapshot = {
       worldId: "emberfall",
       currentNodeId: "reckoning",
+      detourReturnNodeId: null,
       completedNodeIds: ["arrival", "guild-offer", "the-weir"],
       relations: [{ factionA: "ashen-guild", factionB: "river-wardens", band: "hostile" }],
       npcAffinities: [],
@@ -1513,7 +1574,11 @@ describe("handleCommand — free text: narrate-only categories", () => {
         ),
       );
 
-      expect(eventTypesOf(frames)).toEqual(["player_input", "intent_classified", "narrative_emitted"]);
+      expect(eventTypesOf(frames)).toEqual([
+        "player_input",
+        "intent_classified",
+        "narrative_emitted",
+      ]);
     },
   );
 
@@ -1630,7 +1695,11 @@ describe("handleCommand — free text: narrate-only categories", () => {
       ),
     );
 
-    expect(eventTypesOf(frames)).toEqual(["player_input", "intent_classified", "narrative_emitted"]);
+    expect(eventTypesOf(frames)).toEqual([
+      "player_input",
+      "intent_classified",
+      "narrative_emitted",
+    ]);
     expect(seen.map((each) => each.beat)).toEqual([{ kind: "reply", category: "combat" }]);
   });
 });
@@ -1656,7 +1725,11 @@ describe("handleCommand — episodic memory", () => {
     expect(embedding.calls).toHaveLength(1);
 
     await drain(
-      handleCommand(campaign, { type: "free_text", clientMessageId: "c2", text: "hello again" }, ports),
+      handleCommand(
+        campaign,
+        { type: "free_text", clientMessageId: "c2", text: "hello again" },
+        ports,
+      ),
     );
     // Still 1: same node, so `campaign.memoriesForNodeId` already matches
     // and `sceneNarrate` must not retrieve a second time.
@@ -1676,7 +1749,11 @@ describe("handleCommand — episodic memory", () => {
     };
 
     await drain(
-      handleCommand(campaign, { type: "free_text", clientMessageId: "c1", text: "hi there" }, ports),
+      handleCommand(
+        campaign,
+        { type: "free_text", clientMessageId: "c1", text: "hi there" },
+        ports,
+      ),
     );
 
     expect(seen[0]?.memoryEnglish).toContain(
@@ -1725,7 +1802,11 @@ describe("handleCommand — episodic memory", () => {
     };
 
     await drain(
-      handleCommand(campaign, { type: "free_text", clientMessageId: "c1", text: "hi there" }, ports),
+      handleCommand(
+        campaign,
+        { type: "free_text", clientMessageId: "c1", text: "hi there" },
+        ports,
+      ),
     );
 
     expect(seen[0]?.memoryEnglish).toContain("Goblins were driven off at the weir.");
@@ -1762,7 +1843,9 @@ describe("handleCommand — free text: schema parsing at emit sites", () => {
     const ports: TurnPorts = { ...portsWith(store), intent: classifiedAs(bogus) };
 
     await expect(
-      drain(handleCommand(campaign, { type: "free_text", clientMessageId: "c1", text: "hello" }, ports)),
+      drain(
+        handleCommand(campaign, { type: "free_text", clientMessageId: "c1", text: "hello" }, ports),
+      ),
     ).rejects.toThrow();
   });
 
@@ -2184,9 +2267,9 @@ describe("handleCommand — snapshot cadence", () => {
     expect(encounterOf(campaign).currentActorIndex).toBe(0);
     // The log is complete past the crossing event: the append half of the
     // turn never depended on the snapshot half.
-    expect((await store.readSince("s1", SNAPSHOT_EVERY - 1)).map((each) => each.sequence)).toContain(
-      SNAPSHOT_EVERY,
-    );
+    expect(
+      (await store.readSince("s1", SNAPSHOT_EVERY - 1)).map((each) => each.sequence),
+    ).toContain(SNAPSHOT_EVERY);
     // Contained, not swallowed: the operator still learns the store rejected
     // a write, exactly once, for the sequence that failed.
     expect(failures.map((each) => each.sequence)).toEqual([SNAPSHOT_EVERY]);
@@ -3226,6 +3309,115 @@ describe("handleCommand — free text: the combat bridge", () => {
     expect(appendSizes).toContain(3);
   });
 
+  // The player's read of the turn, not the store's: the bridge is atomic
+  // with the scene-entry group by design (the test above pins that append),
+  // but the FRAME that opens the bracket is what flips the client into the
+  // combat board, and live playtesting found it arriving before the
+  // narration describing the arrival had streamed a single token — "it felt
+  // completely random, where did the goblins come from?". The atmospheric
+  // beat that leads INTO the ambush must reach the player first; the board
+  // must still reach them before the affordances that address it.
+  it("streams the arrival narration before the bracket reaches the client", async () => {
+    const store = createInMemoryEventStore();
+    const campaign = await sceneCampaign(store, atTheWeir);
+    const ports: TurnPorts = {
+      ...portsWith(store),
+      intent: classifiedAs({ category: "exploration", targetNodeId: "saboteurs" }),
+      sceneNarrative: scriptedSceneNarrative(["השער ", "פרוץ."]),
+    };
+
+    const frames = await drain(
+      handleCommand(
+        campaign,
+        { type: "free_text", clientMessageId: "c1", text: "search the forced gate" },
+        ports,
+      ),
+    );
+
+    const kinds = frames.map((each) =>
+      each.type === "event" ? `event:${each.event.type}` : each.type,
+    );
+    const bracketAt = kinds.indexOf("event:encounter_started");
+    const narrationEndsAt = kinds.indexOf("event:narrative_emitted");
+    const lastTokenAt = kinds.lastIndexOf("narrative_token");
+    const affordancesAt = kinds.indexOf("turn_affordances");
+
+    expect(bracketAt).toBeGreaterThan(-1);
+    expect(lastTokenAt).toBeGreaterThan(-1);
+    expect(narrationEndsAt).toBeGreaterThan(-1);
+    // Every narration frame — each streamed token and the closing
+    // `narrative_emitted` alike — lands before the bracket.
+    expect(lastTokenAt).toBeLessThan(bracketAt);
+    expect(narrationEndsAt).toBeLessThan(bracketAt);
+    // And the bracket still lands before the affordances that describe it:
+    // `playerAffordances` offers the hero's combat turn off the very board
+    // this frame carries, so a client told whose turn it is before it has
+    // the board has nothing to render the turn on.
+    expect(affordancesAt).toBeGreaterThan(bracketAt);
+  });
+  // Ordering alone did not answer the player's actual question. Live
+  // playtesting after the frame-order fix still produced "where did the
+  // goblins come from?", because the beat handed to the narrator was a plain
+  // `arrived` — it named the location and nothing else, and the system
+  // prompt's noun rule forbids naming anyone not in the brief. So the
+  // narration described a calm arrival and the board appeared a frame later
+  // with nothing in the prose connecting them. The bridge must tell the
+  // narrator who is attacking.
+  it("hands the narrator an ambushed beat naming the hostiles, not a bare arrival", async () => {
+    const store = createInMemoryEventStore();
+    const campaign = await sceneCampaign(store, atTheWeir);
+    const briefs: SceneNarrationInput[] = [];
+    const ports: TurnPorts = {
+      ...portsWith(store),
+      intent: classifiedAs({ category: "exploration", targetNodeId: "saboteurs" }),
+      sceneNarrative: recordingSceneNarrative(briefs),
+    };
+
+    await drain(
+      handleCommand(
+        campaign,
+        { type: "free_text", clientMessageId: "c1", text: "search the forced gate" },
+        ports,
+      ),
+    );
+
+    expect(briefs).toHaveLength(1);
+    const beat = briefs[0]?.beat;
+    expect(beat?.kind).toBe("ambushed");
+    if (beat?.kind !== "ambushed")
+      throw new Error(`expected an ambushed beat, got ${String(beat?.kind)}`);
+    // `goblin-ambush` fields two goblins off one stat block: one name, once.
+    expect(beat.hostileNamesHebrew).toHaveLength(1);
+    expect(beat.hostileNamesHebrew[0]).toMatch(/[֐-׿]/);
+    expect(beat.locationNameHebrew).toMatch(/[֐-׿]/);
+  });
+
+  it("keeps a plain arrival beat for a traversal that opens no bracket", async () => {
+    const store = createInMemoryEventStore();
+    const campaign = await sceneCampaign(store, {
+      currentNodeId: "arrival",
+      completedNodeIds: [],
+      relations: [],
+      day: 1,
+    });
+    const briefs: SceneNarrationInput[] = [];
+    const ports: TurnPorts = {
+      ...portsWith(store),
+      intent: classifiedAs({ category: "exploration", targetNodeId: "guild-offer" }),
+      sceneNarrative: recordingSceneNarrative(briefs),
+    };
+
+    await drain(
+      handleCommand(
+        campaign,
+        { type: "free_text", clientMessageId: "c1", text: "hear out the factor" },
+        ports,
+      ),
+    );
+
+    expect(briefs[0]?.beat.kind).toBe("arrived");
+  });
+
   it("does not open a bracket for a node that declares no encounter", async () => {
     const store = createInMemoryEventStore();
     const campaign = await sceneCampaign(store, {
@@ -3384,7 +3576,9 @@ describe("handleCommand — end of combat", () => {
         : { ...each, currentHp: 10 },
     );
 
-    const frames = await drain(handleCommand(campaign, dodge("hero", "c-wounded"), portsWith(store)));
+    const frames = await drain(
+      handleCommand(campaign, dodge("hero", "c-wounded"), portsWith(store)),
+    );
 
     const resolved = frames
       .filter((each): each is Extract<ServerFrame, { type: "event" }> => each.type === "event")
@@ -3411,6 +3605,7 @@ describe("handleCommand — end of combat", () => {
       preconditions: [],
       effects: [{ kind: "long_rest" }],
       edges: [],
+      detour: false,
       encounterId: "goblin-ambush",
     };
     const longRestWorld: AuthoredWorld = {
@@ -3452,9 +3647,7 @@ describe("handleCommand — end of combat", () => {
         : { ...each, currentHp: 10 },
     );
 
-    const frames = await drain(
-      handleCommand(campaign, dodge("hero", "c-heal"), portsWith(store)),
-    );
+    const frames = await drain(handleCommand(campaign, dodge("hero", "c-heal"), portsWith(store)));
 
     expect(eventTypesOf(frames)).toContain("world_delta_applied");
     const resolved = frames
@@ -3558,5 +3751,316 @@ describe("handleCommand — end of combat", () => {
     expect(eventTypesOf(frames)).not.toContain("encounter_resolved");
     expect(campaign.state.encounter).not.toBeNull();
     expect(campaign.built).not.toBeNull();
+  });
+});
+
+/**
+ * A hand-built world for the GM tier's own tests, mirroring the shape of the
+ * `longRestWorld` fixture above rather than `data/world/`'s real Emberfall
+ * content: the real arc authors no `detour: true` node, and this task's
+ * declared files do not include `data/world/arc.json`. Node and NPC ids echo
+ * the real arc's own (`arrival`, `guild-offer`, `old-tobin`, `maren-vess`)
+ * for readability, plus the one shape the real arc lacks — `tobins-errand`,
+ * a detour reachable only through a validated `enter_detour` move.
+ *
+ * - `arrival`: the start, with one authored edge to `guild-offer` — enough
+ *   for the exploration-ordering tests below to traverse the spine.
+ * - `guild-offer`: gated on `arrival` being completed, exactly like the real
+ *   node of the same name.
+ * - `tobins-errand`: a detour, open unconditionally.
+ */
+function gmFixtureWorld(): AuthoredWorld {
+  const here = {
+    locationId: "here",
+    nameEnglish: "Here",
+    nameHebrew: "כאן",
+    descriptionEnglish: "A fixture location.",
+  };
+  const npc = (npcId: string, nameEnglish: string): NpcDefinition => ({
+    npcId,
+    nameEnglish,
+    nameHebrew: nameEnglish,
+    grammaticalGender: "masculine",
+    locationId: "here",
+    descriptionEnglish: `A fixture NPC named ${nameEnglish}.`,
+  });
+  const arrival: QuestNode = {
+    nodeId: "arrival",
+    titleEnglish: "Arrival",
+    sceneEnglish: "A fixture arrival scene.",
+    locationId: "here",
+    preconditions: [],
+    effects: [],
+    edges: [
+      { to: "guild-offer", labelEnglish: "Hear out the guild factor", labelHebrew: "להקשיב" },
+      {
+        to: "ambush-clearing",
+        labelEnglish: "Cut through the clearing",
+        labelHebrew: "לחצות את הקרחת",
+      },
+    ],
+    detour: false,
+  };
+  const guildOffer: QuestNode = {
+    nodeId: "guild-offer",
+    titleEnglish: "The Guild's Offer",
+    sceneEnglish: "A fixture guild-offer scene.",
+    locationId: "here",
+    preconditions: [{ kind: "node_completed", nodeId: "arrival" }],
+    effects: [],
+    edges: [],
+    detour: false,
+  };
+  // A second edge out of `arrival`, distinct from `guild-offer`, that bridges
+  // into a real combat bracket on entry — `guild-offer` itself stays
+  // encounter-free so the existing "runs after an exploration traversal"
+  // tests below (which traverse into `guild-offer` and expect the GM tier to
+  // fire normally) are untouched by Fix 1's guard.
+  const ambushClearing: QuestNode = {
+    nodeId: "ambush-clearing",
+    titleEnglish: "The Ambush Clearing",
+    sceneEnglish: "A fixture scene that bridges into combat.",
+    locationId: "here",
+    preconditions: [],
+    effects: [],
+    edges: [],
+    detour: false,
+    encounterId: "goblin-ambush",
+  };
+  const tobinsErrand: QuestNode = {
+    nodeId: "tobins-errand",
+    titleEnglish: "Tobin's Errand",
+    sceneEnglish: "A fixture detour scene.",
+    locationId: "here",
+    preconditions: [],
+    effects: [],
+    edges: [],
+    detour: true,
+  };
+  return {
+    worldId: "gm-fixture",
+    startingDay: 1,
+    startingNodeId: "arrival",
+    factions: new Map(),
+    locations: new Map([["here", here]]),
+    npcs: new Map([
+      ["old-tobin", npc("old-tobin", "Old Tobin")],
+      ["maren-vess", npc("maren-vess", "Maren Vess")],
+    ]),
+    questNodes: new Map([
+      ["arrival", arrival],
+      ["guild-offer", guildOffer],
+      ["ambush-clearing", ambushClearing],
+      ["tobins-errand", tobinsErrand],
+    ]),
+    relations: new Map(),
+  };
+}
+
+/** A GM double that always proposes `move`. */
+function gmProposing(move: NarrativeMove): GmAgent {
+  return {
+    propose() {
+      return Promise.resolve({
+        ok: true,
+        move,
+        provider: "test-gm-provider",
+        modelId: "test-gm-model",
+        usage: [{ promptTokens: 10, completionTokens: 5, totalTokens: 15 }],
+      } satisfies GmResult);
+    },
+  };
+}
+
+/** A GM double that always fails with `error` — a provider/adapter failure. */
+function gmFailingWith(error: AdapterError): GmAgent {
+  return {
+    propose() {
+      return Promise.resolve({ ok: false, error, usage: [] } satisfies GmResult);
+    },
+  };
+}
+
+/**
+ * The GM tier's own `free_text` harness: a fresh scene campaign on
+ * `gmFixtureWorld()`, an `intent` double resolving to exactly `classification`,
+ * and a `gm` double proposing exactly `move` (or failing with `gmError`, or
+ * defaulting to `{ kind: "none" }` when neither is given). `metrics` is
+ * spliced onto a working `MetricsPort` so a test can supply only the one
+ * method it cares about, `recordGmCall`, without also implementing the two
+ * non-optional ones.
+ */
+async function runFreeText(options: {
+  classification: IntentClassification;
+  move?: NarrativeMove;
+  gmError?: AdapterError;
+  metrics?: Partial<MetricsPort>;
+}): Promise<ServerFrame[]> {
+  const store = createInMemoryEventStore();
+  const campaign = await createCampaign({
+    campaignId: "s1",
+    rootSeed: 42,
+    store,
+    clock: () => "2026-08-19T10:00:00.000Z",
+    uuid: uuids(),
+    scene: { authored: gmFixtureWorld(), character: loadCharacter("hero") },
+  });
+
+  const gm =
+    options.gmError !== undefined
+      ? gmFailingWith(options.gmError)
+      : gmProposing(options.move ?? { kind: "none" });
+
+  const ports: TurnPorts = {
+    ...portsWith(store),
+    intent: classifiedAs(options.classification),
+    gm,
+    ...(options.metrics === undefined
+      ? {}
+      : {
+          metrics: {
+            recordTacticalTurn: () => {},
+            recordNarrativeTurn: () => {},
+            ...options.metrics,
+          },
+        }),
+  };
+
+  return drain(
+    handleCommand(
+      campaign,
+      { type: "free_text", clientMessageId: "c1", text: "test input" },
+      ports,
+    ),
+  );
+}
+
+describe("handleCommand — the GM tier", () => {
+  it("applies an accepted world move as an audit event plus a world delta", async () => {
+    const frames = await runFreeText({
+      classification: { category: "social" },
+      move: {
+        kind: "world",
+        effects: [{ kind: "shift_npc_affinity", npcId: "old-tobin", delta: 1 }],
+        reasonEnglish: "listened to him",
+      },
+    });
+    const types = eventsOf(frames).map((each) => each.type);
+    expect(types).toContain("narrative_move_applied");
+    expect(types).toContain("world_delta_applied");
+  });
+
+  it("emits nothing when the engine refuses the move, and still narrates", async () => {
+    const frames = await runFreeText({
+      classification: { category: "social" },
+      // Three bands: over the improvised ceiling, so validateMove refuses.
+      move: {
+        kind: "world",
+        effects: [{ kind: "shift_npc_affinity", npcId: "old-tobin", delta: 3 }],
+        reasonEnglish: "r",
+      },
+    });
+    expect(eventsOf(frames).map((each) => each.type)).not.toContain("narrative_move_applied");
+    expect(eventsOf(frames).map((each) => each.type)).toContain("narrative_emitted");
+  });
+
+  it("degrades to no move when the GM call fails, without failing the turn", async () => {
+    const frames = await runFreeText({
+      classification: { category: "social" },
+      gmError: { code: "provider_error", message: "boom" },
+    });
+    expect(eventsOf(frames).map((each) => each.type)).not.toContain("narrative_move_applied");
+    expect(frames.some((each) => each.type === "error")).toBe(false);
+    expect(eventsOf(frames).map((each) => each.type)).toContain("narrative_emitted");
+  });
+
+  it("runs after an exploration traversal, against the post-traversal state", async () => {
+    const frames = await runFreeText({
+      classification: { category: "exploration", targetNodeId: "guild-offer" },
+      move: {
+        kind: "world",
+        effects: [{ kind: "add_npc_fact", npcId: "maren-vess", fact: "was watched closely" }],
+        reasonEnglish: "r",
+      },
+    });
+    const types = eventsOf(frames).map((each) => each.type);
+    expect(types.indexOf("quest_node_entered")).toBeLessThan(
+      types.indexOf("narrative_move_applied"),
+    );
+  });
+
+  it("runs on an exploration refusal too, where the traversal did not happen", async () => {
+    const frames = await runFreeText({
+      classification: { category: "exploration", targetNodeId: "no-such-node" },
+      move: {
+        kind: "world",
+        effects: [{ kind: "add_npc_fact", npcId: "maren-vess", fact: "noticed the hesitation" }],
+        reasonEnglish: "r",
+      },
+    });
+    const types = eventsOf(frames).map((each) => each.type);
+    expect(types).not.toContain("quest_node_entered");
+    expect(types).toContain("narrative_move_applied");
+  });
+
+  it("enters a detour and records the return pointer in the fold", async () => {
+    const frames = await runFreeText({
+      classification: { category: "social" },
+      move: { kind: "enter_detour", nodeId: "tobins-errand", reasonEnglish: "he asked for help" },
+    });
+    const entered = eventsOf(frames).find((each) => each.type === "quest_node_entered");
+    expect(entered?.payload).toMatchObject({
+      nodeId: "tobins-errand",
+      detourReturnNodeId: "arrival",
+    });
+  });
+
+  it("reports every GM call to metrics, refusals included", async () => {
+    const records: GmCallMetrics[] = [];
+    await runFreeText({
+      classification: { category: "ooc" },
+      move: {
+        kind: "world",
+        effects: [{ kind: "shift_npc_affinity", npcId: "old-tobin", delta: 5 }],
+        reasonEnglish: "r",
+      },
+      metrics: { recordGmCall: (record) => records.push(record) },
+    });
+    expect(records).toHaveLength(1);
+    expect(records[0]?.refusal).toBeDefined();
+  });
+
+  // Fix 1 (final whole-branch review): a traversal into a node that itself
+  // declares an `encounterId` (`ambush-clearing`, unlike `guild-offer` which
+  // the tests above deliberately keep encounter-free) opens a bracket
+  // MID-TURN, after guard 2 at the top of the `free_text` case already ran.
+  // `gmStep` must notice the now-open bracket on its own and refuse to fire
+  // — an accepted `enter_detour` here would move the player again while
+  // combat is bracketed.
+  it("does not run the GM tier when the same turn opens a combat bracket", async () => {
+    const frames = await runFreeText({
+      classification: { category: "exploration", targetNodeId: "ambush-clearing" },
+      move: { kind: "enter_detour", nodeId: "tobins-errand", reasonEnglish: "he asked for help" },
+    });
+    const events = eventsOf(frames);
+    const types = events.map((each) => each.type);
+    expect(types).toContain("encounter_started");
+    expect(types).not.toContain("narrative_move_applied");
+    // Exactly one `quest_node_entered` — the exploration branch's own entry
+    // into `ambush-clearing`. The guarded `gmStep` never appends a second one
+    // for `tobins-errand`.
+    const entered = events.filter((each) => each.type === "quest_node_entered");
+    expect(entered).toHaveLength(1);
+    expect(entered[0]?.payload).toMatchObject({ nodeId: "ambush-clearing" });
+  });
+
+  it("reports no GM metric at all when the guard short-circuits (no attempt was made)", async () => {
+    const records: GmCallMetrics[] = [];
+    await runFreeText({
+      classification: { category: "exploration", targetNodeId: "ambush-clearing" },
+      move: { kind: "enter_detour", nodeId: "tobins-errand", reasonEnglish: "he asked for help" },
+      metrics: { recordGmCall: (record) => records.push(record) },
+    });
+    expect(records).toHaveLength(0);
   });
 });

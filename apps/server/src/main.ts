@@ -9,6 +9,7 @@
 import { randomUUID } from "node:crypto";
 import {
   createAgentRuntime,
+  createGmAgent,
   createHebrewNarrative,
   createHebrewSceneNarrative,
   createIntentAgent,
@@ -136,6 +137,14 @@ const summaryRuntime = createAgentRuntime({
   port: createVercelPort({}),
 });
 
+// A fifth runtime, for the GM tier — the same one-runtime-per-role reasoning
+// as the three above: independent instrumentation and routing, no shared
+// lifecycle with any other agent.
+const gmRuntime = createAgentRuntime({
+  routing: DEFAULT_MODEL_ROUTING,
+  port: createVercelPort({}),
+});
+
 const metrics: MetricsPort = {
   recordTacticalTurn(turn) {
     logHolder.current?.info(turn, "tactical_turn_metrics");
@@ -157,6 +166,9 @@ const metrics: MetricsPort = {
   },
   recordIntentCall(record) {
     logHolder.current?.info(record, "intent_call_metrics");
+  },
+  recordGmCall(record) {
+    logHolder.current?.info(record, "gm_call_metrics");
   },
   recordSummaryCall(record) {
     logHolder.current?.info(record, "summary_call_metrics");
@@ -195,13 +207,17 @@ const app = buildApp({
       },
     }),
     intent: createIntentAgent({ runtime: intentRuntime }),
+    gm: createGmAgent({ runtime: gmRuntime }),
     // Wired unconditionally, mirroring `narrative` above: a missing provider
     // key degrades through `sceneNarrate`'s own ladder (pipeline.ts) rather
     // than failing the turn.
     sceneNarrative: createHebrewSceneNarrative({
       runtime: narrativeRuntime,
       onFinish: (finish) => {
-        logHolder.current?.info({ ...finish, agent: "scene_narrative" }, "narrative_stream_finished");
+        logHolder.current?.info(
+          { ...finish, agent: "scene_narrative" },
+          "narrative_stream_finished",
+        );
       },
     }),
     episodic,
@@ -213,7 +229,25 @@ const app = buildApp({
     // replay the same fight. The value is recorded in `dice_rolled` anyway,
     // and replay reads it from there.
     seedFor: (rootSeed, sequence) => (rootSeed + sequence * 2_654_435_761) >>> 0,
-    turnTimeoutMs: 10_000,
+    // 10s was sized for a COMBAT turn: one tactical call plus a short combat
+    // narration. The `free_text` scene path that came later runs up to four
+    // sequential model calls under this one budget — classify, the episode
+    // summary, the GM tier, then the scene narration — and the narration is
+    // last, so it inherits only the remainder.
+    //
+    // Measured against the live Emberfall arc (2026-09-01, Sonnet, Hebrew):
+    // scene narration alone runs 6.7-7.7s, classify ~1.3s, the GM tier ~1.1s,
+    // retrieval ~0.3s. Under 10s the narration was reliably cut off mid-word
+    // — 6 of 13 narrations across four real campaigns came back `completed`
+    // (the seam-and-fallback rung) rather than `model`, including a plain
+    // arrival with no ambush in it. That is a player reading half a sentence
+    // and then a terse template line, on roughly every other turn.
+    //
+    // 20s clears the measured worst case (~13s) with headroom. The cost is
+    // that a hung provider holds the per-campaign lock in `ws.ts` for 20s
+    // instead of 10s before the ladder degrades; single-player paper sessions
+    // can carry that, and nothing gets SLOWER — this is a ceiling, not a wait.
+    turnTimeoutMs: 20_000,
     metrics,
     conditionNamesHebrew,
     skillAbilities,

@@ -3,9 +3,11 @@ import {
   ContentId,
   FACTION_BANDS,
   FactionBand,
+  LongRestEffect,
   NpcAffinityEntry,
   NpcDefinition,
   QuestNode,
+  ShiftNpcAffinityEffect,
   WorldEffect,
   WorldManifest,
   WorldPredicate,
@@ -232,5 +234,51 @@ describe("NpcAffinityEntry", () => {
     expect(
       NpcAffinityEntry.safeParse({ npcId: "sela-the-innkeeper", band: "smitten" }).success,
     ).toBe(false);
+  });
+});
+
+describe("WorldEffect members", () => {
+  it("exposes each member so a subset union can be composed from them", () => {
+    expect(ShiftNpcAffinityEffect.parse({ kind: "shift_npc_affinity", npcId: "old-tobin", delta: 1 })).toEqual({
+      kind: "shift_npc_affinity",
+      npcId: "old-tobin",
+      delta: 1,
+    });
+    expect(LongRestEffect.parse({ kind: "long_rest" })).toEqual({ kind: "long_rest" });
+  });
+
+  it("still parses every member through the whole union", () => {
+    for (const effect of [
+      { kind: "shift_faction_relation", factionA: "a", factionB: "b", delta: -1 },
+      { kind: "advance_calendar", days: 2 },
+      { kind: "shift_npc_affinity", npcId: "old-tobin", delta: 1 },
+      { kind: "add_npc_fact", npcId: "old-tobin", fact: "remembers the favour" },
+      { kind: "long_rest" },
+    ]) {
+      expect(WorldEffect.parse(effect)).toEqual(effect);
+    }
+  });
+});
+
+describe("QuestNode.detour", () => {
+  it("defaults to false, so every existing authored node is unchanged", () => {
+    const node = QuestNode.parse({
+      nodeId: "n",
+      titleEnglish: "T",
+      sceneEnglish: "S",
+      locationId: "l",
+    });
+    expect(node.detour).toBe(false);
+  });
+
+  it("accepts an explicit detour node", () => {
+    const node = QuestNode.parse({
+      nodeId: "n",
+      titleEnglish: "T",
+      sceneEnglish: "S",
+      locationId: "l",
+      detour: true,
+    });
+    expect(node.detour).toBe(true);
   });
 });
