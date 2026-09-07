@@ -1,0 +1,27 @@
+{
+  // Debug configurations for VS Code. Not to be confused with `.claude/launch.json`,
+  // which configures the Claude Code preview pane.
+  "version": "0.2.0",
+  "configurations": [
+    {
+      // Same invocation as `pnpm --filter @ai-dm/server dev`, minus `watch`:
+      // the debugger keeps breakpoints attached to one process, and tsx's
+      // watch restarts would drop them. Reads `apps/server/.env` for the
+      // provider keys, DATABASE_URL and PORT, exactly as the dev script does.
+      //
+      // Breakpoints work in `packages/*` too: every workspace package exports
+      // its TypeScript source (`"exports": "./src/index.ts"`), so tsx compiles
+      // it in-process and maps straight back to the file on disk.
+      "name": "Debug server",
+      "type": "node",
+      "request": "launch",
+      "cwd": "${workspaceFolder}/apps/server",
+      "runtimeExecutable": "node",
+      "runtimeArgs": ["--import", "tsx", "--env-file-if-exists=.env"],
+      "program": "${workspaceFolder}/apps/server/src/main.ts",
+      "console": "integratedTerminal",
+      "sourceMaps": true,
+      "skipFiles": ["<node_internals>/**"]
+    }
+  ]
+}
