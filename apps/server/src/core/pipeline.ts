@@ -529,13 +529,15 @@ const NARRATION_TERMINATORS = [".", "!", "?", "…"] as const;
  * that narration itself has to fall back to deterministic prose (whole-
  * branch review finding 1).
  *
- * Raised from 750ms on 2026-09-07, against measurement. What this bounds is
- * ONLY the embedding call — `retrieveMemories` races the deadline against
- * `embedding.embed` and leaves the pgvector search unbounded — and that call
- * measures p50 ~310ms, p95 ~515ms, max 660ms over 39 samples (isolated, and
- * in-pipeline, warm and cold; a server's genuine first call was 458ms). At
- * 750ms the cap sat about 1.4x over p95, which is no headroom at all for a
- * network call, and 5 of 12 logged retrievals aborted exactly at it.
+ * Raised from 750ms on 2026-09-07, against measurement. This bounds both the
+ * embedding call and the pgvector search — `retrieveMemories` races the
+ * deadline against `embedding.embed` and then again against
+ * `args.store.search`, so the two calls share this one budget. The embedding
+ * call alone measures p50 ~310ms, p95 ~515ms, max 660ms over 39 samples
+ * (isolated, and in-pipeline, warm and cold; a server's genuine first call
+ * was 458ms). At 750ms the cap sat about 1.4x over p95, which is no headroom
+ * at all for a network call, and 5 of 12 logged retrievals aborted exactly
+ * at it.
  *
  * An abort is worse than it looks: `memoriesForNodeId` latches only on
  * success, so a turn that aborts re-runs the whole retrieval on the NEXT
