@@ -100,14 +100,13 @@ What it reports, and what it cannot:
   `quest_node_entered` actually named. Every step sends the edge label
   verbatim, so this is the router's floor, not a paraphrase test.
 - **Narration source mix** from `narrative_emitted.source`; a high
-  `deterministic` share means the fallback is carrying the session. The text
-  is kept too, for the whole session, so a native-speaker read (or a grep for
-  Latin letters inside Hebrew names) is not limited to traversal turns:
-  `report.json` holds the join's opening beat in `openingNarrations`, each
-  step's own in `steps[].narrations`, and the fight a step walked into, combat
-  turn by combat turn, in `steps[].combatNarrations`. `report.md`'s
-  "Narration, in order" prints all three, combat lines labelled `combat`, and
-  their total reconciles with `narrationSources`.
+  `deterministic` share means the fallback is carrying the session. Verbatim
+  text is kept for traversal turns only, in `steps[].narrations`, and that is
+  what `report.md`'s "Narration, in order" prints. Join-time and combat-turn
+  narrations are counted in `narrationSources` but their text is discarded, so
+  the printed lines do not reconcile with that tally — a native-speaker read,
+  or a grep for Latin letters inside Hebrew names, covers only the traversal
+  share of a session that fought.
 - **Combat**: hero turns and outcome per bracket. Actions are chosen from the
   affordances frame alone — the server already validated everything in it, so
   the harness never re-derives legality (invariant 1).
