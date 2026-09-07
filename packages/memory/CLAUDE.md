@@ -16,7 +16,7 @@ Persistence layer, on **one Postgres instance** (image `pgvector/pgvector:pg17`)
 
 - `game_events` is append-only: no UPDATE or DELETE, ever. Corrections are new events.
 - Every projection must be rebuildable by replaying events from the last snapshot — write a replay test for each new projection.
-- Schema changes only via generated migrations; never edit applied migrations.
+- Schema changes only via generated migrations; never edit applied migrations. The `0000` baseline regeneration for the campaign rename (see Commands) was a deliberate exception to this rule, affordable only because the one database carrying the pre-rename schema held disposable dev data. **That exemption expires with the first database worth keeping.** From `PROJECT_PLAN.md` §4.7 step 2 onward, every schema change is additive (`0001`, `0002`, …) — the drop-and-recreate remedy in Commands is not available once a log has anything in it you would miss.
 - Both stores answer to one conformance suite (`src/event-store/contract.ts`). A behaviour only one of them has is a bug in the contract, not a feature — add it to the suite or remove it.
 
 ## Testing
