@@ -129,6 +129,11 @@ export function deriveCharacter(sheet: CharacterSheet, gear: SrdGear): DerivedCh
     savingThrows,
     skills,
 
+    // The Shield is deliberately not named here: it never sets `armorClass`
+    // as a suit of armor does, and no caller of `DerivedCharacter` has asked
+    // to narrate a shield separately from the weapon it accompanies.
+    ...(armor.body === undefined ? {} : { armorNameEnglish: armor.body.nameEnglish }),
+
     attacks: attacksFor({
       weapons,
       abilityModifiers: modifiers,

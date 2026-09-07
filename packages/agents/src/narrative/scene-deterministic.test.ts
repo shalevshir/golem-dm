@@ -16,6 +16,8 @@ function input(
     sceneEnglish: "A quiet market square.",
     playerNameHebrew: actor.playerNameHebrew,
     playerGender: actor.playerGender,
+    playerSheet: { class: "fighter", level: 1, weaponNameEnglish: "Unarmed Strike" },
+    playerHealthBand: "healthy",
     npcsPresent: [],
     recentNarrations: [],
     memoryEnglish: [],

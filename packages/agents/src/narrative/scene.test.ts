@@ -14,6 +14,8 @@ const INPUT: SceneNarrationInput = {
   sceneEnglish: "A quiet market square.",
   playerNameHebrew: "אלדד",
   playerGender: "masculine",
+  playerSheet: { class: "fighter", level: 3, armorNameEnglish: "Chain Mail", weaponNameEnglish: "Longsword" },
+  playerHealthBand: "healthy",
   npcsPresent: [{ nameHebrew: "רעות", descriptionEnglish: "A ranger who keeps the far bank." }],
   recentNarrations: [],
   memoryEnglish: [],
@@ -52,6 +54,58 @@ describe("buildScenePrompt", () => {
   it("omits the NPC section when no NPCs are present", () => {
     const prompt = buildScenePrompt({ ...INPUT, npcsPresent: [] });
     expect(prompt.semiStatic?.some((segment) => segment.includes("NPCS PRESENT"))).toBe(false);
+  });
+
+  // Task 3: the narrator could not previously mention class, level, or gear
+  // at all. The sheet lines are stable for the whole campaign, so they
+  // belong in the PLAYER block UNCONDITIONALLY — a varying cached prefix
+  // costs more than it saves, so this must hold even on the most common turn
+  // (full health, healthy default).
+  it("puts the player's class, armor and weapon in the PLAYER block unconditionally", () => {
+    const prompt = buildScenePrompt(INPUT);
+    const semiStatic = (prompt.semiStatic ?? []).join("\n");
+    expect(semiStatic).toContain("fighter");
+    expect(semiStatic).toContain("Chain Mail");
+    expect(semiStatic).toContain("Longsword");
+  });
+
+  // Ruling 1 (fix round 1): level rides the PLAYER block too, but only ever
+  // as an ordinal WORD — `SCENE_SYSTEM_PROMPT`'s "Numbers" rule bans a digit
+  // outright, so a literal "3" reaching the model would be a hard violation.
+  it("renders the player's level as an ordinal word, never a digit", () => {
+    const prompt = buildScenePrompt(INPUT);
+    const semiStatic = (prompt.semiStatic ?? []).join("\n");
+    expect(semiStatic).toContain("Level: third");
+    expect(semiStatic).not.toMatch(/[0-9]/);
+  });
+
+  it("omits the armor line when the player carries no armor", () => {
+    const prompt = buildScenePrompt({
+      ...INPUT,
+      playerSheet: { class: "wizard", level: 1, weaponNameEnglish: "Unarmed Strike" },
+    });
+    const semiStatic = (prompt.semiStatic ?? []).join("\n");
+    expect(semiStatic).not.toContain("Armor:");
+    expect(semiStatic).toContain("Unarmed Strike");
+  });
+
+  // The common turn: full health. Zero added tokens means the dynamic tier
+  // must not carry a "PLAYER STATUS" section at all here.
+  it("renders nothing about health on the default turn", () => {
+    const prompt = buildScenePrompt(INPUT);
+    expect(prompt.dynamic?.some((segment) => segment.includes("PLAYER STATUS"))).toBe(false);
+  });
+
+  it("puts a non-healthy HP band in the dynamic tier", () => {
+    const prompt = buildScenePrompt({ ...INPUT, playerHealthBand: "bloodied" });
+    expect(prompt.dynamic?.some((segment) => segment.includes("PLAYER STATUS"))).toBe(true);
+    expect(prompt.dynamic?.some((segment) => segment.includes("bloodied"))).toBe(true);
+  });
+
+  it("never puts the health band in the semiStatic tier", () => {
+    const prompt = buildScenePrompt({ ...INPUT, playerHealthBand: "critical" });
+    const semiStatic = (prompt.semiStatic ?? []).join("\n");
+    expect(semiStatic).not.toContain("critical");
   });
 
   it("puts the beat and recent narrations in the dynamic tier", () => {

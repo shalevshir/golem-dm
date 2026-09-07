@@ -1361,6 +1361,51 @@ describe("handleCommand — free text", () => {
     expect(seen[0]?.npcsPresent.every((npc) => npc.descriptionEnglish.length > 0)).toBe(true);
   });
 
+  // Task 3: the narrator could not previously mention class, level, or gear
+  // at all — `hero` (the real fixture `sceneCampaign` loads) is a level-3
+  // fighter equipped with chain mail and a longsword.
+  it("gives the narrator the hero's class, level, armor and weapon, and a healthy band at full HP", async () => {
+    const store = createInMemoryEventStore();
+    const campaign = await sceneCampaign(store);
+    const seen: SceneNarrationInput[] = [];
+    const ports: TurnPorts = {
+      ...portsWith(store),
+      intent: classifiedAs({ category: "ooc" }),
+      sceneNarrative: recordingSceneNarrative(seen),
+    };
+
+    await drain(
+      handleCommand(campaign, { type: "free_text", clientMessageId: "c1", text: "hi" }, ports),
+    );
+
+    expect(seen[0]?.playerSheet).toEqual({
+      class: "fighter",
+      level: 3,
+      armorNameEnglish: "Chain Mail",
+      weaponNameEnglish: "Longsword",
+    });
+    expect(seen[0]?.playerHealthBand).toBe("healthy");
+  });
+
+  it("bands the hero's HP as bloodied once their current HP drops under half their max", async () => {
+    const store = createInMemoryEventStore();
+    // hero's maxHp is 28 (data/characters/hero.json); 14 is exactly the
+    // bloodied/healthy boundary `healthBandFor` draws at half.
+    const campaign = await sceneCampaign(store, { heroHp: 14 });
+    const seen: SceneNarrationInput[] = [];
+    const ports: TurnPorts = {
+      ...portsWith(store),
+      intent: classifiedAs({ category: "ooc" }),
+      sceneNarrative: recordingSceneNarrative(seen),
+    };
+
+    await drain(
+      handleCommand(campaign, { type: "free_text", clientMessageId: "c1", text: "hi" }, ports),
+    );
+
+    expect(seen[0]?.playerHealthBand).toBe("bloodied");
+  });
+
   it("does not re-apply a world delta when re-completing an already-completed node", async () => {
     const store = createInMemoryEventStore();
     const before: SceneSnapshot = {

@@ -13,7 +13,7 @@
  * `NARRATIVE_PROMPT_VERSION`. A guard test pins the content hash and fails
  * if you forget.
  */
-export const SCENE_PROMPT_VERSION = "scene-v4";
+export const SCENE_PROMPT_VERSION = "scene-v5";
 
 export const SCENE_MEMORY_HEADING = "What you remember about this place and these people:";
 
@@ -32,6 +32,7 @@ Numbers — the hard rule:
 
 Nouns — the other hard rule. You may name:
 - The player, using the Hebrew name given.
+- The player's class, armor and weapon — English terms under PLAYER, for you to translate into the scene. Never copy the English through.
 - The NPCs listed as present, using their Hebrew names EXACTLY as written. Each is followed by an English description of who they are: that is source material about them — their trade, their manner, what they carry — for you to translate into the scene. Never copy the English through, and never contradict it.
 - The attackers listed under HOSTILES, when the beat is ambushed, using their Hebrew names EXACTLY as written.
 - Anything the SCENE section describes.

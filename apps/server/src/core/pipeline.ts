@@ -40,6 +40,7 @@ import {
   createDeterministicSceneNarrative,
   DEFAULT_EMBEDDING_SPEC,
   GM_PROMPT_VERSION,
+  healthBandFor,
   INTENT_PROMPT_VERSION,
   NARRATIVE_PROMPT_VERSION,
   SCENE_PROMPT_VERSION,
@@ -771,6 +772,18 @@ function checkModifierFor(character: DerivedCharacter, ability: AbilityKey, skil
 }
 
 /**
+ * The scene narrator's idea of "the player's weapon": `attacksFor`
+ * (`@ai-dm/rules-engine`) always appends the guaranteed Unarmed Strike LAST,
+ * after every equipped weapon, so `attacks[0]` is already the first equipped
+ * weapon, or Unarmed Strike when nothing is equipped. `attacks.min(1)` on
+ * `DerivedCharacter` is what makes the `?? "Unarmed Strike"` fallback
+ * unreachable in practice, not merely convenient.
+ */
+function primaryWeaponNameEnglish(character: DerivedCharacter): string {
+  return character.attacks[0]?.nameEnglish ?? "Unarmed Strike";
+}
+
+/**
  * A real, compiler-enforced exhaustiveness check — the "no `default`"
  * switches elsewhere in this codebase (`reduce.ts`, the scene engine's
  * `evaluatePredicate`/`describePredicate`/`applyEffect`) get this for free
@@ -1158,6 +1171,15 @@ export async function* handleCommand(
       sceneEnglish: card.sceneEnglish,
       playerNameHebrew: statics.character.nameHebrew,
       playerGender: statics.character.grammaticalGender,
+      playerSheet: {
+        class: statics.character.class,
+        level: statics.character.level,
+        ...(statics.character.armorNameEnglish === undefined
+          ? {}
+          : { armorNameEnglish: statics.character.armorNameEnglish }),
+        weaponNameEnglish: primaryWeaponNameEnglish(statics.character),
+      },
+      playerHealthBand: healthBandFor(currentScene().heroHp, statics.character.maxHp),
       // Mapped down rather than passed whole: `card.npcs` also carries
       // `npcId` and `nameEnglish` for the router and the GM tier, and neither
       // belongs in a narration brief.

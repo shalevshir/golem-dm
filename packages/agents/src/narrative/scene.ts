@@ -65,10 +65,58 @@ function renderNpcs(npcs: SceneNarrationInput["npcsPresent"]): string {
   ].join("\n");
 }
 
+// Levels run 1–20 (`DerivedCharacter.level`) — a flat table is smaller than a
+// cardinal-to-ordinal conversion, and `prompt.ts`'s `COUNT_WORDS` is
+// cardinal ("two"), not ordinal, and stops at twelve, so it isn't reusable
+// here.
+const ORDINAL_WORDS = [
+  "first",
+  "second",
+  "third",
+  "fourth",
+  "fifth",
+  "sixth",
+  "seventh",
+  "eighth",
+  "ninth",
+  "tenth",
+  "eleventh",
+  "twelfth",
+  "thirteenth",
+  "fourteenth",
+  "fifteenth",
+  "sixteenth",
+  "seventeenth",
+  "eighteenth",
+  "nineteenth",
+  "twentieth",
+];
+
+/** `level` (1–20) as an ordinal WORD — never a digit reaches the prompt. */
+function ordinalWord(level: number): string {
+  return ORDINAL_WORDS[level - 1] ?? "first";
+}
+
+/** The PLAYER block's sheet lines — class, level, armor, weapon. English, to translate; never copy through. */
+function renderPlayerSheet(sheet: SceneNarrationInput["playerSheet"]): string {
+  const armorLine = sheet.armorNameEnglish === undefined ? "" : `\nArmor: ${sheet.armorNameEnglish}`;
+  return `Class: ${sheet.class}\nLevel: ${ordinalWord(sheet.level)}${armorLine}\nWeapon: ${sheet.weaponNameEnglish}`;
+}
+
+/**
+ * Volatile player state, for the `dynamic` tier — only ever called when
+ * `buildScenePrompt` has already decided the HP band is non-default.
+ */
+function renderPlayerStatus(healthBand: SceneNarrationInput["playerHealthBand"]): string {
+  return `PLAYER STATUS\nHP: ${healthBand}`;
+}
+
 export function buildScenePrompt(input: SceneNarrationInput): LayeredPrompt {
   const semiStatic = [
     `SCENE\n${input.sceneEnglish}`,
-    `PLAYER\nName: ${input.playerNameHebrew}\nGender: ${input.playerGender}`,
+    // The sheet lines ride here UNCONDITIONALLY, never gated on a per-turn
+    // value — see `PlayerSheet`'s doc comment.
+    `PLAYER\nName: ${input.playerNameHebrew}\nGender: ${input.playerGender}\n${renderPlayerSheet(input.playerSheet)}`,
   ];
 
   // Omitted rather than sent empty: an empty "NPCS PRESENT" section is a line
@@ -87,6 +135,13 @@ export function buildScenePrompt(input: SceneNarrationInput): LayeredPrompt {
   }
 
   const dynamic = [renderBeat(input.beat)];
+
+  // Omitted rather than sent as "healthy": that is the common turn, and a
+  // line saying so is uncached tokens spent stating the default.
+  if (input.playerHealthBand !== "healthy") {
+    dynamic.push(renderPlayerStatus(input.playerHealthBand));
+  }
+
   if (input.recentNarrations.length > 0) {
     dynamic.push(
       ["RECENT NARRATION (do not reuse its verbs, imagery or sentence shapes)"]

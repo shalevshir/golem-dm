@@ -55,4 +55,14 @@ describe("DerivedCharacter", () => {
   it("rejects an unknown grammaticalGender", () => {
     expect(() => DerivedCharacter.parse({ ...minimal, grammaticalGender: "neuter" })).toThrow();
   });
+
+  it("leaves armorNameEnglish absent for an unarmored fixture", () => {
+    expect(DerivedCharacter.parse(minimal).armorNameEnglish).toBeUndefined();
+  });
+
+  it("carries armorNameEnglish when given one", () => {
+    expect(DerivedCharacter.parse({ ...minimal, armorNameEnglish: "Chain Mail" }).armorNameEnglish).toBe(
+      "Chain Mail",
+    );
+  });
 });
