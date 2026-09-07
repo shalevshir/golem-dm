@@ -25,10 +25,10 @@ describe("loadWorld", () => {
     expect(world.locations.get("emberfall")?.nameHebrew).toBe("אמברפול");
     expect(world.npcs.get("old-tobin")?.grammaticalGender).toBe("masculine");
     expect(world.questNodes.get("reckoning")?.edges).toEqual([]);
-    expect(world.factions.size).toBe(2);
-    expect(world.locations.size).toBe(1);
-    expect(world.npcs.size).toBe(3);
-    expect(world.questNodes.size).toBe(8);
+    expect(world.factions.size).toBe(3);
+    expect(world.locations.size).toBe(3);
+    expect(world.npcs.size).toBe(6);
+    expect(world.questNodes.size).toBe(19);
   });
 
   // A relation is an unordered pair: `pairKey` sorts, so asking in either
@@ -38,7 +38,10 @@ describe("loadWorld", () => {
     const world = loadWorld();
     expect(world.relations.get(pairKey("ashen-guild", "river-wardens"))).toBe("cold");
     expect(world.relations.get(pairKey("river-wardens", "ashen-guild"))).toBe("cold");
-    expect(world.relations.size).toBe(1);
+    // Three factions is three unordered pairs, and the loader refuses a
+    // missing one — so this count is the manifest being exhaustive, not an
+    // incidental total.
+    expect(world.relations.size).toBe(3);
   });
 
   it("returns the same cached instance on a second call", () => {

@@ -90,7 +90,7 @@ export interface BenchmarkConfig {
    * `smoke/run.ts`) never see it; their own `mode` parameter stays the
    * narrower `"probe" | "encounter" | "both"` on purpose.
    */
-  mode: "probe" | "encounter" | "both" | "narrative";
+  mode: "probe" | "encounter" | "both" | "narrative" | "arc";
   live: boolean;
   arms: readonly Arm[];
   seeds: readonly number[];
@@ -103,6 +103,17 @@ export interface BenchmarkConfig {
    * narrative samples plus the SRD name/glossary/condition tables.
    */
   reviewSheet: boolean;
+  /**
+   * Only meaningful with `mode: "arc"` — `cli.ts` rejects them otherwise.
+   * An arc walk needs a RUNNING server (`pnpm dev`), because the world
+   * loader, the encounter catalogue and the pipeline all live in
+   * `apps/server` and invariant 5 forbids depending on it; the harness
+   * therefore talks to it over the wire like any other client. There is no
+   * `--live` equivalent: whichever models that server wired are the ones
+   * under test, so an arc run is always live by construction.
+   */
+  serverUrl: string;
+  arcSteps: number;
 }
 
 export const DEFAULT_CONFIG: BenchmarkConfig = {
@@ -112,4 +123,7 @@ export const DEFAULT_CONFIG: BenchmarkConfig = {
   seeds: DEFAULT_SEEDS,
   scenarioIds: ALL_SCENARIO_IDS,
   reviewSheet: false,
+  // Matches `.env.example`'s PORT and `apps/web`'s Vite proxy target.
+  serverUrl: "http://127.0.0.1:3000",
+  arcSteps: 40,
 };

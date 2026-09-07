@@ -24,6 +24,12 @@ import {
  */
 function renderBeat(beat: SceneBeat): string {
   switch (beat.kind) {
+    // "opens at", never "reached": this is where the story starts, and the
+    // player has not travelled to get here. The prompt's own SCENE section
+    // carries the node's card, so this line only has to establish that the
+    // paragraph is an opening rather than an arrival.
+    case "opening":
+      return `- opening: the story begins with the player already at ${beat.locationNameHebrew}`;
     case "arrived":
       return `- arrived: the player reached ${beat.locationNameHebrew}`;
     // The hostiles ride in the beat (the DYNAMIC tier) rather than in
@@ -52,8 +58,11 @@ function renderBeat(beat: SceneBeat): string {
   }
 }
 
-function renderNpcs(npcNamesHebrew: readonly string[]): string {
-  return ["NPCS PRESENT", ...npcNamesHebrew.map((name) => `- ${name}`)].join("\n");
+function renderNpcs(npcs: SceneNarrationInput["npcsPresent"]): string {
+  return [
+    "NPCS PRESENT (name them exactly as written; the English after each name is what they are like, to translate into the scene, never to copy)",
+    ...npcs.map((npc) => `- ${npc.nameHebrew}: ${npc.descriptionEnglish}`),
+  ].join("\n");
 }
 
 export function buildScenePrompt(input: SceneNarrationInput): LayeredPrompt {
@@ -65,8 +74,8 @@ export function buildScenePrompt(input: SceneNarrationInput): LayeredPrompt {
   // Omitted rather than sent empty: an empty "NPCS PRESENT" section is a line
   // of uncached tokens naming nobody. Mirrors `prompt.ts`'s treatment of
   // `recentNarrations`.
-  if (input.npcNamesHebrew.length > 0) {
-    semiStatic.push(renderNpcs(input.npcNamesHebrew));
+  if (input.npcsPresent.length > 0) {
+    semiStatic.push(renderNpcs(input.npcsPresent));
   }
 
   // Stable for as long as the campaign stands at this node — semiStatic, not

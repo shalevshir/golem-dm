@@ -16,7 +16,7 @@ function input(
     sceneEnglish: "A quiet market square.",
     playerNameHebrew: actor.playerNameHebrew,
     playerGender: actor.playerGender,
-    npcNamesHebrew: [],
+    npcsPresent: [],
     recentNarrations: [],
     memoryEnglish: [],
   };

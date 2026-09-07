@@ -10,5 +10,11 @@
     "nameEnglish": "The River Wardens",
     "nameHebrew": "שומרי הנהר",
     "descriptionEnglish": "The families who keep the weir and the fish ladders. They were here before the kilns and they intend to be here after."
+  },
+  {
+    "factionId": "quiet-buyer",
+    "nameEnglish": "The Quiet Buyer",
+    "nameHebrew": "הקונה השקט",
+    "descriptionEnglish": "A downriver concern that has bought every ounce the Guild can burn, for four years, at a price nobody wants to examine. It has no hall and no banner in Emberfall — only a factor, a room at the inn, and a barge that comes at night."
   }
 ]

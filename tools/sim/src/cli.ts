@@ -8,7 +8,7 @@ import type { Arm, BenchmarkConfig } from "./config.js";
 import { ARMS, DEFAULT_CONFIG, SMOKE_ARM, armById } from "./config.js";
 import { scenarioById } from "./scenarios/index.js";
 
-const MODES = ["probe", "encounter", "both", "narrative"] as const;
+const MODES = ["probe", "encounter", "both", "narrative", "arc"] as const;
 type Mode = (typeof MODES)[number];
 
 const KNOWN_FLAGS = [
@@ -18,6 +18,8 @@ const KNOWN_FLAGS = [
   "--scenarios",
   "--arms",
   "--review-sheet",
+  "--server",
+  "--steps",
 ] as const;
 
 function isMode(value: string): value is Mode {
@@ -70,6 +72,14 @@ function parseScenarios(value: string): string[] {
   return commaSeparated(value).map((id) => scenarioById(id).scenarioId);
 }
 
+function parseSteps(value: string): number {
+  const steps = Number(value);
+  if (!Number.isInteger(steps) || steps < 1) {
+    throw new Error(`--steps must be a positive integer, got ${value}`);
+  }
+  return steps;
+}
+
 function parseArms(value: string): Arm[] {
   return commaSeparated(value).map((id) => armById(id));
 }
@@ -86,6 +96,26 @@ export function parseArgs(argv: readonly string[]): BenchmarkConfig {
   const rawSeeds = valueAfter(argv, "--seeds");
   const rawScenarios = valueAfter(argv, "--scenarios");
   const rawArms = valueAfter(argv, "--arms");
+  const rawServer = valueAfter(argv, "--server");
+  const rawSteps = valueAfter(argv, "--steps");
+
+  // `--server`/`--steps` address a running server, which only `--mode arc`
+  // talks to. Rejected elsewhere rather than ignored, the same standard
+  // `--arms` and `--review-sheet` are already held to below.
+  for (const flag of ["--server", "--steps"] as const) {
+    if (argv.includes(flag) && rawMode !== "arc") {
+      throw new Error(`${flag} only applies to --mode arc. Pass --mode arc, or drop ${flag}.`);
+    }
+  }
+
+  // An arc walk plays against whichever models the running server wired, so
+  // there is no port to swap and nothing for `--live` or an arm to select.
+  if (rawMode === "arc" && (live || rawArms !== undefined)) {
+    throw new Error(
+      "--mode arc plays against a running server, so it has no port to swap: the models " +
+        "under test are the ones that server wired. Drop --live and --arms.",
+    );
+  }
 
   // `--mode narrative` always benchmarks the "narrative" role from
   // `DEFAULT_MODEL_ROUTING`, never an arm from this file's tactical matrix —
@@ -137,5 +167,7 @@ export function parseArgs(argv: readonly string[]): BenchmarkConfig {
     scenarioIds:
       rawScenarios === undefined ? DEFAULT_CONFIG.scenarioIds : parseScenarios(rawScenarios),
     reviewSheet: argv.includes("--review-sheet"),
+    serverUrl: rawServer ?? DEFAULT_CONFIG.serverUrl,
+    arcSteps: rawSteps === undefined ? DEFAULT_CONFIG.arcSteps : parseSteps(rawSteps),
   };
 }

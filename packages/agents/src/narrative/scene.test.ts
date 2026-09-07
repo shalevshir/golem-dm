@@ -14,7 +14,7 @@ const INPUT: SceneNarrationInput = {
   sceneEnglish: "A quiet market square.",
   playerNameHebrew: "אלדד",
   playerGender: "masculine",
-  npcNamesHebrew: ["רעות"],
+  npcsPresent: [{ nameHebrew: "רעות", descriptionEnglish: "A ranger who keeps the far bank." }],
   recentNarrations: [],
   memoryEnglish: [],
 };
@@ -50,7 +50,7 @@ describe("buildScenePrompt", () => {
   });
 
   it("omits the NPC section when no NPCs are present", () => {
-    const prompt = buildScenePrompt({ ...INPUT, npcNamesHebrew: [] });
+    const prompt = buildScenePrompt({ ...INPUT, npcsPresent: [] });
     expect(prompt.semiStatic?.some((segment) => segment.includes("NPCS PRESENT"))).toBe(false);
   });
 

@@ -128,17 +128,142 @@ describe("the Emberfall arc", () => {
       let state = stateOf(traverseEdge(world, stateOf(startScene(world)), second));
       state = stateOf(traverseEdge(world, state, "the-weir"));
       state = stateOf(traverseEdge(world, state, "saboteurs"));
+      // Two ways on from `saboteurs`: straight to the inn, or the second act
+      // that finds out who paid the ambushers. Both open on both branches —
+      // the short road is what keeps `reckoning`'s gate provably unblocked
+      // regardless of anything the long one does.
       const options = edgesOf(availableEdges(world, state));
-      expect(options).toHaveLength(1);
-      expect(options[0]?.open).toBe(true);
+      expect(options.map((each) => each.edge.to).sort()).toEqual([
+        "reckoning",
+        "the-outsiders-mark",
+      ]);
+      expect(options.every((each) => each.open)).toBe(true);
     }
   });
 
-  it("has exactly two detours, neither of them targeted by an authored edge", () => {
+  // The long road: `saboteurs`' second edge opens an act that finds out who
+  // paid the ambushers and ends by walking the evidence back into the same
+  // `reckoning` the short road reaches in one step. Every `advance_calendar`
+  // and every `shift_faction_relation` on that road is asserted here, because
+  // a chain this long is exactly where an authoring slip stops being visible
+  // by reading the file.
+  const LONG_ROAD = [
+    "the-weir",
+    "saboteurs",
+    "the-outsiders-mark",
+    "the-factors-room",
+    "up-to-the-kilns",
+    "the-slag-pit",
+    "hessas-ledger",
+    "down-to-the-ford",
+    "the-drowned-ford",
+    "the-fish-ladder",
+    "the-buyers-barge",
+    "reckoning",
+  ] as const;
+
+  it("plays the long road from saboteurs to the barge and back into reckoning", () => {
+    const world = loadWorld();
+    let state = stateOf(traverseEdge(world, stateOf(startScene(world)), "guild-offer"));
+    for (const nodeId of LONG_ROAD) state = stateOf(traverseEdge(world, state, nodeId));
+
+    expect(state.currentNodeId).toBe("reckoning");
+    // Eight nodes on this road advance the calendar a day each, applied as
+    // each is left: saboteurs, the-outsiders-mark, up-to-the-kilns,
+    // the-slag-pit, down-to-the-ford, the-drowned-ford, the-fish-ladder,
+    // the-buyers-barge. From day 1, that is day 9 on arrival at the inn.
+    expect(state.day).toBe(9);
+
+    state = stateOf(completeCurrentNode(world, state));
+    // reckoning: +2 days on top, and +2 bands on the pair it has always moved.
+    expect(state.day).toBe(11);
+    expect(relationBetween(world, state, "ashen-guild", "river-wardens")).toBe("neutral");
+    // The buyer is the pair this act exists to move. Guild: cordial, less one
+    // for the factor's room, one for the night crew, one for the barge.
+    // Wardens: neutral, less one for the ford and one for the barge.
+    expect(relationBetween(world, state, "ashen-guild", "quiet-buyer")).toBe("hostile");
+    expect(relationBetween(world, state, "river-wardens", "quiet-buyer")).toBe("hostile");
+  });
+
+  // The long road is longer in days AND lands the world somewhere the short
+  // road cannot — otherwise the whole act is decoration.
+  it("ends the long road in a different world state than the short one", () => {
+    const world = loadWorld();
+    const short = (): SceneState => {
+      let state = stateOf(traverseEdge(world, stateOf(startScene(world)), "guild-offer"));
+      state = stateOf(traverseEdge(world, state, "the-weir"));
+      state = stateOf(traverseEdge(world, state, "saboteurs"));
+      state = stateOf(traverseEdge(world, state, "reckoning"));
+      return stateOf(completeCurrentNode(world, state));
+    };
+    const long = (): SceneState => {
+      let state = stateOf(traverseEdge(world, stateOf(startScene(world)), "guild-offer"));
+      for (const nodeId of LONG_ROAD) state = stateOf(traverseEdge(world, state, nodeId));
+      return stateOf(completeCurrentNode(world, state));
+    };
+    const a = short();
+    const b = long();
+    expect(a.day).not.toBe(b.day);
+    // Untouched by the short road, moved three bands by the long one.
+    expect(relationBetween(world, a, "ashen-guild", "quiet-buyer")).toBe("cordial");
+    expect(relationBetween(world, b, "ashen-guild", "quiet-buyer")).toBe("hostile");
+  });
+
+  // Both new gates sit at exactly the band the authored road delivers, the
+  // same zero-margin shape `reckoning`'s gate has. That is the property worth
+  // pinning: one more band of slippage from anywhere — an improvised GM shift,
+  // an added effect — closes them, and the door guard is what has to catch it.
+  it("opens both new gates at exactly their floor, with no margin to spare", () => {
+    const world = loadWorld();
+    let state = stateOf(traverseEdge(world, stateOf(startScene(world)), "guild-offer"));
+    for (const nodeId of ["the-weir", "saboteurs", "the-outsiders-mark", "the-factors-room"]) {
+      state = stateOf(traverseEdge(world, state, nodeId));
+    }
+    state = stateOf(traverseEdge(world, state, "up-to-the-kilns"));
+    state = stateOf(traverseEdge(world, state, "the-slag-pit"));
+    // hessas-ledger demands `cold`, and leaving the slag pit is what puts the
+    // pair at exactly `cold`.
+    expect(relationBetween(world, state, "ashen-guild", "quiet-buyer")).toBe("neutral");
+    const toLedger = edgesOf(availableEdges(world, state)).find(
+      (each) => each.edge.to === "hessas-ledger",
+    );
+    expect(toLedger?.open).toBe(true);
+    state = stateOf(traverseEdge(world, state, "hessas-ledger"));
+    expect(relationBetween(world, state, "ashen-guild", "quiet-buyer")).toBe("cold");
+
+    state = stateOf(traverseEdge(world, state, "down-to-the-ford"));
+    state = stateOf(traverseEdge(world, state, "the-drowned-ford"));
+    const toLadder = edgesOf(availableEdges(world, state)).find(
+      (each) => each.edge.to === "the-fish-ladder",
+    );
+    expect(toLadder?.open).toBe(true);
+    state = stateOf(traverseEdge(world, state, "the-fish-ladder"));
+    expect(relationBetween(world, state, "river-wardens", "quiet-buyer")).toBe("cold");
+  });
+
+  // A player who skips the night crew and the ford still reaches the barge:
+  // both gates are floors the *unshifted* baseline already clears, so the
+  // short way through the act cannot soft-lock on them.
+  it("reaches the fish ladder without fighting at the ford", () => {
+    const world = loadWorld();
+    let state = stateOf(traverseEdge(world, stateOf(startScene(world)), "guild-offer"));
+    for (const nodeId of ["the-weir", "saboteurs", "the-outsiders-mark", "up-to-the-kilns"]) {
+      state = stateOf(traverseEdge(world, state, nodeId));
+    }
+    state = stateOf(traverseEdge(world, state, "down-to-the-ford"));
+    state = stateOf(traverseEdge(world, state, "the-fish-ladder"));
+    expect(relationBetween(world, state, "river-wardens", "quiet-buyer")).toBe("neutral");
+    state = stateOf(traverseEdge(world, state, "the-buyers-barge"));
+    expect(state.currentNodeId).toBe("the-buyers-barge");
+  });
+
+  it("has exactly four detours, none of them targeted by an authored edge", () => {
     const world = loadWorld();
     const detours = Array.from(world.questNodes.values()).filter((node) => node.detour);
     expect(detours.map((node) => node.nodeId).sort()).toEqual([
       "after-the-reckoning",
+      "ilvas-count",
+      "the-ash-shrine",
       "tobins-errand",
     ]);
     const targeted = new Set(

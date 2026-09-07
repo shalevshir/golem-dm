@@ -2,7 +2,7 @@
   {
     "nodeId": "arrival",
     "titleEnglish": "Arrival at Emberfall",
-    "sceneEnglish": "The road drops out of the pines and Emberfall is below you: a weir throwing white water on the left, a hillside of smoking kilns on the right, and a town wedged between them that has clearly not been sleeping well. Two people are waiting at the bridge, and they are not standing together.",
+    "sceneEnglish": "The road drops out of the pines and Emberfall is below you, close enough to smell before you reach it: woodsmoke, wet stone, and under both a flat mineral taste that coats the back of the throat. The weir throws white water on the left, loud enough that people here pitch their voices over it without noticing. The hillside on the right is terraced with charcoal kilns, and the smoke off them leans downhill into the town wedged between the two. It is late afternoon, the light is going orange, and the town has clearly not been sleeping well: shutters closed on the river side, a fish ladder standing dry, kiln crews coming down the hill in silence. The only bridge in is narrow, and there are people waiting at the near end of it who arrived separately and have arranged themselves so that neither has to acknowledge the other. Both of them are waiting for you specifically — a stranger with no stake here is the one thing this argument has been missing, and both sides know it. You know nothing yet except that the water tastes wrong and that whoever speaks to you first will want you to believe them.",
     "locationId": "emberfall",
     "edges": [
       {
@@ -15,6 +15,10 @@
         "labelEnglish": "Hear out the river warden",
         "labelHebrew": "להקשיב לשומר הנהר"
       }
+    ],
+    "npcIds": [
+      "maren-vess",
+      "old-tobin"
     ]
   },
   {
@@ -42,6 +46,10 @@
         "labelEnglish": "Go and look at the weir yourself",
         "labelHebrew": "ללכת לראות את הסכר במו עיניך"
       }
+    ],
+    "npcIds": [
+      "maren-vess",
+      "sela-the-innkeeper"
     ]
   },
   {
@@ -67,6 +75,9 @@
         "labelEnglish": "Go and look at the weir yourself",
         "labelHebrew": "ללכת לראות את הסכר במו עיניך"
       }
+    ],
+    "npcIds": [
+      "old-tobin"
     ]
   },
   {
@@ -86,7 +97,8 @@
         "labelEnglish": "Search the forced gate mechanism",
         "labelHebrew": "לחפש במנגנון השער שנפרץ"
       }
-    ]
+    ],
+    "npcIds": []
   },
   {
     "nodeId": "saboteurs",
@@ -113,11 +125,17 @@
     ],
     "edges": [
       {
+        "to": "the-outsiders-mark",
+        "labelEnglish": "Look at what the dead are carrying",
+        "labelHebrew": "לבדוק מה נושאים המתים"
+      },
+      {
         "to": "reckoning",
         "labelEnglish": "Bring what you found to the inn",
         "labelHebrew": "להביא את הממצאים אל הפונדק"
       }
-    ]
+    ],
+    "npcIds": []
   },
   {
     "nodeId": "reckoning",
@@ -157,7 +175,364 @@
         "npcId": "sela-the-innkeeper",
         "fact": "hosted and helped broker the reckoning between the Guild and the Wardens"
       }
+    ],
+    "npcIds": [
+      "maren-vess",
+      "old-tobin",
+      "sela-the-innkeeper"
     ]
+  },
+  {
+    "nodeId": "the-outsiders-mark",
+    "titleEnglish": "What the Outsiders Were Carrying",
+    "sceneEnglish": "Nobody who ambushes a stranger over a broken sluice gate is paid in coin from three separate mints. Their gear is good, it is new, and every second piece carries the same small stamped tally-mark, which is not a Guild mark and not a warden mark. Sela will know it. Sela knows everything twice.",
+    "locationId": "emberfall",
+    "preconditions": [
+      {
+        "kind": "node_completed",
+        "nodeId": "saboteurs"
+      }
+    ],
+    "effects": [
+      {
+        "kind": "advance_calendar",
+        "days": 1
+      },
+      {
+        "kind": "add_npc_fact",
+        "npcId": "sela-the-innkeeper",
+        "fact": "identified the tally-mark on the ambushers' gear as the Quiet Buyer's, without being asked twice"
+      }
+    ],
+    "edges": [
+      {
+        "to": "the-factors-room",
+        "labelEnglish": "Ask about the man who rents the corner room",
+        "labelHebrew": "לשאול על האיש ששוכר את חדר הפינה"
+      },
+      {
+        "to": "up-to-the-kilns",
+        "labelEnglish": "Take the mark up to the kiln terraces",
+        "labelHebrew": "להעלות את הסימן אל מדרגות הכבשנים"
+      }
+    ],
+    "npcIds": [
+      "sela-the-innkeeper"
+    ]
+  },
+  {
+    "nodeId": "the-factors-room",
+    "titleEnglish": "The Corner Room",
+    "sceneEnglish": "Factor Arren is in, which Sela says happens about one week in four. He offers you the chair, answers every question you put to him fully and pleasantly, and by the time you are back on the stairs you cannot name one thing you learned. The tally-mark he did not deny. He simply never got to it.",
+    "locationId": "emberfall",
+    "preconditions": [
+      {
+        "kind": "node_completed",
+        "nodeId": "the-outsiders-mark"
+      }
+    ],
+    "effects": [
+      {
+        "kind": "shift_faction_relation",
+        "factionA": "ashen-guild",
+        "factionB": "quiet-buyer",
+        "delta": -1
+      },
+      {
+        "kind": "add_npc_fact",
+        "npcId": "factor-arren",
+        "fact": "was shown the ambushers' tally-mark and neither denied nor explained it"
+      }
+    ],
+    "edges": [
+      {
+        "to": "up-to-the-kilns",
+        "labelEnglish": "Go up and ask the people who burn the ore",
+        "labelHebrew": "לעלות ולשאול את מי ששורף את העפרה"
+      }
+    ],
+    "npcIds": [
+      "factor-arren",
+      "sela-the-innkeeper"
+    ]
+  },
+  {
+    "nodeId": "up-to-the-kilns",
+    "titleEnglish": "Hessa of the Lower Four",
+    "sceneEnglish": "Hessa runs the lower four terraces and has burned charcoal for nineteen years. She reads the tally-mark, hands it straight back, and tells you something she has clearly been waiting a while to tell somebody: the top two terraces are worked at night, by crews she does not know by name, and the Guild's own ledger has no entry for either of them.",
+    "locationId": "kiln-terraces",
+    "preconditions": [
+      {
+        "kind": "node_completed",
+        "nodeId": "the-outsiders-mark"
+      }
+    ],
+    "effects": [
+      {
+        "kind": "advance_calendar",
+        "days": 1
+      },
+      {
+        "kind": "shift_npc_affinity",
+        "npcId": "hessa-of-the-kilns",
+        "delta": 1
+      }
+    ],
+    "edges": [
+      {
+        "to": "the-slag-pit",
+        "labelEnglish": "Walk up to the top terrace tonight",
+        "labelHebrew": "לעלות הלילה אל המדרגה העליונה"
+      },
+      {
+        "to": "down-to-the-ford",
+        "labelEnglish": "Follow the ash downstream instead",
+        "labelHebrew": "לעקוב במקום זאת אחרי האפר במורד הזרם"
+      }
+    ],
+    "npcIds": [
+      "hessa-of-the-kilns"
+    ]
+  },
+  {
+    "nodeId": "the-slag-pit",
+    "titleEnglish": "The Night Crew",
+    "sceneEnglish": "The top terrace is being worked at a proper heat by nine at night, which no charcoal burner in the valley would do and no charcoal burner in the valley is doing. The crew are not burning charcoal. They are burning something out of the ore, and they would rather that stayed a small matter between themselves.",
+    "locationId": "kiln-terraces",
+    "encounterId": "slag-pit-cultists",
+    "preconditions": [
+      {
+        "kind": "node_completed",
+        "nodeId": "up-to-the-kilns"
+      }
+    ],
+    "effects": [
+      {
+        "kind": "advance_calendar",
+        "days": 1
+      },
+      {
+        "kind": "shift_faction_relation",
+        "factionA": "ashen-guild",
+        "factionB": "quiet-buyer",
+        "delta": -1
+      },
+      {
+        "kind": "add_npc_fact",
+        "npcId": "hessa-of-the-kilns",
+        "fact": "was proved right about the night crews on the upper terraces, in front of witnesses"
+      }
+    ],
+    "edges": [
+      {
+        "to": "hessas-ledger",
+        "labelEnglish": "Take what you found back down to Hessa",
+        "labelHebrew": "להוריד את הממצא בחזרה אל הסה"
+      }
+    ],
+    "npcIds": []
+  },
+  {
+    "nodeId": "hessas-ledger",
+    "titleEnglish": "The Ledger Hessa Keeps Anyway",
+    "sceneEnglish": "Hessa is not surprised, which is its own answer. She pulls a second book out from under the first — her own count, kept for nineteen years because the Guild's count has never once matched what her terraces actually burned. Four years of it. Every shortfall goes downstream, and every shortfall is bought.",
+    "locationId": "kiln-terraces",
+    "preconditions": [
+      {
+        "kind": "node_completed",
+        "nodeId": "the-slag-pit"
+      },
+      {
+        "kind": "faction_band_at_least",
+        "factionA": "ashen-guild",
+        "factionB": "quiet-buyer",
+        "band": "cold"
+      }
+    ],
+    "effects": [
+      {
+        "kind": "long_rest"
+      },
+      {
+        "kind": "add_npc_fact",
+        "npcId": "hessa-of-the-kilns",
+        "fact": "opened her own nineteen-year tally to the player, which the Guild has never seen"
+      }
+    ],
+    "edges": [
+      {
+        "to": "down-to-the-ford",
+        "labelEnglish": "Take her count downstream",
+        "labelHebrew": "לקחת את הספירה שלה במורד הזרם"
+      }
+    ],
+    "npcIds": [
+      "hessa-of-the-kilns"
+    ]
+  },
+  {
+    "nodeId": "down-to-the-ford",
+    "titleEnglish": "The Warden Who Works Alone",
+    "sceneEnglish": "An hour downstream the river widens and finally drops what it has been carrying. Warden Ilva keeps this stretch by herself, which is not how the wardens have ever done it, and she says so before you can. She counts the fish up the ladder every morning and writes the number down. The number has been the same for eleven days.",
+    "locationId": "drowned-ford",
+    "preconditions": [
+      {
+        "kind": "node_completed",
+        "nodeId": "up-to-the-kilns"
+      }
+    ],
+    "effects": [
+      {
+        "kind": "advance_calendar",
+        "days": 1
+      },
+      {
+        "kind": "shift_npc_affinity",
+        "npcId": "warden-ilva",
+        "delta": 1
+      }
+    ],
+    "edges": [
+      {
+        "to": "the-drowned-ford",
+        "labelEnglish": "Go down to the shallow bank with her",
+        "labelHebrew": "לרדת איתה אל הגדה הרדודה"
+      },
+      {
+        "to": "the-fish-ladder",
+        "labelEnglish": "Go straight to the fish ladder",
+        "labelHebrew": "לגשת היישר אל סולם הדגים"
+      }
+    ],
+    "npcIds": [
+      "warden-ilva"
+    ]
+  },
+  {
+    "nodeId": "the-drowned-ford",
+    "titleEnglish": "What the Ash Drove Down",
+    "sceneEnglish": "The shallow bank is where the ash finally settles, and it is where everything that used to live upstream has come to stand in water it can still breathe. Not all of it is frightened. Some of it has been down here long enough to be hungry, and to have stopped minding the smell.",
+    "locationId": "drowned-ford",
+    "encounterId": "ford-wolves",
+    "preconditions": [
+      {
+        "kind": "node_completed",
+        "nodeId": "down-to-the-ford"
+      }
+    ],
+    "effects": [
+      {
+        "kind": "advance_calendar",
+        "days": 1
+      },
+      {
+        "kind": "shift_faction_relation",
+        "factionA": "river-wardens",
+        "factionB": "quiet-buyer",
+        "delta": -1
+      },
+      {
+        "kind": "shift_npc_affinity",
+        "npcId": "warden-ilva",
+        "delta": 1
+      }
+    ],
+    "edges": [
+      {
+        "to": "the-fish-ladder",
+        "labelEnglish": "Go on to the fish ladder",
+        "labelHebrew": "להמשיך אל סולם הדגים"
+      }
+    ],
+    "npcIds": [
+      "warden-ilva"
+    ]
+  },
+  {
+    "nodeId": "the-fish-ladder",
+    "titleEnglish": "Eleven Days of the Same Number",
+    "sceneEnglish": "The ladder is clean, in good repair, and completely empty. Ilva's number has not changed in eleven days because nothing has gone up it in eleven days, and the reason is settled on the bottom of every step in a fine grey layer that is not silt. Whatever the night crews are burning out of the ore, this is where the rest of it ends up.",
+    "locationId": "drowned-ford",
+    "preconditions": [
+      {
+        "kind": "node_completed",
+        "nodeId": "down-to-the-ford"
+      },
+      {
+        "kind": "faction_band_at_least",
+        "factionA": "river-wardens",
+        "factionB": "quiet-buyer",
+        "band": "cold"
+      }
+    ],
+    "effects": [
+      {
+        "kind": "advance_calendar",
+        "days": 1
+      },
+      {
+        "kind": "long_rest"
+      },
+      {
+        "kind": "add_npc_fact",
+        "npcId": "warden-ilva",
+        "fact": "showed the player why her fish count has not moved in eleven days"
+      }
+    ],
+    "edges": [
+      {
+        "to": "the-buyers-barge",
+        "labelEnglish": "Wait for the barge that comes at night",
+        "labelHebrew": "להמתין לדוברה שמגיעה בלילה"
+      }
+    ],
+    "npcIds": [
+      "warden-ilva"
+    ]
+  },
+  {
+    "nodeId": "the-buyers-barge",
+    "titleEnglish": "The Barge That Comes at Night",
+    "sceneEnglish": "It moors without a lamp showing, which is the first honest thing anyone connected to this business has done all week. The hold is stacked, tallied and stamped with the mark off a dead ambusher's belt, and the two on deck are paid well enough not to ask you a single question first.",
+    "locationId": "drowned-ford",
+    "encounterId": "barge-hold",
+    "preconditions": [
+      {
+        "kind": "node_completed",
+        "nodeId": "the-fish-ladder"
+      }
+    ],
+    "effects": [
+      {
+        "kind": "advance_calendar",
+        "days": 1
+      },
+      {
+        "kind": "shift_faction_relation",
+        "factionA": "river-wardens",
+        "factionB": "quiet-buyer",
+        "delta": -1
+      },
+      {
+        "kind": "shift_faction_relation",
+        "factionA": "ashen-guild",
+        "factionB": "quiet-buyer",
+        "delta": -1
+      },
+      {
+        "kind": "add_npc_fact",
+        "npcId": "factor-arren",
+        "fact": "had his barge taken with the hold still stamped and tallied, which no polite answer covers"
+      }
+    ],
+    "edges": [
+      {
+        "to": "reckoning",
+        "labelEnglish": "Carry the hold's tally back to the inn",
+        "labelHebrew": "להביא את פנקס המטען חזרה אל הפונדק"
+      }
+    ],
+    "npcIds": []
   },
   {
     "nodeId": "tobins-errand",
@@ -165,9 +540,18 @@
     "sceneEnglish": "Old Tobin does not so much invite you as start walking and assume. The boathouse is a lean-to full of things the river has given back over forty years, and one shelf of things it has not. He wants a second pair of hands and, it becomes clear, a second opinion he can afford to ignore.",
     "locationId": "emberfall",
     "detour": true,
-    "preconditions": [{ "kind": "node_completed", "nodeId": "the-weir" }],
+    "preconditions": [
+      {
+        "kind": "node_completed",
+        "nodeId": "the-weir"
+      }
+    ],
     "effects": [
-      { "kind": "shift_npc_affinity", "npcId": "old-tobin", "delta": 1 },
+      {
+        "kind": "shift_npc_affinity",
+        "npcId": "old-tobin",
+        "delta": 1
+      },
       {
         "kind": "add_npc_fact",
         "npcId": "old-tobin",
@@ -180,6 +564,9 @@
         "labelEnglish": "Walk back down to the weir",
         "labelHebrew": "לחזור אל הסכר"
       }
+    ],
+    "npcIds": [
+      "old-tobin"
     ]
   },
   {
@@ -188,14 +575,98 @@
     "sceneEnglish": "The long table has been wiped down and the ledgers are gone. Sela is counting something under her breath and stops when she sees you. Whatever was decided last night, somebody now has to be the one who goes and tells the lower kilns, and nobody in this room has volunteered.",
     "locationId": "emberfall",
     "detour": true,
-    "preconditions": [{ "kind": "node_completed", "nodeId": "reckoning" }],
+    "preconditions": [
+      {
+        "kind": "node_completed",
+        "nodeId": "reckoning"
+      }
+    ],
     "effects": [
-      { "kind": "advance_calendar", "days": 1 },
+      {
+        "kind": "advance_calendar",
+        "days": 1
+      },
       {
         "kind": "add_npc_fact",
         "npcId": "sela-the-innkeeper",
         "fact": "asked the player to carry the reckoning's terms to the lower kilns"
       }
+    ],
+    "npcIds": [
+      "sela-the-innkeeper"
+    ]
+  },
+  {
+    "nodeId": "the-ash-shrine",
+    "titleEnglish": "The Niche Above the Fourth Terrace",
+    "sceneEnglish": "There is a niche cut into the rock above the fourth terrace, older than the kilns and swept clean, and Hessa walks past it four times a day without looking at it. She looks at it now, because you are here and it would be rude not to, and she tells you who used to be left there and by whom, and how long ago the leaving stopped.",
+    "locationId": "kiln-terraces",
+    "detour": true,
+    "preconditions": [
+      {
+        "kind": "node_completed",
+        "nodeId": "up-to-the-kilns"
+      }
+    ],
+    "effects": [
+      {
+        "kind": "shift_npc_affinity",
+        "npcId": "hessa-of-the-kilns",
+        "delta": 1
+      },
+      {
+        "kind": "add_npc_fact",
+        "npcId": "hessa-of-the-kilns",
+        "fact": "told the player about the swept niche above the fourth terrace, which she does not discuss with the Guild"
+      }
+    ],
+    "edges": [
+      {
+        "to": "up-to-the-kilns",
+        "labelEnglish": "Walk back down to the terraces",
+        "labelHebrew": "לרדת בחזרה אל המדרגות"
+      }
+    ],
+    "npcIds": [
+      "hessa-of-the-kilns"
+    ]
+  },
+  {
+    "nodeId": "ilvas-count",
+    "titleEnglish": "Ilva's Morning Count",
+    "sceneEnglish": "She goes down at first light whether or not anyone is watching, and today anyone is. The count takes an hour, most of it standing still. Somewhere in the second half of it she stops explaining what she is doing and starts telling you why she is the only warden on this stretch, and what she said to the others.",
+    "locationId": "drowned-ford",
+    "detour": true,
+    "preconditions": [
+      {
+        "kind": "node_completed",
+        "nodeId": "down-to-the-ford"
+      }
+    ],
+    "effects": [
+      {
+        "kind": "long_rest"
+      },
+      {
+        "kind": "shift_npc_affinity",
+        "npcId": "warden-ilva",
+        "delta": 1
+      },
+      {
+        "kind": "add_npc_fact",
+        "npcId": "warden-ilva",
+        "fact": "explained to the player why she keeps the downstream stretch alone"
+      }
+    ],
+    "edges": [
+      {
+        "to": "down-to-the-ford",
+        "labelEnglish": "Walk back up to the mooring",
+        "labelHebrew": "לחזור אל המעגן"
+      }
+    ],
+    "npcIds": [
+      "warden-ilva"
     ]
   }
 ]

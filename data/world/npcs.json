@@ -24,5 +24,32 @@
     "grammaticalGender": "feminine",
     "locationId": "emberfall",
     "descriptionEnglish": "Keeps the only inn in town with a roof that holds. Takes no side, serves both, and hears everything twice."
+  },
+  {
+    "npcId": "hessa-of-the-kilns",
+    "nameEnglish": "Hessa of the Kilns",
+    "nameHebrew": "הסה מן הכבשנים",
+    "grammaticalGender": "feminine",
+    "locationId": "kiln-terraces",
+    "factionId": "ashen-guild",
+    "descriptionEnglish": "Kiln-mistress of the lower four terraces. She has burned charcoal for nineteen years and has never once been up to the top two after dark, which she will mention before you ask."
+  },
+  {
+    "npcId": "warden-ilva",
+    "nameEnglish": "Warden Ilva",
+    "nameHebrew": "אילבה השומרת",
+    "grammaticalGender": "feminine",
+    "locationId": "drowned-ford",
+    "factionId": "river-wardens",
+    "descriptionEnglish": "Keeps the downstream stretch alone, which is not how the wardens have ever done it. She counts the fish going up the ladder every morning and writes the number down, and the number has been the same for eleven days."
+  },
+  {
+    "npcId": "factor-arren",
+    "nameEnglish": "Factor Arren",
+    "nameHebrew": "ארן הסוכן",
+    "grammaticalGender": "masculine",
+    "locationId": "emberfall",
+    "factionId": "quiet-buyer",
+    "descriptionEnglish": "Holds the corner room at Sela's inn by the year and is in it perhaps one week in four. Answers every question politely, completely, and about something else."
   }
 ]

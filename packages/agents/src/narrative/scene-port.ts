@@ -6,6 +6,18 @@
 import type { AbilityKey, GrammaticalGender, Skill } from "@ai-dm/schemas";
 
 export type SceneBeat =
+  /**
+   * The campaign's first beat: the player is standing at the world's
+   * `startingNodeId` and nothing has been narrated yet.
+   *
+   * Distinct from `arrived` because the player did not travel here — the
+   * starting node is established by `campaign_started`'s genesis quartet, not
+   * by a traversal, so nothing in the log says they went anywhere. Narrating
+   * it as `arrived` would open every campaign by describing a journey that
+   * never happened. Its own variant rather than a flag, for the reason
+   * `ambushed` is: an exhaustive switch then forces each renderer to decide.
+   */
+  | { kind: "opening"; locationNameHebrew: string }
   | { kind: "arrived"; locationNameHebrew: string }
   // `arrived`'s twin for a node whose entry ALSO opens a combat bracket (the
   // encounter bridge in `pipeline.ts`). A separate variant rather than a flag
@@ -27,8 +39,17 @@ export interface SceneNarrationInput {
   sceneEnglish: string;
   playerNameHebrew: string;
   playerGender: GrammaticalGender;
-  /** Hebrew names of NPCs present at the node's location. May be empty. */
-  npcNamesHebrew: readonly string[];
+  /**
+   * The people standing in this scene. May be empty.
+   *
+   * Names AND descriptions, where this used to be bare `npcNamesHebrew`: a
+   * narrator handed only `מארן וס` can name her and nothing else, so every
+   * introduction read as a list of strangers. `descriptionEnglish` is the
+   * same authored `NpcDefinition` text the intent router and the GM tier
+   * already receive — English, translated at generation time like every
+   * other piece of game state (invariant 2), never copied through.
+   */
+  npcsPresent: readonly { nameHebrew: string; descriptionEnglish: string }[];
   /** The previous narrations, Hebrew, oldest first. */
   recentNarrations: readonly string[];
   /**

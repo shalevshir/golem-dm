@@ -3,6 +3,8 @@
   "startingDay": 1,
   "startingNodeId": "arrival",
   "factionRelations": [
-    { "factionA": "ashen-guild", "factionB": "river-wardens", "band": "cold" }
+    { "factionA": "ashen-guild", "factionB": "river-wardens", "band": "cold" },
+    { "factionA": "ashen-guild", "factionB": "quiet-buyer", "band": "cordial" },
+    { "factionA": "river-wardens", "factionB": "quiet-buyer", "band": "neutral" }
   ]
 }

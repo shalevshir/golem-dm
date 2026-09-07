@@ -380,9 +380,50 @@ export interface TurnPorts {
   skillAbilities: ReadonlyMap<Skill, AbilityKey>;
 }
 
-/** `structured_action` and `free_text` carry one; `join` does not. */
-function clientMessageIdOf(command: ClientMessage): string | undefined {
-  return command.type === "join" ? undefined : command.clientMessageId;
+/**
+ * A command the SERVER raises, never the wire. Deliberately not a member of
+ * `ClientMessage`: `opening` narrates the node the player starts in, and a
+ * client able to ask for it could re-narrate the opening at will, appending a
+ * `narrative_emitted` per request.
+ *
+ * It is handled as a full turn — same `emit`, same `sceneNarrate` ladder,
+ * same `turnTimeoutMs` budget, same deterministic fallback — rather than
+ * inside the `join` branch, which `transport/ws.ts` deliberately keeps
+ * read-only and outside the campaign lock so a reconnect can never be
+ * refused `turn_in_progress`.
+ */
+export type ServerCommand = { type: "opening" };
+
+/** Everything `handleCommand` dispatches on: the wire protocol plus the above. */
+export type PipelineCommand = ClientMessage | ServerCommand;
+
+/**
+ * Whether this campaign still owes its opening narration.
+ *
+ * Two conditions, both cheap and both read off the projection rather than the
+ * log: it must be a scene campaign, and nothing may have happened in it yet.
+ *
+ * `nextSequence === 1` is that second condition exactly. `createCampaign`
+ * (`campaign.ts`) appends `campaign_started` and returns `nextSequence: 1`,
+ * so a campaign still at 1 has been created and never played. A combat-only
+ * campaign is already at 2 — `POST /campaigns` with an `encounterId` calls
+ * `startEncounter` as well, appending `encounter_started` — so it fails this
+ * check on both counts, which is belt and braces rather than redundancy: the
+ * `scene` check is the one that carries the meaning.
+ *
+ * Once the opening beat's own `narrative_emitted` lands, this is false
+ * forever, which is what makes a reconnect replay the opening out of the log
+ * instead of paying for a second one.
+ */
+export function needsOpeningBeat(campaign: Campaign): boolean {
+  return campaign.state.world.scene !== null && campaign.nextSequence === 1;
+}
+
+/** `structured_action` and `free_text` carry one; `join` and `opening` do not. */
+function clientMessageIdOf(command: PipelineCommand): string | undefined {
+  return command.type === "join" || command.type === "opening"
+    ? undefined
+    : command.clientMessageId;
 }
 
 /**
@@ -487,8 +528,46 @@ const NARRATION_TERMINATORS = [".", "!", "?", "…"] as const;
  * a far better outcome than retrieval eating enough of the shared deadline
  * that narration itself has to fall back to deterministic prose (whole-
  * branch review finding 1).
+ *
+ * Raised from 750ms on 2026-09-07, against measurement. What this bounds is
+ * ONLY the embedding call — `retrieveMemories` races the deadline against
+ * `embedding.embed` and leaves the pgvector search unbounded — and that call
+ * measures p50 ~310ms, p95 ~515ms, max 660ms over 39 samples (isolated, and
+ * in-pipeline, warm and cold; a server's genuine first call was 458ms). At
+ * 750ms the cap sat about 1.4x over p95, which is no headroom at all for a
+ * network call, and 5 of 12 logged retrievals aborted exactly at it.
+ *
+ * An abort is worse than it looks: `memoriesForNodeId` latches only on
+ * success, so a turn that aborts re-runs the whole retrieval on the NEXT
+ * turn, and the next, for the rest of the node visit. The failure mode this
+ * prevents therefore costs repeated embedding calls, not one lost lookup.
+ *
+ * 2500ms is ~5x p95 and still an eighth of a 20s turn, and it is only ever
+ * fully spent on a call that was going to be thrown away anyway.
  */
-const RETRIEVAL_BUDGET_MS = 750;
+const RETRIEVAL_BUDGET_MS = 2_500;
+
+/**
+ * The `opening` beat's own narration budget, deliberately far above
+ * `turnTimeoutMs`.
+ *
+ * `turnTimeoutMs` sizes a TURN: on the `free_text` path it is shared across
+ * the classify call, the episode summary, the GM call and the narration, and
+ * the narration inherits only what is left. The opening is not that shape —
+ * it is a single narration call with nothing else in the turn — and the
+ * prompt asks it for a much longer paragraph than any other beat, because it
+ * is the one beat that has to orient a player who has been told nothing.
+ *
+ * Measured: a one-to-three sentence scene narration finishes in ~7s, and the
+ * opening at its full length overran the 20s turn cap and fell back to
+ * deterministic prose — the exact failure this constant exists to stop. The
+ * wait is not dead time: `narrative_token` frames stream, so the player
+ * watches the paragraph arrive rather than watching a spinner.
+ *
+ * It costs at most one call per campaign, before the player has done
+ * anything, so a generous ceiling here buys the first impression cheaply.
+ */
+const OPENING_NARRATION_BUDGET_MS = 60_000;
 
 function endsComplete(text: string): boolean {
   const trimmed = text.trimEnd();
@@ -590,7 +669,6 @@ function questNodeCard(
 ): {
   sceneEnglish: string;
   locationNameHebrew: string;
-  npcNamesHebrew: string[];
   npcIds: string[];
   // Widened over `IntentNpcPresent[]` to carry the real id too — the GM tier
   // needs it (a model cannot propose a legal `shift_npc_affinity`/
@@ -606,13 +684,30 @@ function questNodeCard(
   if (location === undefined) {
     throw new Error(`No location "${node.locationId}" in world ${authored.worldId}`);
   }
-  const present = Array.from(authored.npcs.values()).filter(
-    (npc) => npc.locationId === node.locationId,
-  );
+  // Who is in THIS scene, which is not the same question as who lives in
+  // this location. `emberfall` holds four NPCs, so every node there used to
+  // put an innkeeper and a visiting factor on the bridge alongside the two
+  // people the card actually describes as waiting — the narrator was handed
+  // a cast it had no business introducing. A node that names `npcIds` gets
+  // exactly those; one that does not falls back to the location's roster,
+  // which is what a node with nobody particular in it wants.
+  const present =
+    node.npcIds === undefined
+      ? Array.from(authored.npcs.values()).filter((npc) => npc.locationId === node.locationId)
+      : node.npcIds.map((npcId) => {
+          const npc = authored.npcs.get(npcId);
+          // `loadWorld` cross-references these, so this is unreachable for
+          // content that loaded — thrown rather than filtered for the reason
+          // the node and location lookups above are: a scene silently missing
+          // a person is worse than a loud failure.
+          if (npc === undefined) {
+            throw new Error(`No npc "${npcId}" in world ${authored.worldId}`);
+          }
+          return npc;
+        });
   return {
     sceneEnglish: node.sceneEnglish,
     locationNameHebrew: location.nameHebrew,
-    npcNamesHebrew: present.map((npc) => npc.nameHebrew),
     npcIds: present.map((npc) => npc.npcId),
     // The same people, in the shape the intent router needs. `present` is
     // already computed here, so the router and the narrator cannot disagree
@@ -725,7 +820,7 @@ function worldDeltaEventOrNull(
 
 export async function* handleCommand(
   campaign: Campaign,
-  command: ClientMessage,
+  command: PipelineCommand,
   ports: TurnPorts,
 ): AsyncIterable<ServerFrame> {
   /**
@@ -1061,7 +1156,13 @@ export async function* handleCommand(
       sceneEnglish: card.sceneEnglish,
       playerNameHebrew: statics.character.nameHebrew,
       playerGender: statics.character.grammaticalGender,
-      npcNamesHebrew: card.npcNamesHebrew,
+      // Mapped down rather than passed whole: `card.npcs` also carries
+      // `npcId` and `nameEnglish` for the router and the GM tier, and neither
+      // belongs in a narration brief.
+      npcsPresent: card.npcs.map((npc) => ({
+        nameHebrew: npc.nameHebrew,
+        descriptionEnglish: npc.descriptionEnglish,
+      })),
       recentNarrations: campaign.recentNarrations,
       memoryEnglish: memoryLines({
         npcs: card.npcIds.map((npcId) => {
@@ -1701,6 +1802,42 @@ export async function* handleCommand(
 
   try {
     switch (command.type) {
+      // The campaign's first paragraph. Raised by `transport/ws.ts` right
+      // after a join that found `needsOpeningBeat`, never by a client.
+      //
+      // It narrates and nothing else. No `quest_node_entered` is emitted for
+      // the starting node: `campaign_started`'s genesis already put the
+      // player there and `reduce` has already projected it, so the event
+      // would be a no-op that every replay has to fold and every reader has
+      // to explain. The bug being fixed is a missing paragraph, not a
+      // missing state change.
+      case "opening": {
+        // Re-checked here, not merely at the call site: this is a real turn
+        // taken under the campaign lock, and two sockets joining a fresh
+        // campaign at once must not both narrate its opening. The loser's
+        // check runs after the winner's `narrative_emitted` has landed.
+        if (!needsOpeningBeat(campaign)) return;
+
+        const statics = sceneStaticsOf(campaign);
+        const card = questNodeCard(statics.authored, currentScene().currentNodeId);
+        yield* sceneNarrate(
+          statics.character.characterId,
+          { kind: "opening", locationNameHebrew: card.locationNameHebrew },
+          Date.now() + OPENING_NARRATION_BUDGET_MS,
+        );
+        // Ends in `playerAffordances()` like every other turn path, even
+        // though the `join` that raised this pushed an identical frame
+        // moments ago. The affordances are not identical by the time they
+        // land: `apps/web`'s store CLEARS `sceneAffordances` on every `event`
+        // frame (`state/store.ts`, "the board just moved"), so this turn's
+        // own `narrative_emitted` wipes the set the join sent and a client
+        // that got the opening paragraph would be left with prose and no
+        // buttons. Caught in the browser, not by a test — hence the
+        // assertion in `e2e.test.ts` that now pins the order.
+        yield* playerAffordances();
+        return;
+      }
+
       case "join": {
         // The existing body, verbatim, moved into a nested generator so all
         // four of its exits are covered by one affordance push rather than

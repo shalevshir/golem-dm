@@ -1347,6 +1347,18 @@ describe("handleCommand — free text", () => {
     expect(seen.map((each) => each.beat)).toEqual([
       { kind: "concluded", locationNameHebrew: "אמברפול" },
     ]);
+
+    // The cast is the NODE's, not the location's, and it carries each
+    // person's authored description rather than a bare name. `reckoning`
+    // names three; `factor-arren` also lives in `emberfall` and is
+    // deliberately not among them, which is what makes this a test of the
+    // node-scoped roster rather than of the location filter it replaced.
+    expect(seen[0]?.npcsPresent.map((npc) => npc.nameHebrew)).toEqual([
+      "מארן וס",
+      "טובין הזקן",
+      "סלה הפונדקאית",
+    ]);
+    expect(seen[0]?.npcsPresent.every((npc) => npc.descriptionEnglish.length > 0)).toBe(true);
   });
 
   it("does not re-apply a world delta when re-completing an already-completed node", async () => {

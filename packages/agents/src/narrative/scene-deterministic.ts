@@ -17,6 +17,7 @@ type GenderedForms = Readonly<Record<GrammaticalGender, string>>;
 
 const FORMS: Readonly<Record<string, GenderedForms>> = {
   arrives: { masculine: "מגיע", feminine: "מגיעה" },
+  stands: { masculine: "עומד", feminine: "עומדת" },
   concludes: { masculine: "מסיים", feminine: "מסיימת" },
   succeeds: { masculine: "מצליח", feminine: "מצליחה" },
   fails: { masculine: "נכשל", feminine: "נכשלת" },
@@ -43,6 +44,14 @@ function replyLine(category: "social" | "combat" | "ooc"): string {
 function sentenceFor(input: SceneNarrationInput): string {
   const { beat, playerNameHebrew, playerGender } = input;
   switch (beat.kind) {
+    // Two sentences, with the place standing alone, rather than the
+    // `אל <name>` shape `arrived` uses: an opening wants a locative ("at
+    // X"), and Hebrew builds that with a `ב` prefix that ABSORBS a leading
+    // `ה` — `המעבר הטבוע` would render as the ungrammatical `בהמעבר הטבוע`.
+    // Naming the place on its own dodges the whole question, and reads like
+    // the card it is.
+    case "opening":
+      return `${beat.locationNameHebrew}. ${playerNameHebrew} ${form("stands", playerGender)} כאן.`;
     case "arrived":
       return `${playerNameHebrew} ${form("arrives", playerGender)} אל ${beat.locationNameHebrew}.`;
     // Names the attackers, unlike `refused`'s deliberately generic line:

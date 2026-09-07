@@ -76,6 +76,53 @@ describe("encounter catalogue", () => {
   });
 });
 
+// The three arc encounters, held to the same geometry standard as
+// `goblin-ambush` above — and for a second reason it did not have: the arc
+// harness (`tools/sim/src/arc/`) picks an action out of the affordances frame
+// and never moves, so a fight that opens with nothing in reach stalls it for
+// `maxRounds`. Every entry in the catalogue must therefore be playable from
+// tile one, which is a property worth a test rather than a comment.
+describe("every catalogue encounter", () => {
+  const ARC_ENCOUNTERS = [
+    { encounterId: "ford-wolves", firstHostileId: "wolf-a" },
+    { encounterId: "slag-pit-cultists", firstHostileId: "cultist-a" },
+    { encounterId: "barge-hold", firstHostileId: "guard-a" },
+  ] as const;
+
+  it.each(ARC_ENCOUNTERS)("builds $encounterId from real SRD stat blocks", ({ encounterId }) => {
+    const built = buildEncounterById(encounterId);
+    expect(built.encounterId).toBe(encounterId);
+    expect(built.turnOrder).toEqual(built.world.combatants.map((each) => each.combatantId));
+    for (const combatant of built.world.combatants) {
+      expect(built.statBlocks.get(combatant.combatantId)).toBeDefined();
+    }
+    expect(new Set(built.world.combatants.map((each) => each.faction))).toEqual(
+      new Set(["party", "hostile"]),
+    );
+  });
+
+  it.each(ARC_ENCOUNTERS)(
+    "makes the hero's longsword legal on turn 1 of $encounterId",
+    ({ encounterId, firstHostileId }) => {
+      const built = buildEncounterById(encounterId);
+      const hero = built.world.combatants.find((each) => each.combatantId === "hero");
+      if (hero === undefined) throw new Error(`no hero in ${encounterId}`);
+
+      const turn: ExecuteTurn = {
+        actorId: "hero",
+        mainAction: {
+          actionType: "attack",
+          actionId: "longsword",
+          targetIds: [firstHostileId],
+        },
+        tacticalRationaleEnglish: "Test fixture.",
+      };
+
+      expect(validateExecuteTurn(turn, hero, built.world).valid).toBe(true);
+    },
+  );
+});
+
 describe("the goblin-ambush hero", () => {
   it("is a real character, not a borrowed guard stat block", () => {
     const built = buildEncounterById("goblin-ambush");

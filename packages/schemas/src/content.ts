@@ -220,6 +220,21 @@ export const QuestNode = z.object({
    * indistinguishable.
    */
   detour: z.boolean().default(false),
+  /**
+   * Who is present in this scene, by id. Absent means "everyone the
+   * location holds", which is the original behaviour and what a node with
+   * nobody particular in it wants.
+   *
+   * Optional rather than defaulted to `[]`, because absent and empty mean
+   * different things here: absent is "use the location's roster", `[]` is
+   * "this scene is deliberately empty of people". A `.default([])` would
+   * make the second unsayable.
+   *
+   * Not required to live at the node's own location: an NPC who has come to
+   * meet the player is a normal thing for a scene to want, and `loadWorld`
+   * checks only that the id resolves.
+   */
+  npcIds: z.array(ContentId).optional(),
 });
 
 export const FactionRelationEntry = z.object({
