@@ -1406,3 +1406,122 @@ describe("App (reset)", () => {
     });
   });
 });
+
+// The panel's own rendering is covered in `SheetPanel.test.tsx`; what matters
+// here is the wiring — that a scene campaign actually fetches the sheet and
+// that the panel is fed the LIVE HP rather than the sheet's load-time value.
+describe("App (character sheet)", () => {
+  const scene = {
+    worldId: "emberfall",
+    currentNodeId: "market-square",
+    detourReturnNodeId: null,
+    completedNodeIds: [],
+    relations: [],
+    npcAffinities: [],
+    day: 1,
+    heroHp: 9,
+  };
+
+  const sheet = {
+    characterId: "hero",
+    nameHebrew: "אלדד",
+    grammaticalGender: "masculine",
+    class: "fighter",
+    level: 3,
+    size: "medium",
+    abilityModifiers: { str: 3, dex: 1, con: 2, int: 0, wis: 1, cha: 0 },
+    proficiencyBonus: 2,
+    armorClass: 16,
+    initiative: 1,
+    speedFeet: 30,
+    passivePerception: 13,
+    maxHp: 28,
+    currentHp: 28,
+    tempHp: 0,
+    hitDice: "3d10",
+    savingThrows: { str: 5, dex: 1, con: 4, int: 0, wis: 1, cha: 0 },
+    skills: { athletics: 5 },
+    attacks: [
+      {
+        actionId: "longsword",
+        nameEnglish: "Longsword",
+        nameHebrew: "חרב ארוכה",
+        attackBonus: 5,
+        damage: { diceNotation: "1d8", averageDamage: 7, damageType: "slashing" },
+        extraDamage: [],
+      },
+    ],
+    attacksPerAction: 1,
+    inventory: [{ itemId: "chain_mail", nameHebrew: "שריון שרשראות", quantity: 1, equipped: true }],
+  };
+
+  function sceneSnapshot(): CampaignState {
+    return {
+      world: { campaignId: "s1", rootSeed: 3, appliedClientMessageIds: [], scene },
+      encounter: null,
+    };
+  }
+
+  beforeEach(() => {
+    window.history.pushState({}, "", "/?world=emberfall");
+    fetchMock.mockImplementation((...args: Parameters<typeof fetch>): Promise<Response> => {
+      const [input, init] = args;
+      // `RequestInfo` is a union, and only its string arm is ever used here —
+      // every call in `net/api.ts` passes a string literal.
+      const url = typeof input === "string" ? input : "";
+      const body =
+        init?.method === "POST"
+          ? { campaignId: "s1" }
+          : url.endsWith("/character")
+            ? sheet
+            : catalogue;
+      return Promise.resolve({
+        ok: true,
+        json: (): Promise<unknown> => Promise.resolve(body),
+      } as Response);
+    });
+  });
+
+  afterEach(() => {
+    window.history.pushState({}, "", "/");
+  });
+
+  it("fetches the sheet for a scene campaign and shows the projection's HP, not the sheet's", async () => {
+    await start();
+    act(() => {
+      socket.emitMessage({ type: "campaign_state", sequence: 0, snapshot: sceneSnapshot() });
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText("9/28")).toBeTruthy();
+    });
+    // The sheet said 28/28; the scene projection says the hero is on 9.
+    expect(screen.queryByText("28/28")).toBeNull();
+    expect(screen.getByText("שריון שרשראות")).toBeTruthy();
+  });
+
+  // A combat-only campaign has no scene character server-side (404), so the
+  // client must not ask for one at all.
+  it("never requests a character for a combat-only campaign", async () => {
+    window.history.pushState({}, "", "/");
+    await start();
+    act(() => {
+      socket.emitMessage({
+        type: "campaign_state",
+        sequence: 0,
+        snapshot: snapshotWith([
+          combatant("hero", "party", "alive"),
+          combatant("goblin-a", "hostile", "alive"),
+        ]),
+      });
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText(he.app.title)).toBeTruthy();
+    });
+    const asked = fetchMock.mock.calls.some((call: unknown[]) =>
+      String(call[0]).endsWith("/character"),
+    );
+    expect(asked).toBe(false);
+  });
+});

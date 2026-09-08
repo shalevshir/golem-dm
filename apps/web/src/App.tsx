@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { JSX } from "react";
 import type {
   ActionAffordance,
+  DerivedCharacter,
   ClientMessage,
   EncounterCatalogue,
   ServerFrame,
@@ -13,7 +14,7 @@ import type {
 import { conclusionOf } from "@ai-dm/schemas";
 import { connect } from "./net/connection.js";
 import type { Connection, ConnectionStatus, WebSocketLike } from "./net/connection.js";
-import { createCampaign, fetchCatalogue } from "./net/api.js";
+import { createCampaign, fetchCatalogue, fetchCharacter } from "./net/api.js";
 import { applyFrame, initialClientState } from "./state/store.js";
 import type { ClientState } from "./state/store.js";
 import {
@@ -30,6 +31,7 @@ import { Grid } from "./components/Grid.js";
 import { NarrativePane } from "./components/NarrativePane.js";
 import { ResetButton } from "./components/ResetButton.js";
 import { SceneOptions } from "./components/SceneOptions.js";
+import { SheetPanel } from "./components/SheetPanel.js";
 import { he } from "./i18n.js";
 
 const ENCOUNTER_ID = "goblin-ambush";
@@ -66,6 +68,12 @@ export function App(props: AppProps): JSX.Element {
     restoreClientState(sessionStorage.getItem(CAMPAIGN_STORAGE_KEY)),
   );
   const [catalogue, setCatalogue] = useState<EncounterCatalogue | null>(null);
+  // The derived sheet behind `SheetPanel`. Fetched once per campaign, not
+  // folded: it is derived data, so it is not in the event log at all.
+  const [character, setCharacter] = useState<DerivedCharacter | null>(null);
+  // Set when the sheet fetch fails. Nothing retries it, so the panel has to
+  // say so rather than sit on "loading" for the rest of the campaign.
+  const [characterUnavailable, setCharacterUnavailable] = useState(false);
   const [status, setStatus] = useState<ConnectionStatus>("connecting");
   // A click is stored together with the affordance set it was made against,
   // and counts only while that exact set is still the live one. `store.ts`
@@ -280,6 +288,39 @@ export function App(props: AppProps): JSX.Element {
     };
   }, [openEncounterId, catalogue?.encounterId]);
 
+  // The sheet is scene-campaign-only: `GET /campaigns/:id/character` answers
+  // 404 for a combat-only campaign, whose character arrives in the encounter
+  // catalogue instead. Keyed on the campaign id from the projection rather
+  // than on storage, so it fires exactly once the join is answered — and
+  // re-fires after a reset, because `restart` clears `character` and the new
+  // campaign carries a different id.
+  const sceneCampaignId =
+    state.snapshot !== null && state.snapshot.world.scene !== null
+      ? state.snapshot.world.campaignId
+      : null;
+  useEffect(() => {
+    if (sceneCampaignId === null) return;
+    if (character !== null || characterUnavailable) return;
+    const cancelled = { current: false };
+    void (async () => {
+      try {
+        const fetched = await fetchCharacter(sceneCampaignId);
+        if (!cancelled.current) setCharacter(fetched);
+      } catch {
+        // Not routed to `ErrorBanner`, unlike the catalogue's failure below:
+        // the board cannot render without a catalogue, so that one must
+        // surface, while the sheet is supplementary and a campaign that plays
+        // fine must not raise a banner because a side panel did not load. It
+        // is not swallowed either — the panel says it is unavailable, because
+        // a permanent "loading…" is indistinguishable from a slow network.
+        if (!cancelled.current) setCharacterUnavailable(true);
+      }
+    })();
+    return () => {
+      cancelled.current = true;
+    };
+  }, [sceneCampaignId, character, characterUnavailable]);
+
   // Everything it takes to stop owning a campaign: drop the stored id, close
   // whatever connection is live, and reset every piece of state a fresh mount
   // would otherwise read as "still in progress". Says nothing about what
@@ -301,6 +342,10 @@ export function App(props: AppProps): JSX.Element {
     sequenceRef.current = 0;
     setState(initialClientState);
     setCatalogue(null);
+    // Belongs to the campaign being discarded: left set, the next story's
+    // panel would open showing the previous hero's numbers.
+    setCharacter(null);
+    setCharacterUnavailable(false);
     // Part of "every piece of state a fresh mount would otherwise read as
     // still in progress" (see the comment above): left set, a NEXT scene
     // campaign would render its `FreeTextBar` disabled from its very first
@@ -520,6 +565,14 @@ export function App(props: AppProps): JSX.Element {
           onReconnect={reconnect}
         />
 
+        {/* Out of combat the projection's one player number is `heroHp`;
+            everything else on the panel is stable for the campaign. */}
+        <SheetPanel
+          character={character}
+          currentHp={scene.heroHp}
+          unavailable={characterUnavailable}
+        />
+
         <NarrativePane text={state.narrative} />
 
         {/* Above the input, not below it: the options are what the player
@@ -545,6 +598,15 @@ export function App(props: AppProps): JSX.Element {
 
   const conclusion = conclusionOf(encounter);
   const yourTurn = state.affordances !== null && conclusion === "ongoing";
+
+  // In a fight the combatant row is the live one — `scene.heroHp` is only
+  // reconciled when the bracket closes. Matched on `characterId`, not on
+  // faction: `party` is a faction, but the sheet belongs to one character,
+  // and a second party member would otherwise silently drive this panel.
+  const heroRow =
+    character === null
+      ? undefined
+      : encounter.combatants.find((each) => each.characterId === character.characterId);
 
   return (
     <main>
@@ -575,6 +637,15 @@ export function App(props: AppProps): JSX.Element {
         rejection={state.lastRejection}
         onDismiss={dismissError}
         onReconnect={reconnect}
+      />
+
+      {/* The summary line carries HP, which is what a player mid-fight
+          actually wants from a sheet; the rest is one click away. */}
+      <SheetPanel
+        character={character}
+        currentHp={heroRow?.currentHp ?? null}
+        unavailable={characterUnavailable}
+        {...(heroRow === undefined ? {} : { tempHp: heroRow.tempHp })}
       />
 
       <Grid

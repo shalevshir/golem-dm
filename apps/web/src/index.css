@@ -176,3 +176,101 @@ main {
   color: var(--alert);
   font-weight: 600;
 }
+
+/* The character sheet panel. `<details>` styling, so the collapsed state
+   needs no class of its own. */
+.sheet-panel {
+  border: 1px solid #d8cdbb;
+  border-radius: 4px;
+  background: #fffdf9;
+  margin-block: 1rem;
+  padding: 0.5rem 0.75rem;
+}
+
+.sheet-summary {
+  display: flex;
+  align-items: baseline;
+  gap: 0.75rem;
+  cursor: pointer;
+  font-weight: 600;
+}
+
+.sheet-name {
+  font-size: 1.1rem;
+}
+
+.sheet-subtitle {
+  font-weight: 400;
+  color: #6b6155;
+}
+
+/* Pushed to the far edge — logical, so it follows `dir="rtl"`. */
+.sheet-hp {
+  margin-inline-start: auto;
+  color: var(--accent);
+}
+
+.sheet-loading {
+  color: #6b6155;
+  margin: 0;
+}
+
+.sheet-body h3 {
+  font-size: 0.9rem;
+  margin-block: 0.9rem 0.35rem;
+  color: #6b6155;
+}
+
+.sheet-stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem 1.25rem;
+  margin-block-start: 0.75rem;
+}
+
+.sheet-stat {
+  display: flex;
+  gap: 0.4rem;
+}
+
+.sheet-stat-label {
+  color: #6b6155;
+}
+
+.sheet-stat-value {
+  font-weight: 600;
+}
+
+/* `auto-fill` rather than a fixed count: the six abilities and the eighteen
+   skills share this grid, and the narrow viewport has to reflow both. */
+.sheet-grid,
+.sheet-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(11rem, 1fr));
+  gap: 0.2rem 1rem;
+}
+
+.sheet-list {
+  grid-template-columns: repeat(auto-fill, minmax(14rem, 1fr));
+}
+
+.sheet-item-equipped {
+  font-weight: 600;
+}
+
+.sheet-equipped-tag {
+  margin-inline-start: 0.4rem;
+  font-size: 0.75rem;
+  font-weight: 400;
+  color: var(--accent);
+}
+
+/* Every Latin fragment in the sheet — dice notation, modifiers, a label that
+   fell back to its raw key. Isolated by `<bdi dir="ltr">` in the markup; this
+   only keeps the digits from crowding the Hebrew beside them. */
+.ltr-fragment {
+  margin-inline: 0.15rem;
+}
