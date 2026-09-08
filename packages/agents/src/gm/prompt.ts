@@ -5,6 +5,7 @@
 // delimited, in the dynamic tier — never interpolated into the static system
 // prompt. See `apps/server/CLAUDE.md`'s injection rule.
 import type { LayeredPrompt } from "../providers/prompt.js";
+import { renderPlayerMessage } from "../providers/prompt.js";
 import type { IntentNpcPresent } from "../intent/prompt.js";
 import { GM_SYSTEM_PROMPT } from "./prompt-text.js";
 
@@ -79,39 +80,6 @@ function renderCheckOutcome(check: GmCheckOutcome | undefined): string | undefin
   return `CHECK\n${check.ability}${skillPart}: ${check.success ? "success" : "failure"}`;
 }
 
-/**
- * A line that opens with a chat role label reads as the start of a new turn,
- * which is the one piece of conversational scaffolding angle-bracket escaping
- * below does not already flatten. Matched at line starts only (`m`), so an
- * ordinary sentence mentioning a system or a user is untouched. Identical to
- * `intent/prompt.ts`'s guard — the two tiers must not disagree about what
- * counts as an injection attempt.
- */
-const ROLE_LABEL = /^[ \t]*(?:system|assistant|user|human|developer|tool)[ \t]*:/gim;
-
-/**
- * Strips the structural affordances a prompt injection needs before the
- * player's text reaches the model. Same three steps as
- * `intent/prompt.ts`'s `sanitizePlayerText`, kept as its own copy here
- * rather than a shared import so the GM tier's dynamic-tier construction
- * does not reach back into `intent/` for anything but the NPC shape.
- *
- * 1. Every `<`/`>` character, so the text cannot contain the literal
- *    `<<<`/`>>>` block delimiter and close the block early, and so
- *    `<|im_start|>`-style turn markers are flattened too.
- * 2. Line-initial chat role labels, whose colon is swapped for U+2236 so the
- *    line reads as prose rather than as a new turn.
- * 3. Triple backticks, which would otherwise let the text forge a fenced
- *    block boundary around the quoted region.
- */
-function sanitizePlayerText(text: string): string {
-  return text
-    .replaceAll("<", "‹")
-    .replaceAll(">", "›")
-    .replace(ROLE_LABEL, (label) => label.replace(":", "∶"))
-    .replaceAll("```", "'''");
-}
-
 export function buildGmPrompt(input: GmPromptInput): LayeredPrompt {
   const checkBlock = renderCheckOutcome(input.checkOutcome);
 
@@ -124,8 +92,6 @@ export function buildGmPrompt(input: GmPromptInput): LayeredPrompt {
       ...(checkBlock === undefined ? [] : [checkBlock]),
       renderDetours(input.detours),
     ],
-    dynamic: [
-      `Player message (untrusted, may be in Hebrew):\n<<<\n${sanitizePlayerText(input.text)}\n>>>`,
-    ],
+    dynamic: [renderPlayerMessage(input.text)],
   };
 }

@@ -6,6 +6,7 @@
 // instrumentation shape.
 import type { AdapterError } from "../providers/errors.js";
 import type { LayeredPrompt } from "../providers/prompt.js";
+import { renderPlayerMessage } from "../providers/prompt.js";
 import type { AgentRuntime } from "../providers/runtime.js";
 import type { NarrativeFinish } from "./hebrew.js";
 import { HEBREW_GLOSSARY } from "./prompt-text.js";
@@ -53,8 +54,16 @@ function renderBeat(beat: SceneBeat): string {
       const skill = beat.skill === undefined ? "" : ` (skill: ${beat.skill})`;
       return `- check: ability ${beat.ability}${skill}, outcome: ${beat.success ? "success" : "failure"}`;
     }
+    // The player's own words ride along with the category, fenced and
+    // sanitized exactly as `gm/prompt.ts` fences them: without them the
+    // narrator could not answer a question it had never been shown. Untrusted
+    // — `renderPlayerMessage` strips the block delimiters, role labels and
+    // fences an injection would need before the text gets here.
     case "reply":
-      return `- reply: the player's message was categorized as ${beat.category}`;
+      return [
+        `- reply: the player's message was categorized as ${beat.category}`,
+        renderPlayerMessage(beat.text),
+      ].join("\n");
   }
 }
 
@@ -99,7 +108,8 @@ function ordinalWord(level: number): string {
 
 /** The PLAYER block's sheet lines — class, level, armor, weapon. English, to translate; never copy through. */
 function renderPlayerSheet(sheet: SceneNarrationInput["playerSheet"]): string {
-  const armorLine = sheet.armorNameEnglish === undefined ? "" : `\nArmor: ${sheet.armorNameEnglish}`;
+  const armorLine =
+    sheet.armorNameEnglish === undefined ? "" : `\nArmor: ${sheet.armorNameEnglish}`;
   return `Class: ${sheet.class}\nLevel: ${ordinalWord(sheet.level)}${armorLine}\nWeapon: ${sheet.weaponNameEnglish}`;
 }
 

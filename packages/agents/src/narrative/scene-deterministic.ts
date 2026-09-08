@@ -5,6 +5,12 @@
 //
 // States only what the brief carries. No invented nouns, no numbers.
 //
+// `reply` is asymmetric with the model tier for the same reason in reverse:
+// the beat now carries the player's own words so the narrator can answer a
+// question, and this renderer drops them. Echoing untrusted text straight back
+// as narration is not a fallback, it is a mirror — and this rung has no way to
+// tell a question from anything else.
+//
 // `refused` is deliberately asymmetric with the model tier: the model
 // explains WHY using the beat's English messages as ground truth, but this
 // renderer never echoes them — they are English, and this is the one place
