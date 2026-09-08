@@ -84,10 +84,17 @@ export async function summarizeEpisode(args: {
  * Embed, then write. Best-effort on purpose: the summary is already durable
  * in the event log by the time this runs, so a failure here costs retrieval
  * quality until the next reindex and costs correctness nothing (invariant 3).
- * It must never throw into the turn pipeline, and it must never outlast the
- * turn's own deadline — a stalled embed call is treated exactly like a
- * failed one (`!result.ok`): nothing is written, and control returns to the
- * caller promptly.
+ * It must never throw into the turn pipeline, and the embed call must never
+ * outlast the turn's own deadline — a stalled embed call is treated exactly
+ * like a failed one (`!result.ok`): nothing is written, and control returns
+ * to the caller promptly.
+ *
+ * The store write that follows is not raced against a deadline: every
+ * pipeline call site is `void indexEpisode(...)`, fire-and-forget, so a
+ * hung write costs the turn nothing — it only delays this function's own
+ * promise, which nothing is awaiting. A caller that starts awaiting this
+ * under a shared turn deadline would need to wrap the write the same way
+ * `retrieveMemories` wraps its search.
  */
 export async function indexEpisode(args: {
   store: EpisodicStore;
@@ -157,9 +164,10 @@ export async function indexEpisode(args: {
 
 /**
  * The `limit` nearest episodes' summaries, or an empty list on any failure
- * — including a stalled embedding call past `deadline`, treated the same as
- * a failed one. Retrieval is a prompt-quality nicety; it never blocks or
- * fails a turn, and it must never be the reason a turn's narration is late.
+ * — including a stalled embedding call or a stalled store search past
+ * `deadline`, both treated the same as a failed one. Retrieval is a
+ * prompt-quality nicety; it never blocks or fails a turn, and it must never
+ * be the reason a turn's narration is late.
  */
 export async function retrieveMemories(args: {
   store: EpisodicStore;
@@ -200,7 +208,14 @@ export async function retrieveMemories(args: {
   }
 
   try {
-    const hits = await args.store.search(args.campaignId, vector, args.limit);
+    const hits = await raceDeadline(
+      args.store.search(args.campaignId, vector, args.limit),
+      args.deadline,
+    );
+    if (hits === DEADLINE_TIMEOUT) {
+      args.onFailure?.("aborted");
+      return [];
+    }
     return hits.map((hit) => hit.memory.summaryEnglish);
   } catch (error) {
     args.onFailure?.("store_failed", messageOf(error));

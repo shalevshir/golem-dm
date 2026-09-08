@@ -35,12 +35,14 @@ says nothing about any real model's tactical quality.
 
 | Flag          | Values                                                              | Default                 |
 | ------------- | ------------------------------------------------------------------- | ----------------------- |
-| `--mode`      | `probe` \| `encounter` \| `both` \| `narrative`                     | `both`                  |
+| `--mode`      | `probe` \| `encounter` \| `both` \| `narrative` \| `arc`            | `both`                  |
 | `--live`      | absent \| present                                                   | absent                  |
 | `--arms`      | comma-separated arm ids from `src/config.ts`, **requires `--live`** | every arm when `--live` |
 | `--seeds`     | comma-separated integers                                            | `1,2,3,4,5`             |
 | `--scenarios` | comma-separated scenario ids                                        | all four                |
 | `--review-sheet` | absent \| present, **requires `--mode narrative`**               | absent                  |
+| `--server`    | HTTP origin of a running server, **requires `--mode arc`**          | `http://127.0.0.1:3000` |
+| `--steps`     | positive integer, **requires `--mode arc`**                         | `40`                    |
 
 An unrecognised `--flag` (including a singular typo like `--scenario` or `--seed`)
 is rejected with the list of known flags, rather than silently falling through to
@@ -70,6 +72,53 @@ silently ignore it. `--review-sheet` itself prints `src/live/review-sheet.ts`'s
 name/glossary/condition tables) to stdout, separate from the `Wrote <path>`
 lines on stderr, so redirecting `pnpm --silent sim --live --mode narrative
 --review-sheet` to a file captures only the sheet.
+
+## `--mode arc` — the whole-session harness
+
+Every other mode measures one agent against fixtures. `--mode arc` plays a
+**whole authored arc** against a RUNNING server, as the player: it reads the
+`scene_affordances` frame, sends an edge's own `labelHebrew` back as
+`free_text`, drives any combat bracket from `turn_affordances`, and records
+what the real intent router, GM tier and narrative agent did with it.
+
+```bash
+pnpm dev                                   # in another terminal — PORT=3000
+pnpm sim --mode arc                        # walks data/world/arc.json
+pnpm sim --mode arc --steps 80 --server http://127.0.0.1:3001
+```
+
+It needs a running server because `loadWorld`, the encounter catalogue and
+`core/pipeline.ts` all live in `apps/server`, and invariant 5 forbids
+depending on that package — so the harness talks to it over the wire like any
+other client. That also means **there is no `--live`**: the models under test
+are whichever ones that server wired, so an arc run is live by construction,
+and `--live`/`--arms` are rejected in combination with it.
+
+What it reports, and what it cannot:
+
+- **Router accuracy** per step — the chosen edge's `to` versus the node
+  `quest_node_entered` actually named. Every step sends the edge label
+  verbatim, so this is the router's floor, not a paraphrase test.
+- **Narration source mix** from `narrative_emitted.source`; a high
+  `deterministic` share means the fallback is carrying the session. Verbatim
+  text is kept for traversal turns only, in `steps[].narrations`, and that is
+  what `report.md`'s "Narration, in order" prints. Join-time and combat-turn
+  narrations are counted in `narrationSources` but their text is discarded, so
+  the printed lines do not reconcile with that tally — a native-speaker read,
+  or a grep for Latin letters inside Hebrew names, covers only the traversal
+  share of a session that fought.
+- **Combat**: hero turns and outcome per bracket. Actions are chosen from the
+  affordances frame alone — the server already validated everything in it, so
+  the harness never re-derives legality (invariant 1).
+- **Not cost, not per-agent retries.** Neither crosses the wire; both go to
+  the server's own `MetricsPort`. Latency in the report is client-observed and
+  covers the whole turn — router, GM tier, engine and narration together.
+
+`finish` is the first thing to read. `stalled` means every open edge out of a
+node was tried and none moved the player — the walk stops there instead of
+burning the step budget on an identical failure, and the `error` column
+carries the server's own reason (a missing provider key reads exactly like a
+router misclassification without it).
 
 ## Live benchmarking
 

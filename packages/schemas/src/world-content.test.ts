@@ -27,17 +27,20 @@ describe("the authored world", () => {
     expect(manifest.startingNodeId).toBe("arrival");
   });
 
-  // Doubles as the scope guard, which is why it asserts exact counts rather
-  // than `toBeGreaterThan`. §4.7 sizes this world at one town, two factions
-  // and three NPCs; the arc was five nodes until §4.7 step 5 added the one
-  // that declares an encounter, which is the whole point of the combat
-  // bridge — moved deliberately, not drifted past. §4.7 step 9 added two more
-  // as detours, reusing the existing cast, so the other three counts hold.
-  it("parses every collection, and is still deliberately tiny", () => {
-    expect(LocationDefinition.array().parse(readJson("locations.json"))).toHaveLength(1);
-    expect(FactionDefinition.array().parse(readJson("factions.json"))).toHaveLength(2);
-    expect(NpcDefinition.array().parse(readJson("npcs.json"))).toHaveLength(3);
-    expect(QuestNode.array().parse(readJson("arc.json"))).toHaveLength(8);
+  // Still a scope guard, which is why it asserts exact counts rather than
+  // `toBeGreaterThan` — but the scope it guards has deliberately changed.
+  // §4.7 sized this world at one town, two factions and three NPCs, and it
+  // stayed there through step 5's encounter node and step 9's two detours.
+  // It is now a second act larger: three locations, three factions, six NPCs
+  // and nineteen nodes, authored so that a whole-session run
+  // (`tools/sim --mode arc`) has enough arc to actually exercise the router,
+  // the GM tier and the narrator, which eight nodes and one fight could not.
+  // A count moving again should still be a decision someone made, not drift.
+  it("parses every collection at the size the arc was authored to", () => {
+    expect(LocationDefinition.array().parse(readJson("locations.json"))).toHaveLength(3);
+    expect(FactionDefinition.array().parse(readJson("factions.json"))).toHaveLength(3);
+    expect(NpcDefinition.array().parse(readJson("npcs.json"))).toHaveLength(6);
+    expect(QuestNode.array().parse(readJson("arc.json"))).toHaveLength(19);
   });
 
   // Exercised by real content rather than only by a unit fixture: an NPC who
@@ -57,15 +60,25 @@ describe("the authored world", () => {
     expect(reckoning?.edges).toEqual([]);
   });
 
-  // Both predicate kinds and all four effect kinds appear in the shipped arc,
-  // so the schemas are exercised by content and not only by unit fixtures.
-  it("uses both predicate kinds and all four effect kinds", () => {
+  // Both predicate kinds and every effect kind appear in the shipped arc, so
+  // the schemas are exercised by content and not only by unit fixtures.
+  // `long_rest` joined this list with the second act: it is what lets four
+  // encounters sit on one road without the third being unwinnable, and until
+  // there was a second fight to pace against, no shipped node had a reason to
+  // declare it.
+  it("uses both predicate kinds and every effect kind", () => {
     const nodes = QuestNode.array().parse(readJson("arc.json"));
     const predicateKinds = new Set(nodes.flatMap((n) => n.preconditions.map((p) => p.kind)));
     const effectKinds = new Set(nodes.flatMap((n) => n.effects.map((e) => e.kind)));
     expect(predicateKinds).toEqual(new Set(["node_completed", "faction_band_at_least"]));
     expect(effectKinds).toEqual(
-      new Set(["shift_faction_relation", "advance_calendar", "shift_npc_affinity", "add_npc_fact"]),
+      new Set([
+        "shift_faction_relation",
+        "advance_calendar",
+        "shift_npc_affinity",
+        "add_npc_fact",
+        "long_rest",
+      ]),
     );
   });
 });

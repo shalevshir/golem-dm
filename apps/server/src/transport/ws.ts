@@ -4,7 +4,7 @@
 import type { FastifyInstance } from "fastify";
 import { ClientMessage } from "@ai-dm/schemas";
 import type { ServerFrame } from "@ai-dm/schemas";
-import { handleCommand } from "../core/pipeline.js";
+import { handleCommand, needsOpeningBeat } from "../core/pipeline.js";
 import type { TurnPorts } from "../core/pipeline.js";
 import type { Campaign } from "../core/campaign.js";
 import type { CampaignRegistry } from "./http.js";
@@ -158,6 +158,36 @@ export function registerWebSocketRoute(app: FastifyInstance, input: WebSocketRou
           // do) would leave the rest of that turn unwritten. `send` above
           // is what makes it safe to keep pulling after the socket closes.
           for await (const frame of handleCommand(campaign, command, input.ports)) send(frame);
+
+          // The campaign's opening paragraph, raised by the server on the
+          // first join of a never-played scene campaign. It runs HERE, after
+          // the join has been answered, rather than inside the join branch:
+          // that branch is deliberately read-only and outside the campaign
+          // lock (see guard 2 above) so a reconnect can never be refused
+          // `turn_in_progress`, and narrating is neither read-only nor
+          // something two sockets may do at once.
+          //
+          // So it takes the lock like any other turn, and simply skips if it
+          // cannot get it — a held lock means another socket is already
+          // playing this campaign, and `needsOpeningBeat` will be false by
+          // the time it lets go. Skipping is also why the pipeline re-checks
+          // the same condition itself rather than trusting this call site.
+          if (command.type === "join" && needsOpeningBeat(campaign)) {
+            const openingId = campaign.state.world.campaignId;
+            if (input.registry.tryBegin(openingId)) {
+              try {
+                for await (const frame of handleCommand(
+                  campaign,
+                  { type: "opening" },
+                  input.ports,
+                )) {
+                  send(frame);
+                }
+              } finally {
+                input.registry.end(openingId);
+              }
+            }
+          }
         } catch (error) {
           // The log is already consistent — `emit` appends before it yields —
           // so the socket reporting a failure does not leave a torn campaign.

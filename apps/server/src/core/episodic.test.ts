@@ -341,6 +341,45 @@ describe("retrieveMemories", () => {
     expect(lines).toEqual([]);
   });
 
+  it('reports a deadline loss through onFailure as "aborted" when the store search hangs past the deadline', async () => {
+    const embedding = createFakeEmbeddingPort();
+    const hangingStore = { write: () => Promise.resolve(), search: () => hangs<never>() };
+    let reported: string | undefined;
+
+    const lines = await retrieveMemories({
+      store: hangingStore,
+      embedding,
+      spec: DEFAULT_EMBEDDING_SPEC,
+      campaignId: "c1",
+      queryEnglish: "anything",
+      limit: 3,
+      deadline: ALREADY_PAST,
+      onFailure: (code) => {
+        reported = code;
+      },
+    });
+
+    expect(lines).toEqual([]);
+    expect(reported).toBe("aborted");
+  });
+
+  it("returns an empty list, not a hang, when the store search hangs past the deadline", async () => {
+    const embedding = createFakeEmbeddingPort();
+    const hangingStore = { write: () => Promise.resolve(), search: () => hangs<never>() };
+
+    const lines = await retrieveMemories({
+      store: hangingStore,
+      embedding,
+      spec: DEFAULT_EMBEDDING_SPEC,
+      campaignId: "c1",
+      queryEnglish: "anything",
+      limit: 3,
+      deadline: ALREADY_PAST,
+    });
+
+    expect(lines).toEqual([]);
+  });
+
   // Code review finding: same conflation as `indexEpisode`'s — a
   // `store.search` throw used to be reported as "embed_failed".
   it("reports a store search failure as \"store_failed\", distinct from an embedding failure", async () => {

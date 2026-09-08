@@ -845,6 +845,87 @@ describe("end to end", () => {
   //   - `fold(clientState, eventFrames(log.frames))` disagrees with the
   //     fresh `reloaded` projection: the client-visible event stream and
   //     the server's own log have forked.
+  // The campaign's first paragraph. Before this, `campaign_started` was
+  // followed straight by the player's first `player_input`: the starting node
+  // is established by the genesis quartet rather than by a traversal, so it
+  // never passed through the only code that narrates a node, and every
+  // campaign opened on a blank screen with two buttons.
+  it("narrates the opening node on a first join, and never again", async () => {
+    const { app, url, store } = await startServer();
+    const campaignId = await createWorldCampaignOver(app);
+
+    const socket = await connect(url);
+    const log = new FrameLog(socket);
+    await joinAndAck(socket, log, campaignId);
+
+    // Nothing was sent after the join — the server raises this turn itself.
+    await log.waitFor(
+      (frames) => eventFrames(frames).some((each) => each.type === "narrative_emitted"),
+      "the opening narration, with no command sent",
+    );
+
+    const afterFirstJoin = await store.readSince(campaignId, -1);
+    expect(afterFirstJoin.map((each) => each.type)).toEqual([
+      "campaign_started",
+      "narrative_emitted",
+    ]);
+
+    // The opening must be FOLLOWED by a fresh affordance frame, not merely
+    // preceded by the join's. `apps/web`'s store clears `sceneAffordances` on
+    // every `event` frame, so the join's set is already gone by the time the
+    // narration lands — without this the player reads the opening paragraph
+    // and has no edges to choose from. Found by playing it, not by a test.
+    const kinds = log.frames.map((frame) =>
+      frame.type === "event" ? `event:${frame.event.type}` : frame.type,
+    );
+    // `lastIndexOf`, not `indexOf`: the join pushes its own
+    // `scene_affordances` first, so the earliest one always precedes the
+    // narration. What matters is that a LATER one follows it.
+    expect(kinds.lastIndexOf("scene_affordances")).toBeGreaterThan(
+      kinds.lastIndexOf("event:narrative_emitted"),
+    );
+
+    // A reconnect must replay that paragraph out of the log, never pay for a
+    // second one: `needsOpeningBeat` is false the moment the first lands.
+    const second = await connect(url);
+    const secondLog = new FrameLog(second);
+    await joinAndAck(second, secondLog, campaignId);
+    const replayed = await connect(url);
+    const replayedLog = new FrameLog(replayed);
+    await joinAndAck(replayed, replayedLog, campaignId, 0);
+    await replayedLog.waitFor(
+      (frames) => eventFrames(frames).some((each) => each.type === "narrative_emitted"),
+      "the opening narration replayed from the log",
+    );
+
+    expect((await store.readSince(campaignId, -1)).map((each) => each.type)).toEqual([
+      "campaign_started",
+      "narrative_emitted",
+    ]);
+  });
+
+  // A combat-only campaign has no scene and therefore no node to open on.
+  // `needsOpeningBeat`'s first condition, exercised against the real join.
+  it("raises no opening beat for a combat-only campaign", async () => {
+    const { app, url, store } = await startServer();
+    const response = await app.inject({
+      method: "POST",
+      url: "/campaigns",
+      payload: { encounterId: "goblin-ambush" },
+    });
+    const campaignId = CampaignCreated.parse(response.json()).campaignId;
+
+    const socket = await connect(url);
+    const log = new FrameLog(socket);
+    await joinAndAck(socket, log, campaignId);
+
+    // `campaign_started` plus the `encounter_started` that `POST /campaigns`
+    // with an `encounterId` opens — and nothing narrated, which is the point.
+    const types = (await store.readSince(campaignId, -1)).map((each) => each.type);
+    expect(types).toEqual(["campaign_started", "encounter_started"]);
+    expect(types).not.toContain("narrative_emitted");
+  });
+
   it("walks a scene campaign into combat and back out to narration", async () => {
     const { app, url, store } = await startServer();
     const campaignId = await createWorldCampaignOver(app);

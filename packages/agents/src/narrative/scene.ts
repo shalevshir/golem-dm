@@ -24,6 +24,12 @@ import {
  */
 function renderBeat(beat: SceneBeat): string {
   switch (beat.kind) {
+    // "opens at", never "reached": this is where the story starts, and the
+    // player has not travelled to get here. The prompt's own SCENE section
+    // carries the node's card, so this line only has to establish that the
+    // paragraph is an opening rather than an arrival.
+    case "opening":
+      return `- opening: the story begins with the player already at ${beat.locationNameHebrew}`;
     case "arrived":
       return `- arrived: the player reached ${beat.locationNameHebrew}`;
     // The hostiles ride in the beat (the DYNAMIC tier) rather than in
@@ -52,21 +58,72 @@ function renderBeat(beat: SceneBeat): string {
   }
 }
 
-function renderNpcs(npcNamesHebrew: readonly string[]): string {
-  return ["NPCS PRESENT", ...npcNamesHebrew.map((name) => `- ${name}`)].join("\n");
+function renderNpcs(npcs: SceneNarrationInput["npcsPresent"]): string {
+  return [
+    "NPCS PRESENT (name them exactly as written; the English after each name is what they are like, to translate into the scene, never to copy)",
+    ...npcs.map((npc) => `- ${npc.nameHebrew}: ${npc.descriptionEnglish}`),
+  ].join("\n");
+}
+
+// Levels run 1–20 (`DerivedCharacter.level`) — a flat table is smaller than a
+// cardinal-to-ordinal conversion, and `prompt.ts`'s `COUNT_WORDS` is
+// cardinal ("two"), not ordinal, and stops at twelve, so it isn't reusable
+// here.
+const ORDINAL_WORDS = [
+  "first",
+  "second",
+  "third",
+  "fourth",
+  "fifth",
+  "sixth",
+  "seventh",
+  "eighth",
+  "ninth",
+  "tenth",
+  "eleventh",
+  "twelfth",
+  "thirteenth",
+  "fourteenth",
+  "fifteenth",
+  "sixteenth",
+  "seventeenth",
+  "eighteenth",
+  "nineteenth",
+  "twentieth",
+];
+
+/** `level` (1–20) as an ordinal WORD — never a digit reaches the prompt. */
+function ordinalWord(level: number): string {
+  return ORDINAL_WORDS[level - 1] ?? "first";
+}
+
+/** The PLAYER block's sheet lines — class, level, armor, weapon. English, to translate; never copy through. */
+function renderPlayerSheet(sheet: SceneNarrationInput["playerSheet"]): string {
+  const armorLine = sheet.armorNameEnglish === undefined ? "" : `\nArmor: ${sheet.armorNameEnglish}`;
+  return `Class: ${sheet.class}\nLevel: ${ordinalWord(sheet.level)}${armorLine}\nWeapon: ${sheet.weaponNameEnglish}`;
+}
+
+/**
+ * Volatile player state, for the `dynamic` tier — only ever called when
+ * `buildScenePrompt` has already decided the HP band is non-default.
+ */
+function renderPlayerStatus(healthBand: SceneNarrationInput["playerHealthBand"]): string {
+  return `PLAYER STATUS\nHP: ${healthBand}`;
 }
 
 export function buildScenePrompt(input: SceneNarrationInput): LayeredPrompt {
   const semiStatic = [
     `SCENE\n${input.sceneEnglish}`,
-    `PLAYER\nName: ${input.playerNameHebrew}\nGender: ${input.playerGender}`,
+    // The sheet lines ride here UNCONDITIONALLY, never gated on a per-turn
+    // value — see `PlayerSheet`'s doc comment.
+    `PLAYER\nName: ${input.playerNameHebrew}\nGender: ${input.playerGender}\n${renderPlayerSheet(input.playerSheet)}`,
   ];
 
   // Omitted rather than sent empty: an empty "NPCS PRESENT" section is a line
   // of uncached tokens naming nobody. Mirrors `prompt.ts`'s treatment of
   // `recentNarrations`.
-  if (input.npcNamesHebrew.length > 0) {
-    semiStatic.push(renderNpcs(input.npcNamesHebrew));
+  if (input.npcsPresent.length > 0) {
+    semiStatic.push(renderNpcs(input.npcsPresent));
   }
 
   // Stable for as long as the campaign stands at this node — semiStatic, not
@@ -78,6 +135,13 @@ export function buildScenePrompt(input: SceneNarrationInput): LayeredPrompt {
   }
 
   const dynamic = [renderBeat(input.beat)];
+
+  // Omitted rather than sent as "healthy": that is the common turn, and a
+  // line saying so is uncached tokens spent stating the default.
+  if (input.playerHealthBand !== "healthy") {
+    dynamic.push(renderPlayerStatus(input.playerHealthBand));
+  }
+
   if (input.recentNarrations.length > 0) {
     dynamic.push(
       ["RECENT NARRATION (do not reuse its verbs, imagery or sentence shapes)"]

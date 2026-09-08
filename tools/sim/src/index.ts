@@ -15,6 +15,7 @@ import {
   DEFAULT_MODEL_ROUTING,
   NARRATIVE_PROMPT_VERSION,
 } from "@ai-dm/agents";
+import { runArcMode } from "./arc/mode.js";
 import { parseArgs } from "./cli.js";
 import { runLive } from "./live/run.js";
 import { runNarrativeBenchmark, SCRIPTED_BRIEFS } from "./live/narrative.js";
@@ -127,6 +128,20 @@ export async function main(): Promise<void> {
   const config = parseArgs(process.argv.slice(2));
   const generatedAt = new Date().toISOString();
 
+  if (config.mode === "arc") {
+    const { jsonPath, markdownPath } = await runArcMode({
+      runId: `arc-${generatedAt.replaceAll(":", "-")}`,
+      generatedAt,
+      gitCommit: gitCommit(),
+      serverUrl: config.serverUrl,
+      maxSteps: config.arcSteps,
+      runsDir: RUNS_DIR,
+    });
+    console.warn(`Wrote ${jsonPath}`);
+    console.warn(`Wrote ${markdownPath}`);
+    return;
+  }
+
   if (config.mode === "narrative") {
     const { jsonPath, markdownPath } = await runNarrativeMode({
       runId: `${config.live ? "live" : "smoke"}-narrative-${generatedAt.replaceAll(":", "-")}`,
@@ -141,7 +156,7 @@ export async function main(): Promise<void> {
   }
 
   // `config.mode` is narrowed to "probe" | "encounter" | "both" here by the
-  // early return above — `runLive`/`runSmoke` never see "narrative".
+  // early returns above — `runLive`/`runSmoke` never see "narrative".
   //
   // `--live` and the smoke path share everything downstream of `report` — the
   // only difference is which port produced the records. Real credentials are

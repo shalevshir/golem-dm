@@ -246,6 +246,9 @@ export function loadWorld(dir: string = dataDir(WORLD_DIR_RELATIVE)): AuthoredWo
     if (node.encounterId !== undefined && !hasEncounter(node.encounterId)) {
       problems.push(`${where} references unknown encounter "${node.encounterId}"`);
     }
+    for (const npcId of node.npcIds ?? []) {
+      checkRef({ kind: "npc", id: npcId }, `${where} npcIds`);
+    }
     for (const edge of node.edges) {
       checkRef({ kind: "quest node", id: edge.to }, `${where} edge`);
       // A detour has no authored way in — that is what makes it a detour, and

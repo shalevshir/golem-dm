@@ -4,5 +4,17 @@
     "nameEnglish": "Emberfall",
     "nameHebrew": "אמברפול",
     "descriptionEnglish": "A river town of two hundred, wedged between a working weir and a hillside of charcoal kilns. The water tastes of ash in the dry months, and everyone has an opinion about why."
+  },
+  {
+    "locationId": "kiln-terraces",
+    "nameEnglish": "The Kiln Terraces",
+    "nameHebrew": "מדרגות הכבשנים",
+    "descriptionEnglish": "Six cut terraces above the town, each with its own kiln and its own spoil heap. The Guild works the lower four in daylight. The upper two are worked at night, by people the terrace crews do not know by name."
+  },
+  {
+    "locationId": "drowned-ford",
+    "nameEnglish": "The Drowned Ford",
+    "nameHebrew": "המעבר הטבוע",
+    "descriptionEnglish": "An hour downstream, where the river widens and the ash it carries finally settles. There was a cart ford here within living memory. There is now a barge mooring, and nobody in Emberfall remembers agreeing to it."
   }
 ]

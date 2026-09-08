@@ -34,6 +34,9 @@ export const DerivedCharacter = z.object({
   savingThrows: ByAbility,
   skills: z.record(Skill, z.number().int()),
 
+  /** English display name of equipped body armor. Absent when unarmored — never the shield, which `attacks`/`armorClass` fold in but do not name. */
+  armorNameEnglish: z.string().optional(),
+
   /**
    * Never empty: an Unarmed Strike is always derived, so a character with no
    * equipped weapon still satisfies `CreatureStatBlock.actions.min(1)`.

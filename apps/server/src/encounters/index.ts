@@ -41,8 +41,118 @@ const GOBLIN_AMBUSH: EncounterDefinition = {
   maxRounds: 20,
 };
 
+// The three encounters below follow GOBLIN_AMBUSH's geometry rule for the
+// reason its comment gives — everyone starts within melee reach — plus a
+// second one it did not have to state: the hero (`data/characters/hero.json`)
+// carries a longsword and nothing else, so a hostile spawned out of reach can
+// only be answered by closing the distance. A player can do that; the arc
+// harness (`tools/sim/src/arc/`) picks from the affordances frame and never
+// moves, so a fight that opens at range would stall it for `maxRounds`.
+//
+// They also do NOT escalate in raw power, which is deliberate and worth
+// stating once. A level-3 fighter with 28 HP, AC 16 and no Extra Attack deals
+// about 5 damage a round; GOBLIN_AMBUSH already deals about 5 back, so the
+// shipped baseline is a knife-edge fight and there is no XP or levelling
+// anywhere to grow out of it. Escalating totals would just produce an arc that
+// always ends in a corpse at the same node. These vary in SHAPE instead —
+// creature type, count, AC band, speed, terrain — which is what actually
+// exercises the tactical agent and the narrator.
+
+/** Two wolves: low AC, fast, beasts rather than people. Easier than the baseline. */
+const FORD_WOLVES: EncounterDefinition = {
+  encounterId: "ford-wolves",
+  descriptionEnglish:
+    "Two wolves, driven downstream by the ash, take the hero at the ford's shallow bank " +
+    "on a 12x12 field with a band of difficult ground along the water.",
+  sceneEnglish:
+    "The shallow end of a river ford at grey noon. Loose shingle underfoot, ankle-deep " +
+    "water two paces off, and a low ash haze that flattens every sound to nothing.",
+  width: 12,
+  height: 12,
+  // The water: crossable, costly, and off the line between the spawns, so it
+  // is a choice the tactical agent can make rather than a wall in the way.
+  terrain: [
+    { tile: [2, 4], terrain: "difficult" },
+    { tile: [2, 5], terrain: "difficult" },
+    { tile: [2, 6], terrain: "difficult" },
+    { tile: [2, 7], terrain: "difficult" },
+  ],
+  spawns: [
+    { combatantId: "hero", characterId: "hero", faction: "party", position: [6, 6] },
+    { combatantId: "wolf-a", monsterId: "wolf", faction: "hostile", position: [7, 5] },
+    { combatantId: "wolf-b", monsterId: "wolf", faction: "hostile", position: [7, 7] },
+  ],
+  turnOrder: ["hero", "wolf-a", "wolf-b"],
+  maxRounds: 20,
+};
+
+/** Three cultists: the first fight where the hero must choose a target. */
+const SLAG_PIT_CULTISTS: EncounterDefinition = {
+  encounterId: "slag-pit-cultists",
+  descriptionEnglish:
+    "Three cultists working a slag pit turn on the hero in melee range on a 14x14 " +
+    "terrace, with spoil heaps offering half cover away from the opening exchange.",
+  sceneEnglish:
+    "A kiln terrace at dusk, cut into the hillside. The ground is warm slag and grit, the " +
+    "light is low and red off the pit, and the air carries a dry mineral burn.",
+  width: 14,
+  height: 14,
+  // Spoil heaps, placed off the hero-to-cultist line so round one stays a
+  // clean melee exchange and the cover is something to manoeuvre toward.
+  terrain: [
+    { tile: [4, 4], terrain: "half_cover" },
+    { tile: [4, 5], terrain: "half_cover" },
+    { tile: [4, 9], terrain: "half_cover" },
+    { tile: [10, 11], terrain: "difficult" },
+    { tile: [11, 11], terrain: "difficult" },
+  ],
+  spawns: [
+    { combatantId: "hero", characterId: "hero", faction: "party", position: [7, 7] },
+    { combatantId: "cultist-a", monsterId: "cultist", faction: "hostile", position: [8, 6] },
+    { combatantId: "cultist-b", monsterId: "cultist", faction: "hostile", position: [8, 7] },
+    { combatantId: "cultist-c", monsterId: "cultist", faction: "hostile", position: [8, 8] },
+  ],
+  turnOrder: ["hero", "cultist-a", "cultist-b", "cultist-c"],
+  maxRounds: 20,
+};
+
+/**
+ * Two guards on a barge deck. AC 16 against the hero's +5 is the point: this
+ * is the one fight where the hero misses about as often as they hit, so the
+ * narrator has to make a run of misses read as something other than a stall.
+ */
+const BARGE_HOLD: EncounterDefinition = {
+  encounterId: "barge-hold",
+  descriptionEnglish:
+    "Two hired guards defend a moored barge's hold in melee range on a cramped 10x10 " +
+    "deck, with stacked cargo blocking the corners.",
+  sceneEnglish:
+    "The open hold of a moored barge, after dark. Wet planking underfoot, one shuttered " +
+    "lamp throwing hard shadows off the cargo, and the hull knocking against the piles.",
+  width: 10,
+  height: 10,
+  // Cargo. Blocking rather than cover: on a deck this size it is the only
+  // thing that makes position mean anything at all.
+  terrain: [
+    { tile: [1, 1], terrain: "blocking" },
+    { tile: [1, 2], terrain: "blocking" },
+    { tile: [8, 8], terrain: "blocking" },
+    { tile: [8, 7], terrain: "blocking" },
+  ],
+  spawns: [
+    { combatantId: "hero", characterId: "hero", faction: "party", position: [5, 5] },
+    { combatantId: "guard-a", monsterId: "guard", faction: "hostile", position: [6, 4] },
+    { combatantId: "guard-b", monsterId: "guard", faction: "hostile", position: [6, 6] },
+  ],
+  turnOrder: ["hero", "guard-a", "guard-b"],
+  maxRounds: 25,
+};
+
 const CATALOGUE = new Map<string, EncounterDefinition>([
   [GOBLIN_AMBUSH.encounterId, GOBLIN_AMBUSH],
+  [FORD_WOLVES.encounterId, FORD_WOLVES],
+  [SLAG_PIT_CULTISTS.encounterId, SLAG_PIT_CULTISTS],
+  [BARGE_HOLD.encounterId, BARGE_HOLD],
 ]);
 
 /**

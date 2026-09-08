@@ -19,6 +19,15 @@ describe("deriveCharacter", () => {
     expect(deriveCharacter(sheet(), GEAR).armorClass).toBe(16);
   });
 
+  it("names the equipped body armor in English", () => {
+    expect(deriveCharacter(sheet(), GEAR).armorNameEnglish).toBe("Chain Mail");
+  });
+
+  it("leaves armorNameEnglish absent for an unarmored character", () => {
+    const unarmored = sheet({ inventory: [{ itemId: "longsword", quantity: 1, equipped: true }] });
+    expect(deriveCharacter(unarmored, GEAR).armorNameEnglish).toBeUndefined();
+  });
+
   it("applies the armor Strength penalty to speed", () => {
     const weak = sheet({ abilities: { str: 12, dex: 12, con: 14, int: 10, wis: 12, cha: 10 } });
     expect(deriveCharacter(weak, GEAR).speedFeet).toBe(20);
