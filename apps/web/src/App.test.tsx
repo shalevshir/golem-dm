@@ -956,7 +956,9 @@ describe("App (scene mode, out-of-combat free text)", () => {
     // be sent from here, because the component that builds one (ActionBar,
     // via App's `commit`) is simply not mounted.
     expect(
-      socket.sent.some((each) => (JSON.parse(each) as { type: string }).type === "structured_action"),
+      socket.sent.some(
+        (each) => (JSON.parse(each) as { type: string }).type === "structured_action",
+      ),
     ).toBe(false);
   });
 
@@ -1286,5 +1288,121 @@ describe("App (?world= query param)", () => {
     expect(await screen.findByText(he.app.defeat)).toBeInTheDocument();
     expect(sessionStorage.getItem(CAMPAIGN_STORAGE_KEY)).toBe("s1");
     expect(sessionStorage.getItem(LOG_STORAGE_KEY)).not.toBeNull();
+  });
+});
+
+// The player-facing "start a new story" control. `ResetButton.test.tsx` covers
+// the confirmation; what matters here is the half it cannot see — that
+// confirming actually mints a NEW campaign rather than resuming the old one.
+describe("App (reset)", () => {
+  const scene = {
+    worldId: "emberfall",
+    currentNodeId: "market-square",
+    detourReturnNodeId: null,
+    completedNodeIds: [],
+    relations: [],
+    npcAffinities: [],
+    day: 1,
+    heroHp: 10,
+  };
+
+  function sceneSnapshot(campaignId: string): CampaignState {
+    return {
+      world: { campaignId, rootSeed: 3, appliedClientMessageIds: [], scene },
+      encounter: null,
+    };
+  }
+
+  beforeEach(() => {
+    window.history.pushState({}, "", "/?world=emberfall");
+    // A distinct id per POST, so "a second campaign was created" is provable
+    // rather than inferred from a call count alone.
+    let created = 0;
+    fetchMock.mockImplementation((...args: Parameters<typeof fetch>): Promise<Response> => {
+      const [, init] = args;
+      if (init?.method === "POST") {
+        created += 1;
+        return Promise.resolve({
+          ok: true,
+          json: (): Promise<unknown> => Promise.resolve({ campaignId: `s${String(created)}` }),
+        } as Response);
+      }
+      return Promise.resolve({
+        ok: true,
+        json: (): Promise<unknown> => Promise.resolve(catalogue),
+      } as Response);
+    });
+  });
+
+  afterEach(() => {
+    window.history.pushState({}, "", "/");
+  });
+
+  async function confirmReset(): Promise<void> {
+    await userEvent.click(screen.getByRole("button", { name: he.app.reset }));
+    await userEvent.click(screen.getByRole("button", { name: he.actions.confirm }));
+  }
+
+  it("creates a second campaign and joins it, rather than resuming the first", async () => {
+    await start();
+    act(() => {
+      socket.emitMessage({ type: "campaign_state", sequence: 0, snapshot: sceneSnapshot("s1") });
+    });
+    expect(sessionStorage.getItem(CAMPAIGN_STORAGE_KEY)).toBe("s1");
+
+    await confirmReset();
+
+    await waitFor(() => {
+      expect(sessionStorage.getItem(CAMPAIGN_STORAGE_KEY)).toBe("s2");
+    });
+    await waitFor(() => {
+      socket.emitOpen();
+      expect(
+        socket.sent.map((each) => JSON.parse(each) as { type: string; campaignId?: string }),
+      ).toContainEqual({ type: "join", campaignId: "s2" });
+    });
+  });
+
+  // The bug the nonce exists to avoid: joining the new campaign carrying the
+  // old one's `resumeFrom` would ask the server to replay from a sequence
+  // that belongs to a different log.
+  it("joins the new campaign with no resumeFrom, whatever the old one reached", async () => {
+    await start();
+    act(() => {
+      socket.emitMessage({ type: "campaign_state", sequence: 0, snapshot: sceneSnapshot("s1") });
+      socket.emitMessage({
+        type: "event",
+        event: event(7, "narrative_emitted", { text: NARRATION }),
+      });
+    });
+
+    const before = socket.sent.length;
+    await confirmReset();
+
+    await waitFor(() => {
+      socket.emitOpen();
+      expect(socket.sent.length).toBeGreaterThan(before);
+    });
+    expect(JSON.parse(socket.sent[before] ?? "{}")).toEqual({ type: "join", campaignId: "s2" });
+  });
+
+  // The narration pane and the roll log live in `sessionStorage`, not in the
+  // server's projection: a reset that left them behind would open the new
+  // story with the old one's last paragraph still on screen.
+  it("clears the narration the discarded campaign left on screen", async () => {
+    await start();
+    act(() => {
+      socket.emitMessage({ type: "campaign_state", sequence: 0, snapshot: sceneSnapshot("s1") });
+      // A token frame, not the `narrative_emitted` event: the pane renders
+      // the accumulated stream, and the event only closes it.
+      socket.emitMessage({ type: "narrative_token", streamId: "n1", text: NARRATION });
+    });
+    expect(screen.getByText(NARRATION)).toBeTruthy();
+
+    await confirmReset();
+
+    await waitFor(() => {
+      expect(screen.queryByText(NARRATION)).toBeNull();
+    });
   });
 });

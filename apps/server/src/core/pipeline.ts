@@ -2605,7 +2605,7 @@ export async function* handleCommand(
             yield* gmStep();
             yield* sceneNarrate(
               statics.character.characterId,
-              { kind: "reply", category: classification.category },
+              { kind: "reply", category: classification.category, text: command.text },
               deadline,
             );
             yield* playerAffordances();

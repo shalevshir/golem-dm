@@ -18,6 +18,8 @@ export const he = {
     defeat: "הובסתם",
     stalemate: "הקרב הגיע למבוי סתום",
     startFight: "התחל קרב",
+    reset: "סיפור חדש",
+    resetConfirm: "לוותר על הסיפור הזה ולהתחיל מחדש?",
     reconnect: "התחבר מחדש",
   },
   freeText: {

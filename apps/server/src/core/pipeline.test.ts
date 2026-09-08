@@ -1757,7 +1757,11 @@ describe("handleCommand — free text: narrate-only categories", () => {
       "intent_classified",
       "narrative_emitted",
     ]);
-    expect(seen.map((each) => each.beat)).toEqual([{ kind: "reply", category: "combat" }]);
+    expect(seen.map((each) => each.beat)).toEqual([
+      // The player's own words reach the narrator, not just the category:
+      // without them a question is answered by continuing the scene past it.
+      { kind: "reply", category: "combat", text: "I draw my sword" },
+    ]);
   });
 });
 

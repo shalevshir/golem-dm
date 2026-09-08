@@ -32,7 +32,22 @@ export type SceneBeat =
   | { kind: "concluded"; locationNameHebrew: string }
   | { kind: "refused"; messages: readonly string[] }
   | { kind: "check"; ability: AbilityKey; skill?: Skill; success: boolean }
-  | { kind: "reply"; category: "social" | "combat" | "ooc" };
+  /**
+   * The player said or did something that needs a grounded reply.
+   *
+   * `text` is the player's own words, verbatim — the ONLY place in the scene
+   * brief where Hebrew arrives as input rather than leaving as output. Without
+   * it the narrator was handed the category and nothing else, so a direct
+   * question ("who is Tobin?") was answered by continuing the scene from the
+   * node card: no stage in the free-text pipeline could see what was asked.
+   * The GM tier already carries the same text under the same fence
+   * (`gm/prompt.ts`), so this is that precedent, not a new one — invariant 2's
+   * sanctioned Hebrew fields are event payloads, and a prompt is neither.
+   *
+   * Renders into the `dynamic` tier only (`scene.ts`): it changes every turn,
+   * so a cached tier would bust the prefix on every call.
+   */
+  | { kind: "reply"; category: "social" | "combat" | "ooc"; text: string };
 
 /**
  * The player's stable gear and class — the sheet's mirror of `npcsPresent`'s

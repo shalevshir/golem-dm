@@ -36,24 +36,18 @@ function endsComplete(text: string): boolean {
 
 describe("createDeterministicSceneNarrative", () => {
   it("names the location on arrival", async () => {
-    const text = await textOf(
-      input(ELDAD, { kind: "arrived", locationNameHebrew: "הכיכר" }),
-    );
+    const text = await textOf(input(ELDAD, { kind: "arrived", locationNameHebrew: "הכיכר" }));
     expect(text).toContain("הכיכר");
     expect(endsComplete(text)).toBe(true);
   });
 
   it("agrees the arrival verb with a feminine subject", async () => {
-    const text = await textOf(
-      input(RANGER, { kind: "arrived", locationNameHebrew: "הכיכר" }),
-    );
+    const text = await textOf(input(RANGER, { kind: "arrived", locationNameHebrew: "הכיכר" }));
     expect(text).toBe("רעות מגיעה אל הכיכר.");
   });
 
   it("agrees the arrival verb with a masculine subject", async () => {
-    const text = await textOf(
-      input(ELDAD, { kind: "arrived", locationNameHebrew: "הכיכר" }),
-    );
+    const text = await textOf(input(ELDAD, { kind: "arrived", locationNameHebrew: "הכיכר" }));
     expect(text).toBe("אלדד מגיע אל הכיכר.");
   });
 
@@ -92,32 +86,38 @@ describe("createDeterministicSceneNarrative", () => {
   });
 
   it("renders a failure line for a failed check, agreeing with a feminine subject", async () => {
-    const text = await textOf(input(RANGER, { kind: "check", ability: "wis", skill: "insight", success: false }));
+    const text = await textOf(
+      input(RANGER, { kind: "check", ability: "wis", skill: "insight", success: false }),
+    );
     expect(text).toBe("רעות נכשלת בניסיון.");
   });
 
   it("says fighting is not possible here for a combat reply", async () => {
-    const text = await textOf(input(ELDAD, { kind: "reply", category: "combat" }));
+    const text = await textOf(
+      input(ELDAD, { kind: "reply", category: "combat", text: "מי זה טובין?" }),
+    );
     expect(text).toContain("קרב");
     expect(endsComplete(text)).toBe(true);
   });
 
   it("renders a non-empty terminated line for a social reply", async () => {
-    const text = await textOf(input(ELDAD, { kind: "reply", category: "social" }));
+    const text = await textOf(
+      input(ELDAD, { kind: "reply", category: "social", text: "מי זה טובין?" }),
+    );
     expect(text.length).toBeGreaterThan(0);
     expect(endsComplete(text)).toBe(true);
   });
 
   it("renders a non-empty terminated line for an ooc reply", async () => {
-    const text = await textOf(input(ELDAD, { kind: "reply", category: "ooc" }));
+    const text = await textOf(
+      input(ELDAD, { kind: "reply", category: "ooc", text: "מי זה טובין?" }),
+    );
     expect(text.length).toBeGreaterThan(0);
     expect(endsComplete(text)).toBe(true);
   });
 
   it("never emits a digit", async () => {
-    const text = await textOf(
-      input(ELDAD, { kind: "arrived", locationNameHebrew: "הכיכר" }),
-    );
+    const text = await textOf(input(ELDAD, { kind: "arrived", locationNameHebrew: "הכיכר" }));
     expect(text).not.toMatch(/[0-9]/);
   });
 
