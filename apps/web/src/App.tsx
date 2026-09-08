@@ -28,6 +28,7 @@ import { ErrorBanner } from "./components/ErrorBanner.js";
 import { FreeTextBar } from "./components/FreeTextBar.js";
 import { Grid } from "./components/Grid.js";
 import { NarrativePane } from "./components/NarrativePane.js";
+import { ResetButton } from "./components/ResetButton.js";
 import { SceneOptions } from "./components/SceneOptions.js";
 import { he } from "./i18n.js";
 
@@ -111,7 +112,8 @@ export function App(props: AppProps): JSX.Element {
   //   3. `onStatus`, on any transition away from `"open"`. A send dropped
   //      client-side on a closed socket produces no frame at all, so `onFrame`
   //      never runs; this is the only site that sees that case.
-  //   4. `resetToStart` and `reconnect`, so a fresh campaign or a manual
+  //   4. `discardCampaign` (behind both `resetToStart` and the player's own
+  //      `restart`) and `reconnect`, so a fresh campaign or a manual
   //      reconnect never inherits a stale pending id.
   const [pendingFreeTextId, setPendingFreeTextId] = useState<string | null>(null);
 
@@ -162,9 +164,8 @@ export function App(props: AppProps): JSX.Element {
       const stored = sessionStorage.getItem(CAMPAIGN_STORAGE_KEY);
       const campaignId =
         stored ??
-        (
-          await createCampaign(worldId !== null ? { worldId } : { encounterId: ENCOUNTER_ID })
-        ).campaignId;
+        (await createCampaign(worldId !== null ? { worldId } : { encounterId: ENCOUNTER_ID }))
+          .campaignId;
       // The staleness check comes first: a superseded run must not persist
       // ITS campaign id over whatever the surviving run has already written
       // (or is about to write) — see `runIdRef` above.
@@ -279,11 +280,11 @@ export function App(props: AppProps): JSX.Element {
     };
   }, [openEncounterId, catalogue?.encounterId]);
 
-  // The one teardown that gets back to a clean start screen: drop the stored
-  // campaign id, close whatever connection is live, and reset every piece of
-  // state a fresh mount would otherwise read as "still in progress". Used by
-  // the automatic `unknown_campaign` recovery below — the campaign is gone, so
-  // there is nothing to resume and nothing to weigh.
+  // Everything it takes to stop owning a campaign: drop the stored id, close
+  // whatever connection is live, and reset every piece of state a fresh mount
+  // would otherwise read as "still in progress". Says nothing about what
+  // happens next — its two callers below disagree about that, and that
+  // disagreement is the only difference between them.
   //
   // `sequenceRef` is part of "every piece": it is not React state, so it
   // survives this reset unless cleared by hand, and the next campaign's join
@@ -292,7 +293,7 @@ export function App(props: AppProps): JSX.Element {
   // server falls back to a full `campaign_state`); if that fallback ever
   // changes, the client would get bare `event` frames against a null
   // snapshot and drop every one of them, hanging on "connecting…".
-  const resetToStart = useCallback(() => {
+  const discardCampaign = useCallback(() => {
     sessionStorage.removeItem(CAMPAIGN_STORAGE_KEY);
     clearStoredClientState();
     connectionRef.current?.close();
@@ -300,13 +301,37 @@ export function App(props: AppProps): JSX.Element {
     sequenceRef.current = 0;
     setState(initialClientState);
     setCatalogue(null);
-    setStarted(false);
     // Part of "every piece of state a fresh mount would otherwise read as
     // still in progress" (see the comment above): left set, a NEXT scene
     // campaign would render its `FreeTextBar` disabled from its very first
     // frame, for a send that named a campaign this reset just discarded.
     setPendingFreeTextId(null);
   }, []);
+
+  // Back to a clean start screen. Used by the automatic `unknown_campaign`
+  // recovery below — the campaign is gone, so there is nothing to resume and
+  // nothing to weigh, and the player has to choose to begin again.
+  const resetToStart = useCallback(() => {
+    discardCampaign();
+    setStarted(false);
+  }, [discardCampaign]);
+
+  // The player asking for a new story, mid-campaign (`ResetButton`). Unlike
+  // `resetToStart` this does NOT go back to the start screen: the player has
+  // already said what they want, and a second button to press to get it is a
+  // step that answers a question nobody asked.
+  //
+  // `started` therefore stays true, which is exactly why the nonce bump is
+  // what drives this. Flipping `started` false and true again in one commit
+  // would batch into no change at all, the connect effect would never re-run,
+  // and the app would sit on a connection `discardCampaign` had just closed.
+  // Bumping the nonce re-runs that effect for real; it then finds no stored
+  // id — this just cleared it — and mints a fresh campaign instead of
+  // resuming, which is the whole difference between this and `reconnect`.
+  const restart = useCallback(() => {
+    discardCampaign();
+    setReconnectNonce((previous) => previous + 1);
+  }, [discardCampaign]);
 
   // `internal_error`: the spec's error table says "Surface, and offer
   // reconnect", and reconnect is meant literally. Both producers
@@ -476,16 +501,17 @@ export function App(props: AppProps): JSX.Element {
 
     return (
       <main>
-        <h1>{he.app.title}</h1>
+        <header className="app-header">
+          <h1>{he.app.title}</h1>
+          <ResetButton onReset={restart} />
+        </header>
 
         {/* Out of combat there is no "turn" concept, so this mirrors only
             the connection half of the combat view's status line below --
             a dropped socket must not present as a dead input box with
             nothing explaining it (the inert-board soft-lock in a scene
             costume, whole-branch review finding 3). */}
-        <p className="status">
-          {status === "reconnecting" ? he.app.reconnecting : he.app.waiting}
-        </p>
+        <p className="status">{status === "reconnecting" ? he.app.reconnecting : he.app.waiting}</p>
 
         <ErrorBanner
           error={state.lastError}
@@ -522,7 +548,13 @@ export function App(props: AppProps): JSX.Element {
 
   return (
     <main>
-      <h1>{he.app.title}</h1>
+      <header className="app-header">
+        <h1>{he.app.title}</h1>
+        {/* Offered mid-fight too, not only out of combat: a campaign the
+            player wants to leave is at least as likely to be a fight going
+            badly as a scene going nowhere. */}
+        <ResetButton onReset={restart} />
+      </header>
 
       <p className="status">
         {conclusion === "defeat"

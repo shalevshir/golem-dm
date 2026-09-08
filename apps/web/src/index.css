@@ -150,3 +150,29 @@ main {
   opacity: 0.75;
   margin: 0;
 }
+
+/* The title and the reset control share a row, with the control pushed to the
+   far edge — `margin-inline-start: auto` and not `margin-left`, so it lands on
+   the left under `dir="rtl"` and would follow the direction if it changed. */
+.app-header {
+  display: flex;
+  align-items: baseline;
+  gap: 1rem;
+}
+
+.app-header .reset,
+.app-header .reset-confirm {
+  margin-inline-start: auto;
+}
+
+.reset-confirm {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.9rem;
+}
+
+.reset-yes {
+  color: var(--alert);
+  font-weight: 600;
+}
