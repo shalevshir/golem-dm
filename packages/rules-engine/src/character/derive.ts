@@ -10,6 +10,7 @@ import type {
   ClassDefinition,
   CreatureStatBlock,
   DerivedCharacter,
+  DerivedInventoryItem,
   Skill,
   SkillDefinition,
   WeaponDefinition,
@@ -70,6 +71,32 @@ function equipmentOf(
   }
 
   return { armor, weapons };
+}
+
+/**
+ * The carried list, each id paired with its Hebrew name. A second walk of
+ * `sheet.inventory` rather than another return value threaded out of
+ * `equipmentOf`: that function exists to pick out the equipped armor and
+ * weapons and to reject an illegal combination of them, and it deliberately
+ * `continue`s past everything else. This needs the opposite — every entry,
+ * equipped or not, in the order the sheet lists them.
+ *
+ * An id with neither a weapon nor an armor row is ordinary gear and keeps no
+ * `nameHebrew`; see `DerivedInventoryItem`. Armor is looked up before weapons
+ * to match `equipmentOf`'s own order, so an id that somehow appeared in both
+ * maps would resolve to the same row in both places rather than to two
+ * different names.
+ */
+function inventoryOf(sheet: CharacterSheet, gear: SrdGear): DerivedInventoryItem[] {
+  return sheet.inventory.map((entry) => {
+    const named = gear.armor.get(entry.itemId) ?? gear.weapons.get(entry.itemId);
+    return {
+      itemId: entry.itemId,
+      ...(named === undefined ? {} : { nameHebrew: named.nameHebrew }),
+      quantity: entry.quantity,
+      equipped: entry.equipped,
+    };
+  });
 }
 
 function modifiersOf(sheet: CharacterSheet): Record<AbilityKey, number> {
@@ -142,6 +169,7 @@ export function deriveCharacter(sheet: CharacterSheet, gear: SrdGear): DerivedCh
       shieldEquipped: armor.shield !== undefined,
     }),
     attacksPerAction,
+    inventory: inventoryOf(sheet, gear),
 
     ...(spellcastingAbility === undefined
       ? {}
