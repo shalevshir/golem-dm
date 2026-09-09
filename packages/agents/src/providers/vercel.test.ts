@@ -115,6 +115,55 @@ describe("generateStructured", () => {
     });
   });
 
+  // The cost bug this fixes: Anthropic's `input_tokens` excludes both cache
+  // reads and cache writes, so a cached narration reported ~22 prompt tokens
+  // for a prompt whose fixed system tier alone is over a thousand. The counts
+  // live in `providerMetadata`, which this adapter used to drop on the floor.
+  it("carries Anthropic cache reads and writes, which input_tokens excludes", async () => {
+    const port = portFor(
+      generatingModel(() =>
+        Promise.resolve({
+          rawCall: { rawPrompt: null, rawSettings: {} },
+          finishReason: "tool-calls" as const,
+          usage: { promptTokens: 22, completionTokens: 300 },
+          providerMetadata: {
+            anthropic: { cacheReadInputTokens: 1800, cacheCreationInputTokens: 0 },
+          },
+          toolCalls: [
+            {
+              toolCallType: "function" as const,
+              toolCallId: "call-1",
+              toolName: "execute_turn",
+              args: JSON.stringify(legalTurn),
+            },
+          ],
+        }),
+      ),
+    );
+
+    const result = await port.generateStructured(flash, turnRequest);
+
+    if (!result.ok) throw new Error("expected success");
+    expect(result.value.usage.cachedPromptTokens).toBe(1800);
+    expect(result.value.usage.cacheWritePromptTokens).toBe(0);
+    // Additive, never folded in: `promptTokens` stays the uncached remainder
+    // the provider actually billed at the full rate.
+    expect(result.value.usage.promptTokens).toBe(22);
+  });
+
+  // Absent is not zero. Zero means nothing was cached; absent means the
+  // provider said nothing, and a reader must not price it as a cache hit.
+  it("leaves the cache fields absent for a provider that reports no cache accounting", async () => {
+    const result = await portFor(returningToolCall(legalTurn)).generateStructured(
+      flash,
+      turnRequest,
+    );
+
+    if (!result.ok) throw new Error("expected success");
+    expect(result.value.usage.cachedPromptTokens).toBeUndefined();
+    expect(result.value.usage.cacheWritePromptTokens).toBeUndefined();
+  });
+
   // A malformed tool call must surface as a typed error value, not a thrown
   // string the caller has to pattern-match on.
   it("surfaces a schema-violating tool call as a typed error", async () => {
@@ -312,6 +361,36 @@ describe("streamText", () => {
       seen.filter((chunk) => chunk.type === "text-delta").map((chunk) => chunk.text),
     ).toStrictEqual(["הגובלין", " נסוג", " לאחור."]);
     expect(seen.at(-1)?.type).toBe("finish");
+  });
+
+  // The narration path is the one that pays for this: it is the only Anthropic
+  // role, and it streams, so the finish chunk is where its usage is read.
+  it("carries cache counts on the finish chunk of a stream", async () => {
+    const port = portFor(
+      streamingModel([
+        { type: "text-delta", textDelta: "הגובלין נסוג." },
+        {
+          type: "finish",
+          finishReason: "stop",
+          usage: { promptTokens: 22, completionTokens: 140 },
+          providerMetadata: {
+            anthropic: { cacheReadInputTokens: 0, cacheCreationInputTokens: 1800 },
+          },
+        },
+      ]),
+    );
+
+    const seen = [];
+    for await (const chunk of port.streamText(flash, { prompt: turnRequest.prompt })) {
+      seen.push(chunk);
+    }
+
+    const finish = seen.at(-1);
+    if (finish?.type !== "finish") throw new Error("expected a finish chunk");
+    // A write, not a read — the distinction the plan recorded as unmeasurable,
+    // and the one that decides whether a run costs 0.1x or 1.25x on the prefix.
+    expect(finish.usage.cacheWritePromptTokens).toBe(1800);
+    expect(finish.usage.cachedPromptTokens).toBe(0);
   });
 
   it("accumulates the full text on the finish chunk", async () => {

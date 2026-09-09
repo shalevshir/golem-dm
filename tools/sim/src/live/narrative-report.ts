@@ -15,6 +15,14 @@ export interface NarrativeRunReport extends NarrativeReport {
   live: boolean;
 }
 
+/**
+ * A share as a percentage, or "n/a" when there was nothing to divide — every
+ * sample errored. Never printed as 0%, which would claim a measured miss.
+ */
+function percentOrNa(share: number | null): string {
+  return share === null ? "n/a (no prompt tokens counted)" : `${(share * 100).toFixed(1)}%`;
+}
+
 function money(value: number | null): string {
   return value === null ? "unpriced" : `$${value.toFixed(4)}`;
 }
@@ -90,24 +98,17 @@ export function renderNarrativeMarkdown(report: NarrativeRunReport): string {
 
   lines.push("## Cost");
   lines.push("");
-  lines.push(`- Prompt tokens: ${String(report.usage.promptTokens)}`);
+  // Broken out rather than summed into one "prompt tokens" line: the three
+  // bill at different rates, and a run whose prefix is written on every call
+  // looks identical to one that reads it if they are added together.
+  lines.push(`- Prompt tokens: ${String(report.usage.promptTokens)} uncached`);
+  lines.push(`- Cache reads: ${String(report.usage.cachedPromptTokens)} prompt tokens`);
+  lines.push(`- Cache writes: ${String(report.usage.cacheWritePromptTokens)} prompt tokens`);
   lines.push(`- Completion tokens: ${String(report.usage.completionTokens)}`);
   lines.push(
     `- Cost: ${money(report.usage.costUsd)} total, ${money(report.usage.costPerNarrationUsd)} per narration`,
   );
-  // Both notes below are declared unconditionally — not only inside the
-  // costIsUnderreported branch that follows, which does not fire on a
-  // healthy run and would otherwise leave these two gaps undeclared for the
-  // common case.
-  lines.push(
-    "- Cached-token share: not reported — no adapter in this repo surfaces a cache-read count.",
-  );
-  lines.push(
-    "- Note: the cost above excludes cache-read tokens and is a lower bound whether or not " +
-      "the under-reported flag below is set — `promptTokens` is the provider's `input_tokens`, which " +
-      "does not include `cache_read_input_tokens` (see `NarrativeUsageSummary.costIsUnderreported`'s " +
-      "doc comment in live/narrative.ts).",
-  );
+  lines.push(`- Cached-token share: ${percentOrNa(report.usage.cachedTokenShare)}`);
   if (report.usage.costIsUnderreported) {
     lines.push("");
     lines.push(
