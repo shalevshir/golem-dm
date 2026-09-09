@@ -86,12 +86,47 @@ describe("renderNarrativeMarkdown", () => {
     expect(markdown).toContain("Prompt tokens: 900 uncached");
   });
 
-  it("says n/a for the share when nothing was counted, never 0%", () => {
+  // Restores coverage a deleted test took with it. Four tests were removed as
+  // pinning a limitation that no longer exists; three of them did, but one was
+  // the only place rendering a report with `costIsUnderreported: true`, and
+  // that branch is unrelated to the cache work and still matters.
+  it("still shouts when a billed attempt reported no usage at all", () => {
+    const markdown = renderNarrativeMarkdown(
+      report({ usage: { ...report().usage, costIsUnderreported: true } }),
+    );
+    expect(markdown).toContain("Cost is under-reported");
+  });
+
+  // A provider that reports no cache accounting must not read as a measured
+  // cache miss — routing is config, so the narrative role can point at one.
+  it("says the provider reported nothing rather than printing zero cache reads", () => {
+    const markdown = renderNarrativeMarkdown(
+      report({
+        usage: {
+          ...report().usage,
+          cachedPromptTokens: null,
+          cacheWritePromptTokens: null,
+          cachedTokenShare: null,
+        },
+      }),
+    );
+    expect(markdown).toContain("Cache reads: not reported by this provider");
+    expect(markdown).not.toContain("Cache reads: 0 prompt tokens");
+    // The WHOLE line: "n/a" alone matched either parenthetical, so it passed
+    // while the report told the reader the run was empty rather than that the
+    // provider was silent — two opposite meanings behind one prefix.
+    expect(markdown).toContain("Cached-token share: n/a (not reported by this provider)");
+  });
+
+  // The other null cause, and it must not borrow the first one's wording: here
+  // the provider DID report, there was simply nothing to divide.
+  it("distinguishes an empty run from a silent provider, never printing 0%", () => {
     const markdown = renderNarrativeMarkdown(
       report({ usage: { ...report().usage, cachedTokenShare: null } }),
     );
-    expect(markdown).toContain("Cached-token share: n/a");
+    expect(markdown).toContain("Cached-token share: n/a (no prompt tokens counted)");
     expect(markdown).not.toContain("Cached-token share: 0.0%");
+    expect(markdown).not.toContain("not reported by this provider");
   });
 
   it("says nothing about provider errors when there were none", () => {

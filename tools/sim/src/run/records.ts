@@ -20,6 +20,14 @@ export interface TurnRecord {
   adapterErrorCodes: readonly string[];
   promptTokens: number;
   completionTokens: number;
+  /**
+   * Cache reads and writes, summed across attempts. Additive to
+   * `promptTokens`, which excludes them — see `TokenUsage`. Zero for a
+   * provider that reports no cache accounting, which is every arm except an
+   * Anthropic one.
+   */
+  cachedPromptTokens: number;
+  cacheWritePromptTokens: number;
   /** False when any attempt was billed but reported no usage. */
   usageComplete: boolean;
   attemptsMissingUsage: number;
@@ -57,19 +65,42 @@ function outcomeOf(result: TurnProposalResult): TurnOutcome {
   return result.ok ? result.source : result.kind;
 }
 
-function totals(usage: readonly TokenUsage[]): { prompt: number; completion: number } {
+function totals(usage: readonly TokenUsage[]): {
+  prompt: number;
+  completion: number;
+  cached: number;
+  cacheWrite: number;
+} {
   return usage.reduce(
     (accumulator, each) => ({
       prompt: accumulator.prompt + each.promptTokens,
       completion: accumulator.completion + each.completionTokens,
+      // The Anthropic cache breakpoint is attached to every Anthropic call,
+      // `generateStructured` included, so a `claude-*` arm bills cache tokens
+      // on the tactical path exactly as the narrative role does. Dropping
+      // them here made this matrix's cost column — the one step 7b chose a
+      // model from — a silent lower bound for that arm.
+      //
+      // KNOWN GAP, recorded rather than hidden: `?? 0` cannot tell "this
+      // provider reports no cache accounting" from "this attempt carried
+      // usage but no `providerMetadata`", which is what a billed failure looks
+      // like (`NoObjectGeneratedError` has usage and no metadata). So an
+      // Anthropic arm that retries through a schema rejection still
+      // under-reports that attempt's cache spend, and `attemptsMissingUsage`
+      // does not flag it because usage was present. The narrative path draws
+      // the distinction with a nullable count; this one would need the same
+      // treatment threaded through `UsageSummary` and every fixture, which is
+      // not worth it until an Anthropic arm is actually benchmarked here.
+      cached: accumulator.cached + (each.cachedPromptTokens ?? 0),
+      cacheWrite: accumulator.cacheWrite + (each.cacheWritePromptTokens ?? 0),
     }),
-    { prompt: 0, completion: 0 },
+    { prompt: 0, completion: 0, cached: 0, cacheWrite: 0 },
   );
 }
 
 export function recordFrom(input: RecordInput): TurnRecord {
   const { result } = input;
-  const { prompt, completion } = totals(result.usage);
+  const { prompt, completion, cached, cacheWrite } = totals(result.usage);
 
   // Every model call should have produced one usage entry. Any shortfall is an
   // attempt that was billed and reported nothing — the report says so rather
@@ -118,6 +149,8 @@ export function recordFrom(input: RecordInput): TurnRecord {
     ),
     promptTokens: prompt,
     completionTokens: completion,
+    cachedPromptTokens: cached,
+    cacheWritePromptTokens: cacheWrite,
     usageComplete: attemptsMissingUsage === 0,
     attemptsMissingUsage,
     durationMs: input.timings.reduce((sum, timing) => sum + timing.durationMs, 0),

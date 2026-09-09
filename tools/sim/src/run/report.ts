@@ -113,6 +113,8 @@ function summarise(armId: string, records: readonly TurnRecord[]): ModeSummary {
   const cost = costUsd(modelIdOf(armId), {
     promptTokens: usage.promptTokens,
     completionTokens: usage.completionTokens,
+    cachedPromptTokens: usage.cachedPromptTokens,
+    cacheWritePromptTokens: usage.cacheWritePromptTokens,
   });
   const perTurn = cost === null || records.length === 0 ? null : cost / records.length;
 

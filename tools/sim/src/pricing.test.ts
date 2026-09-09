@@ -57,13 +57,29 @@ describe("costUsd", () => {
     expect(cost).toBeCloseTo(2 + 0.2 + 2.5);
   });
 
-  // Absent is not zero, and a model with no cache rates must not silently
-  // price cache tokens at its full input rate either.
-  it("ignores cache tokens for a model with no cache rates in the table", () => {
+  // The rule one line up in pricing.ts — "an unpriced arm must not read as
+  // free" — applies to a partial figure as much as a missing one. Silently
+  // dropping cache tokens would reintroduce the exact under-report this
+  // pricing exists to fix, the first time someone adds a claude row in the
+  // old two-field shape.
+  it("returns null when a model reports cache tokens the table cannot price", () => {
     const cost = costUsd("gemini-3-flash", {
       promptTokens: 1_000_000,
       completionTokens: 0,
       cachedPromptTokens: 5_000_000,
+    });
+
+    expect(cost).toBeNull();
+  });
+
+  // Zero cache tokens is not "unpriceable cache tokens": every non-Anthropic
+  // arm reports zero, and those must still price normally.
+  it("prices a model with no cache rates normally when it reports no cache tokens", () => {
+    const cost = costUsd("gemini-3-flash", {
+      promptTokens: 1_000_000,
+      completionTokens: 0,
+      cachedPromptTokens: 0,
+      cacheWritePromptTokens: 0,
     });
 
     expect(cost).toBeCloseTo(0.25);

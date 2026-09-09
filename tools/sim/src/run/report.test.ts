@@ -15,6 +15,8 @@ function record(overrides: Partial<TurnRecord> = {}): TurnRecord {
     adapterErrorCodes: [],
     promptTokens: 1_000_000,
     completionTokens: 0,
+    cachedPromptTokens: 0,
+    cacheWritePromptTokens: 0,
     usageComplete: true,
     attemptsMissingUsage: 0,
     durationMs: 100,
@@ -44,6 +46,27 @@ describe("buildReport", () => {
     expect(arm?.armId).toBe("gemini-3-flash@medium");
     expect(arm?.probe.legality.firstTry).toBe(1);
     expect(arm?.probe.costUsd).toBeCloseTo(0.25);
+  });
+
+  // The other half of the same threading: a record's cache tokens must reach
+  // the arm's cost. Deleting the two fields `summarise` passes to `costUsd`
+  // left every test green before this one existed.
+  it("prices an arm's cache tokens, not just its uncached prompt", () => {
+    const report = buildReport({
+      ...BASE,
+      probeRecords: [
+        record({
+          armId: "claude-sonnet-5@medium",
+          promptTokens: 0,
+          completionTokens: 0,
+          cachedPromptTokens: 1_000_000,
+          cacheWritePromptTokens: 1_000_000,
+        }),
+      ],
+    });
+
+    // 1M reads at $0.20 + 1M writes at $2.50, with nothing uncached at all.
+    expect(report.arms[0]?.probe.costUsd).toBeCloseTo(2.7);
   });
 
   it("marks an unpriced model rather than reporting it as free", () => {

@@ -285,10 +285,16 @@ export interface NarrativeUsageSummary {
   /** Uncached prompt tokens only — see `TokenUsage.promptTokens`. */
   promptTokens: number;
   completionTokens: number;
-  /** Prompt tokens served from cache. Additive to `promptTokens`. */
-  cachedPromptTokens: number;
-  /** Prompt tokens spent writing the cache entry. Additive too. */
-  cacheWritePromptTokens: number;
+  /**
+   * Prompt tokens served from cache, additive to `promptTokens` — or null
+   * when no finish reported cache accounting at all. Null, not zero: routing
+   * is config (`packages/agents/CLAUDE.md`), so pointing the narrative role
+   * at a provider that folds cached tokens into its own prompt count must not
+   * print "0 cache reads" as though a miss had been measured.
+   */
+  cachedPromptTokens: number | null;
+  /** Prompt tokens spent writing the cache entry. Null on the same terms. */
+  cacheWritePromptTokens: number | null;
   /** Null when the model has no entry in tools/sim/src/pricing.ts. */
   costUsd: number | null;
   costPerNarrationUsd: number | null;
@@ -323,8 +329,10 @@ export interface NarrativeUsageSummary {
    *
    * Was once typed as the literal `null`, with a comment saying a real
    * implementation "would have to change this field's type, not just its
-   * value" — this is that change. Null now means only that no prompt tokens
-   * were counted (every sample errored), never that the share is unknowable.
+   * value" — this is that change. Null now has exactly two causes, neither of
+   * them "unknowable in this repo": no prompt tokens were counted at all
+   * (every sample errored), or the provider reported no cache accounting, in
+   * which case `cachedPromptTokens` is null too and the report says which.
    */
   cachedTokenShare: number | null;
 }
@@ -386,9 +394,11 @@ export async function runNarrativeBenchmark(
   let promptTokens = 0;
   let completionTokens = 0;
   // Anthropic reports these separately from `promptTokens`, which excludes
-  // them; they are additive, never overlapping. See `TokenUsage`.
-  let cachedPromptTokens = 0;
-  let cacheWritePromptTokens = 0;
+  // them; they are additive, never overlapping. See `TokenUsage`. Left null
+  // until some finish actually reports one, so "this provider said nothing"
+  // stays distinct from "nothing was cached".
+  let cachedPromptTokens: number | null = null;
+  let cacheWritePromptTokens: number | null = null;
   let attemptsMissingUsage = 0;
 
   for (const [index, brief] of SCRIPTED_BRIEFS.entries()) {
@@ -465,22 +475,28 @@ export async function runNarrativeBenchmark(
       } else {
         promptTokens += finish.usage.promptTokens;
         completionTokens += finish.usage.completionTokens;
-        cachedPromptTokens += finish.usage.cachedPromptTokens ?? 0;
-        cacheWritePromptTokens += finish.usage.cacheWritePromptTokens ?? 0;
+        if (finish.usage.cachedPromptTokens !== undefined) {
+          cachedPromptTokens = (cachedPromptTokens ?? 0) + finish.usage.cachedPromptTokens;
+        }
+        if (finish.usage.cacheWritePromptTokens !== undefined) {
+          cacheWritePromptTokens =
+            (cacheWritePromptTokens ?? 0) + finish.usage.cacheWritePromptTokens;
+        }
       }
     }
   }
 
   // Everything the prompt actually cost, cached and uncached: the three
   // counts are disjoint on Anthropic, so this is the real prompt size.
-  const totalPromptTokens = promptTokens + cachedPromptTokens + cacheWritePromptTokens;
+  const totalPromptTokens =
+    promptTokens + (cachedPromptTokens ?? 0) + (cacheWritePromptTokens ?? 0);
 
   const modelId = options.runtime.specFor("narrative").modelId;
   const cost = costUsd(modelId, {
     promptTokens,
     completionTokens,
-    cachedPromptTokens,
-    cacheWritePromptTokens,
+    ...(cachedPromptTokens === null ? {} : { cachedPromptTokens }),
+    ...(cacheWritePromptTokens === null ? {} : { cacheWritePromptTokens }),
   });
   // Divided by the samples that actually produced a narration, never by
   // `samples.length`: an errored sample contributes nothing to `cost` (its
@@ -510,9 +526,15 @@ export async function runNarrativeBenchmark(
       costPerNarrationUsd,
       costIsUnderreported: attemptsMissingUsage > 0,
       // Of every prompt token this run sent, the share the provider served
-      // from cache. Null only when no prompt tokens were counted at all
-      // (every sample errored), never as a stand-in for "unmeasurable".
-      cachedTokenShare: totalPromptTokens === 0 ? null : cachedPromptTokens / totalPromptTokens,
+      // from cache. Null when there is nothing to divide (every sample
+      // errored) or when the provider reported no cache accounting at all —
+      // never as a stand-in for "unmeasurable", which it no longer is. The
+      // null guard is load-bearing: `null / n` is 0 in JS, so omitting it
+      // prints a measured cache miss for a provider that said nothing.
+      cachedTokenShare:
+        cachedPromptTokens === null || totalPromptTokens === 0
+          ? null
+          : cachedPromptTokens / totalPromptTokens,
     },
   };
 }

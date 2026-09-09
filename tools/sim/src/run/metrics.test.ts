@@ -15,6 +15,8 @@ function record(overrides: Partial<TurnRecord> = {}): TurnRecord {
     adapterErrorCodes: [],
     promptTokens: 1000,
     completionTokens: 50,
+    cachedPromptTokens: 0,
+    cacheWritePromptTokens: 0,
     usageComplete: true,
     attemptsMissingUsage: 0,
     durationMs: 100,

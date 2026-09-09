@@ -84,6 +84,44 @@ describe("recordFrom: outcome mapping", () => {
   });
 });
 
+// Cache tokens on the tactical path. The threading that carries them from a
+// `TokenUsage` to the arm's cost column had no test at all: deleting the
+// summing in `records.ts` — or the two fields passed to `costUsd` in
+// `report.ts` — left the whole suite green, on the path whose $/turn column a
+// model gets chosen from.
+describe("recordFrom: cache tokens", () => {
+  it("sums cache reads and writes across attempts, separately from the uncached prompt", () => {
+    const cached = (read: number, write: number): TokenUsage => ({
+      promptTokens: 20,
+      completionTokens: 5,
+      totalTokens: 25,
+      cachedPromptTokens: read,
+      cacheWritePromptTokens: write,
+    });
+
+    const record = recordFrom(
+      input({
+        result: success({ usage: [cached(1000, 200), cached(1500, 0)] }),
+        timings: [timing(10), timing(10)],
+      }),
+    );
+
+    expect(record.cachedPromptTokens).toBe(2500);
+    expect(record.cacheWritePromptTokens).toBe(200);
+    // Disjoint from the uncached count, never folded into it.
+    expect(record.promptTokens).toBe(40);
+  });
+
+  it("reports zero for a provider that reports no cache accounting", () => {
+    const record = recordFrom(
+      input({ result: success({ usage: [usage(100, 10)] }), timings: [timing(10)] }),
+    );
+
+    expect(record.cachedPromptTokens).toBe(0);
+    expect(record.cacheWritePromptTokens).toBe(0);
+  });
+});
+
 describe("recordFrom: usage completeness", () => {
   it("is complete and reports zero missing when every timing has a matching usage entry", () => {
     const record = recordFrom(

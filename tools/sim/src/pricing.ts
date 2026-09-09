@@ -10,8 +10,10 @@ export interface ModelPricing {
   outputPerMillionUsd: number;
   /**
    * What a cache HIT costs, per million prompt tokens served from cache.
-   * Absent for a model whose provider reports no cache accounting — cache
-   * tokens are then ignored rather than charged at the full input rate.
+   * Absent for a model whose provider reports no cache accounting. Absent
+   * here while cache tokens are nonetheless reported makes the whole call
+   * unpriced (`costUsd` returns null) rather than silently under-charged —
+   * see the reasoning in `costUsd` itself.
    */
   cacheReadPerMillionUsd?: number;
   /** What it costs to WRITE the cache entry, per million prompt tokens. */
@@ -58,17 +60,23 @@ export function costUsd(modelId: string, usage: CostInput): number | null {
   const pricing = MODEL_PRICING[modelId];
   if (pricing === undefined) return null;
 
-  // Cache tokens are dropped, not charged at the input rate, when the model
-  // has no cache rates: a model whose provider folds cached tokens into its
-  // prompt count would otherwise be billed for them twice.
-  const cacheRead =
-    pricing.cacheReadPerMillionUsd === undefined
-      ? 0
-      : ((usage.cachedPromptTokens ?? 0) / PER_MILLION) * pricing.cacheReadPerMillionUsd;
-  const cacheWrite =
-    pricing.cacheWritePerMillionUsd === undefined
-      ? 0
-      : ((usage.cacheWritePromptTokens ?? 0) / PER_MILLION) * pricing.cacheWritePerMillionUsd;
+  const cachedTokens = usage.cachedPromptTokens ?? 0;
+  const cacheWriteTokens = usage.cacheWritePromptTokens ?? 0;
+
+  // A model that reports cache tokens this table cannot price is an unpriced
+  // model, and "an unpriced arm must not read as free" applies to a partial
+  // figure exactly as it applies to a missing one. Charging them at the input
+  // rate would overstate a read tenfold; dropping them silently understates
+  // the call by however much of its prompt was cached — which is the whole
+  // bug this pricing exists to fix, reintroduced by the back door the first
+  // time someone adds a `claude-*` row in the old two-field shape.
+  const missingCacheRate =
+    (cachedTokens > 0 && pricing.cacheReadPerMillionUsd === undefined) ||
+    (cacheWriteTokens > 0 && pricing.cacheWritePerMillionUsd === undefined);
+  if (missingCacheRate) return null;
+
+  const cacheRead = (cachedTokens / PER_MILLION) * (pricing.cacheReadPerMillionUsd ?? 0);
+  const cacheWrite = (cacheWriteTokens / PER_MILLION) * (pricing.cacheWritePerMillionUsd ?? 0);
 
   return (
     (usage.promptTokens / PER_MILLION) * pricing.inputPerMillionUsd +

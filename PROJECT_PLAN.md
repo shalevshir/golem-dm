@@ -176,8 +176,15 @@ comparison most wants to price. Either add `usage?` to `AdapterError` (a step-6
 contract change) or state the bias explicitly alongside the results. *Resolved
 by declaration:* `usage` was threaded onto the failure paths that carry it and
 the report now computes `costIsUnderreported`, which came back **false** for the
-7b run below — no attempt was billed without reporting usage, so its cost column
-is a real figure rather than a lower bound.
+7b run below — no attempt was billed without reporting usage.
+
+That flag never covered cache tokens, and the figures recorded below remain a
+lower bound for the `claude-sonnet-5` arm regardless of it: they were measured
+while `run/report.ts` priced an arm from uncached prompt and completion tokens
+alone, and the Anthropic cache breakpoint is attached to every Anthropic call.
+The tooling no longer has that gap — `run/report.ts` prices cache reads and
+writes since §4.5 — so a re-run would report a complete figure. These numbers
+predate that fix and have not been re-measured.
 
 ### Step 7b result (2026-08-19) — tactical model chosen from data
 
@@ -399,17 +406,25 @@ rediscovering:
   round cap anywhere in the pipeline. Termination rests entirely on the
   combat math above; a caller that needs a bound (the E2E test included) has
   to impose its own.
-- **Per-turn metrics are missing one of the spec's five fields, honestly rather
-  than silently.** `TurnPorts.metrics` (`apps/server/src/core/pipeline.ts`)
-  records tokens in/out, cached tokens, retries and latency per call, but not
-  cost: the cost table lives in `tools/sim`, which nothing under `apps/server`
-  may depend on (dependency direction, root `CLAUDE.md` §5), so cost stays an
-  offline calculation over the logged token counts.
-  `TokenUsage` (`packages/agents/src/providers/usage.ts`) now carries
-  `cachedPromptTokens` and `cacheWritePromptTokens`, read off the SDK's
-  `providerMetadata` in `providers/vercel.ts`, so that calculation is no longer
-  *wrong* — cache reads and writes bill at their own rates and are now
-  reported separately rather than omitted.
+- **Per-turn metrics are still missing two of the spec's five fields, honestly
+  rather than silently — but one blocker has moved.** `TurnPorts.metrics`
+  (`apps/server/src/core/pipeline.ts`) records tokens in/out, retries and
+  latency per call, and neither cached tokens nor cost.
+  - Cached tokens: no longer unavailable. `TokenUsage`
+    (`packages/agents/src/providers/usage.ts`) carries `cachedPromptTokens` and
+    `cacheWritePromptTokens`, read off the SDK's `providerMetadata` in
+    `providers/vercel.ts`. The metric record types in `pipeline.ts` simply do
+    not forward them yet, which is now a plumbing gap rather than a missing
+    capability. No role those records cover is on Anthropic today — intent,
+    tactical and the GM tier are OpenAI, the summary role is Google — and
+    `anthropicCacheTokens` reads only Anthropic's metadata namespace, so
+    forwarding them would add fields that stay absent until one of those roles
+    moves to Anthropic.
+  - Cost: unchanged. The pricing table lives in `tools/sim`, which nothing
+    under `apps/server` may depend on (dependency direction, root `CLAUDE.md`
+    §5), so cost stays an offline calculation over the logged token counts.
+    That calculation is no longer *wrong* for the narrative role, whose usage
+    reaches the log whole through `narrative_stream_finished`.
 - **Model routing is not yet config-overridable, though the spec calls for
   it to be.** The spec's §Config says routing "stays config
   (`DEFAULT_MODEL_ROUTING` as the default, overridable), never code," but
@@ -880,8 +895,10 @@ fight. Step 10's spec #2 becomes designable at that point and not before.
 
 Cost consequence: the narrative prompt is layered for cache stability
 (`static` / `semiStatic` / `dynamic`). Retrieved memories vary per turn, so
-they land in the uncached tail — which interacts directly with the missing
-`cache_read_input_tokens` field described under step 11 below.
+they land in the uncached tail. That interacted with the missing
+`cache_read_input_tokens` field described under step 11 below until the field
+was added (§4.5); the uncached tail is now visible as `promptTokens` beside
+the cached prefix rather than indistinguishable from it.
 
 #### Integration with tactical combat
 
@@ -1250,9 +1267,10 @@ feel it.
 A new §8 gap is recorded in its place: a long rest does not reduce
 exhaustion, because exhaustion has no cross-encounter persistence at all yet.
 
-Two items are independent of this ordering. The
-`cache_read_input_tokens`-plus-pricing-relocation fix described for step 11
-becomes *more* urgent, not less, because this sequence adds two model tiers
+Two items are independent of this ordering. The pricing-relocation half of
+the step 11 fix described below becomes *more* urgent, not less (its
+`cache_read_input_tokens` half is done — §4.5), because this sequence adds two
+model tiers
 to the three that already bill (intent, tactical, narrative): step 4's intent
 router and step 7's scene summarizer, plus step 7's embedding call — five
 billed sources in all, none of them priced, on a meter that is unreportable

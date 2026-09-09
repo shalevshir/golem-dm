@@ -104,8 +104,13 @@ export const SNAPSHOT_EVERY = 50;
  *
  * Two of the spec's five fields are deliberately absent:
  * - Cached tokens: `TokenUsage` (`packages/agents/src/providers/usage.ts`)
- *   is exactly `{ promptTokens, completionTokens, totalTokens }` — no
- *   cache-read field exists anywhere in the port layer to report.
+ *   does carry `cachedPromptTokens` and `cacheWritePromptTokens` now; these
+ *   records simply do not forward them. No role below is on Anthropic —
+ *   intent, tactical and the GM tier are OpenAI, the summary role is Google —
+ *   and the adapter reads only Anthropic's metadata namespace, so the fields
+ *   would be absent on every record until one of them moves. The narrative
+ *   role, which is Anthropic, reports its usage whole by a different path
+ *   (`narrative_stream_finished`, wired in `main.ts`).
  * - Cost: the pricing table lives in `tools/sim`, which nothing under
  *   `apps/server` may depend on (dependency direction, root CLAUDE.md §5).
  *   A cost figure computed from `TokenUsage` alone would also be *wrong*,
@@ -251,8 +256,10 @@ export interface SummaryCallMetrics {
  * The fifth. `completionTokens` is always 0 — an embedding bills input only,
  * which is truthful rather than a gap.
  *
- * Cost is still not computed here: `cache_read_input_tokens` is unreported
- * and the pricing table lives in `tools/sim`, which this app may not import.
+ * Cost is still not computed here: the pricing table lives in `tools/sim`,
+ * which this app may not import. (Cache reads are no longer the blocker they
+ * were — `TokenUsage` reports them; embeddings simply have no cache
+ * accounting of their own.)
  * These are tokens and latency only, so step 11's fix prices them without
  * touching these call sites (episodic-memory spec, Decision 11).
  */

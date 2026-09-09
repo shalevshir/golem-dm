@@ -16,11 +16,28 @@ export interface NarrativeRunReport extends NarrativeReport {
 }
 
 /**
- * A share as a percentage, or "n/a" when there was nothing to divide — every
- * sample errored. Never printed as 0%, which would claim a measured miss.
+ * A cache count, or an explicit "not reported" when the provider said nothing
+ * about caching. Never printed as 0, which would claim a measured miss for a
+ * provider that may well be serving a cached prefix it folds into its own
+ * prompt count.
  */
-function percentOrNa(share: number | null): string {
-  return share === null ? "n/a (no prompt tokens counted)" : `${(share * 100).toFixed(1)}%`;
+function tokensOrNotReported(tokens: number | null): string {
+  return tokens === null ? "not reported by this provider" : `${String(tokens)} prompt tokens`;
+}
+
+/**
+ * A share as a percentage, or an explanation of why there is none. Never
+ * printed as 0%, which would claim a measured cache miss.
+ *
+ * Two different nulls reach here and they mean opposite things: the provider
+ * reported no cache accounting at all, or it did and there were no prompt
+ * tokens to divide (every sample errored). One message for both told the
+ * reader the run was empty when the run was fine and the provider was silent,
+ * so the caller passes which it was.
+ */
+function percentOrNa(share: number | null, reported: boolean): string {
+  if (share !== null) return `${(share * 100).toFixed(1)}%`;
+  return reported ? "n/a (no prompt tokens counted)" : "n/a (not reported by this provider)";
 }
 
 function money(value: number | null): string {
@@ -102,13 +119,18 @@ export function renderNarrativeMarkdown(report: NarrativeRunReport): string {
   // bill at different rates, and a run whose prefix is written on every call
   // looks identical to one that reads it if they are added together.
   lines.push(`- Prompt tokens: ${String(report.usage.promptTokens)} uncached`);
-  lines.push(`- Cache reads: ${String(report.usage.cachedPromptTokens)} prompt tokens`);
-  lines.push(`- Cache writes: ${String(report.usage.cacheWritePromptTokens)} prompt tokens`);
+  lines.push(`- Cache reads: ${tokensOrNotReported(report.usage.cachedPromptTokens)}`);
+  lines.push(`- Cache writes: ${tokensOrNotReported(report.usage.cacheWritePromptTokens)}`);
   lines.push(`- Completion tokens: ${String(report.usage.completionTokens)}`);
   lines.push(
     `- Cost: ${money(report.usage.costUsd)} total, ${money(report.usage.costPerNarrationUsd)} per narration`,
   );
-  lines.push(`- Cached-token share: ${percentOrNa(report.usage.cachedTokenShare)}`);
+  lines.push(
+    `- Cached-token share: ${percentOrNa(
+      report.usage.cachedTokenShare,
+      report.usage.cachedPromptTokens !== null,
+    )}`,
+  );
   if (report.usage.costIsUnderreported) {
     lines.push("");
     lines.push(
