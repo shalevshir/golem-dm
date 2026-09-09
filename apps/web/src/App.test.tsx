@@ -56,6 +56,41 @@ function event(
   };
 }
 
+/** The hero's derived sheet, as both `/encounters/:id` and
+ *  `/campaigns/:id/character` serve it. */
+const heroSheet = {
+  characterId: "hero",
+  nameHebrew: "אלדד",
+  grammaticalGender: "masculine",
+  class: "fighter",
+  level: 3,
+  size: "medium",
+  abilityModifiers: { str: 3, dex: 1, con: 2, int: 0, wis: 1, cha: 0 },
+  proficiencyBonus: 2,
+  armorClass: 16,
+  initiative: 1,
+  speedFeet: 30,
+  passivePerception: 13,
+  maxHp: 28,
+  currentHp: 28,
+  tempHp: 0,
+  hitDice: "3d10",
+  savingThrows: { str: 5, dex: 1, con: 4, int: 0, wis: 1, cha: 0 },
+  skills: { athletics: 5 },
+  attacks: [
+    {
+      actionId: "longsword",
+      nameEnglish: "Longsword",
+      nameHebrew: "חרב ארוכה",
+      attackBonus: 5,
+      damage: { diceNotation: "1d8", averageDamage: 7, damageType: "slashing" },
+      extraDamage: [],
+    },
+  ],
+  attacksPerAction: 1,
+  inventory: [{ itemId: "chain_mail", nameHebrew: "שריון שרשראות", quantity: 1, equipped: true }],
+};
+
 const catalogue = {
   encounterId: "goblin-ambush",
   combatants: [
@@ -72,6 +107,9 @@ const catalogue = {
     { actionId: "spear", nameEnglish: "Spear", nameHebrew: "חנית" },
     { actionId: "scimitar", nameEnglish: "Scimitar", nameHebrew: "חרב מעוקלת" },
   ],
+  // The real catalogue has always carried this; nothing read it until the
+  // sheet panel needed a source for a campaign with no scene.
+  characters: [heroSheet],
 };
 
 /** Narration fixture. No dice expression in it, so `NarrativePane` renders
@@ -1422,38 +1460,7 @@ describe("App (character sheet)", () => {
     heroHp: 9,
   };
 
-  const sheet = {
-    characterId: "hero",
-    nameHebrew: "אלדד",
-    grammaticalGender: "masculine",
-    class: "fighter",
-    level: 3,
-    size: "medium",
-    abilityModifiers: { str: 3, dex: 1, con: 2, int: 0, wis: 1, cha: 0 },
-    proficiencyBonus: 2,
-    armorClass: 16,
-    initiative: 1,
-    speedFeet: 30,
-    passivePerception: 13,
-    maxHp: 28,
-    currentHp: 28,
-    tempHp: 0,
-    hitDice: "3d10",
-    savingThrows: { str: 5, dex: 1, con: 4, int: 0, wis: 1, cha: 0 },
-    skills: { athletics: 5 },
-    attacks: [
-      {
-        actionId: "longsword",
-        nameEnglish: "Longsword",
-        nameHebrew: "חרב ארוכה",
-        attackBonus: 5,
-        damage: { diceNotation: "1d8", averageDamage: 7, damageType: "slashing" },
-        extraDamage: [],
-      },
-    ],
-    attacksPerAction: 1,
-    inventory: [{ itemId: "chain_mail", nameHebrew: "שריון שרשראות", quantity: 1, equipped: true }],
-  };
+  const sheet = heroSheet;
 
   function sceneSnapshot(): CampaignState {
     return {
@@ -1498,6 +1505,30 @@ describe("App (character sheet)", () => {
     // The sheet said 28/28; the scene projection says the hero is on 9.
     expect(screen.queryByText("28/28")).toBeNull();
     expect(screen.getByText("שריון שרשראות")).toBeTruthy();
+  });
+
+  // The regression this guards: a combat-only campaign never fetches a sheet
+  // (no scene, so the endpoint would 404), and the combat view rendered the
+  // panel anyway — leaving it on "loading" for the whole fight. Its sheet
+  // rides the encounter catalogue, which carried it all along.
+  it("shows the catalogue's sheet in a combat-only campaign rather than loading forever", async () => {
+    window.history.pushState({}, "", "/");
+    await start();
+    act(() => {
+      socket.emitMessage({
+        type: "campaign_state",
+        sequence: 0,
+        snapshot: snapshotWith([
+          combatant("hero", "party", "alive"),
+          combatant("goblin-a", "hostile", "alive"),
+        ]),
+      });
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText("אלדד")).toBeTruthy();
+    });
+    expect(screen.queryByText(he.sheet.loading)).toBeNull();
   });
 
   // A combat-only campaign has no scene character server-side (404), so the

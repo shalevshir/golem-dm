@@ -599,14 +599,23 @@ export function App(props: AppProps): JSX.Element {
   const conclusion = conclusionOf(encounter);
   const yourTurn = state.affordances !== null && conclusion === "ongoing";
 
+  // A combat-only campaign has no scene, so nothing above fetched a sheet for
+  // it — but its encounter catalogue has carried `characters` all along, and
+  // until now nothing read it. Without this the panel below rendered against
+  // a `character` that could never arrive and sat on "loading" for the whole
+  // fight, which is exactly the permanent lie `unavailable` exists to avoid.
+  // `[0]` and not a search: ADR-0002 scopes the POC to one player character,
+  // the same reason `encounterCatalogue` does not dedupe the list it builds.
+  const sheet = character ?? catalogue.characters[0] ?? null;
+
   // In a fight the combatant row is the live one — `scene.heroHp` is only
   // reconciled when the bracket closes. Matched on `characterId`, not on
   // faction: `party` is a faction, but the sheet belongs to one character,
   // and a second party member would otherwise silently drive this panel.
   const heroRow =
-    character === null
+    sheet === null
       ? undefined
-      : encounter.combatants.find((each) => each.characterId === character.characterId);
+      : encounter.combatants.find((each) => each.characterId === sheet.characterId);
 
   return (
     <main>
@@ -640,13 +649,19 @@ export function App(props: AppProps): JSX.Element {
       />
 
       {/* The summary line carries HP, which is what a player mid-fight
-          actually wants from a sheet; the rest is one click away. */}
-      <SheetPanel
-        character={character}
-        currentHp={heroRow?.currentHp ?? null}
-        unavailable={characterUnavailable}
-        {...(heroRow === undefined ? {} : { tempHp: heroRow.tempHp })}
-      />
+          actually wants from a sheet; the rest is one click away.
+
+          Rendered only once there is a sheet, unlike the scene view above:
+          here it has either already arrived or come off the catalogue, so a
+          "loading" line would mean a monster-only encounter with no player
+          character at all — a panel about nobody. */}
+      {sheet === null ? null : (
+        <SheetPanel
+          character={sheet}
+          currentHp={heroRow?.currentHp ?? null}
+          {...(heroRow === undefined ? {} : { tempHp: heroRow.tempHp })}
+        />
+      )}
 
       <Grid
         snapshot={encounter}
