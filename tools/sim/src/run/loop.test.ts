@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { adapterSuccess, createAgentRuntime, createTacticalAgent, createTimingPort } from "@ai-dm/agents";
+import {
+  adapterSuccess,
+  createAgentRuntime,
+  createTacticalAgent,
+  createTimingPort,
+} from "@ai-dm/agents";
 import { SMOKE_ARM } from "../config.js";
 import type { TurnLogEntry } from "../engine/encounter.js";
 import { scriptedTurn } from "../engine/policy.js";
@@ -20,6 +25,8 @@ function record(overrides: Partial<TurnRecord> = {}): TurnRecord {
     adapterErrorCodes: [],
     promptTokens: 0,
     completionTokens: 0,
+    cachedPromptTokens: 0,
+    cacheWritePromptTokens: 0,
     usageComplete: true,
     attemptsMissingUsage: 0,
     durationMs: 0,

@@ -282,8 +282,19 @@ export interface NarrativeSample {
 }
 
 export interface NarrativeUsageSummary {
+  /** Uncached prompt tokens only — see `TokenUsage.promptTokens`. */
   promptTokens: number;
   completionTokens: number;
+  /**
+   * Prompt tokens served from cache, additive to `promptTokens` — or null
+   * when no finish reported cache accounting at all. Null, not zero: routing
+   * is config (`packages/agents/CLAUDE.md`), so pointing the narrative role
+   * at a provider that folds cached tokens into its own prompt count must not
+   * print "0 cache reads" as though a miss had been measured.
+   */
+  cachedPromptTokens: number | null;
+  /** Prompt tokens spent writing the cache entry. Null on the same terms. */
+  cacheWritePromptTokens: number | null;
   /** Null when the model has no entry in tools/sim/src/pricing.ts. */
   costUsd: number | null;
   costPerNarrationUsd: number | null;
@@ -299,29 +310,31 @@ export interface NarrativeUsageSummary {
    * reader separately, right above the Cost section, that N samples errored
    * — this flag would otherwise repeat that fact under a misleading name.
    *
-   * It also says nothing about usage that IS present but itself undercounts:
-   * `providers/vercel.ts` passes the AI SDK's `promptTokens` through
-   * verbatim, and for Anthropic that is `input_tokens`, which excludes
-   * `cache_read_input_tokens`. So `costUsd` above is a lower bound on a
-   * cache-stable prompt (this benchmark's prompt is exactly that — three
-   * static tiers, byte-identical across every sample) even when this flag
-   * reads `false`. `narrative-report.ts`'s Cost section says so
-   * unconditionally, not only inside this flag's own branch.
+   * It no longer covers the cache shortfall it once described. Anthropic's
+   * `input_tokens` still excludes `cache_read_input_tokens` and
+   * `cache_creation_input_tokens`, but `providers/vercel.ts` now reads both
+   * off `providerMetadata` and `costUsd` prices them at their own rates, so a
+   * cache-stable prompt — this benchmark's is exactly that, three static
+   * tiers byte-identical across every sample — is priced in full rather than
+   * bounded from below. This flag means only what its first paragraph says:
+   * a clean finish reported no usage at all.
    */
   costIsUnderreported: boolean;
   /**
-   * Always `null`: no `TokenUsage` field and no adapter in this repo
-   * surfaces a cache-read count (verified by grep across `packages/agents`),
-   * so the share cannot be measured. Typed as the literal `null` rather than
-   * `number | null` on purpose — an actual implementation would have to
-   * change this field's type, not just its value, which is a stronger
-   * signal than a comment that this is still unmeasured. Declared as a
-   * field, not just a comment, so `report.json` states the gap too, and
-   * printed unconditionally in the markdown Cost section rather than only
-   * inside the `costIsUnderreported` branch, which does not fire on a
-   * healthy run.
+   * Cache reads as a share of every prompt token sent — the number that says
+   * whether the cache-stable prefix is actually being reused. Near 1.0 means
+   * the prefix is being read; near 0 with a large `cacheWritePromptTokens`
+   * means every call is paying to write it instead, which costs more than not
+   * caching at all.
+   *
+   * Was once typed as the literal `null`, with a comment saying a real
+   * implementation "would have to change this field's type, not just its
+   * value" — this is that change. Null now has exactly two causes, neither of
+   * them "unknowable in this repo": no prompt tokens were counted at all
+   * (every sample errored), or the provider reported no cache accounting, in
+   * which case `cachedPromptTokens` is null too and the report says which.
    */
-  cachedTokenShare: null;
+  cachedTokenShare: number | null;
 }
 
 export interface NarrativeReport {
@@ -380,6 +393,12 @@ export async function runNarrativeBenchmark(
   let erroredSamples = 0;
   let promptTokens = 0;
   let completionTokens = 0;
+  // Anthropic reports these separately from `promptTokens`, which excludes
+  // them; they are additive, never overlapping. See `TokenUsage`. Left null
+  // until some finish actually reports one, so "this provider said nothing"
+  // stays distinct from "nothing was cached".
+  let cachedPromptTokens: number | null = null;
+  let cacheWritePromptTokens: number | null = null;
   let attemptsMissingUsage = 0;
 
   for (const [index, brief] of SCRIPTED_BRIEFS.entries()) {
@@ -456,12 +475,29 @@ export async function runNarrativeBenchmark(
       } else {
         promptTokens += finish.usage.promptTokens;
         completionTokens += finish.usage.completionTokens;
+        if (finish.usage.cachedPromptTokens !== undefined) {
+          cachedPromptTokens = (cachedPromptTokens ?? 0) + finish.usage.cachedPromptTokens;
+        }
+        if (finish.usage.cacheWritePromptTokens !== undefined) {
+          cacheWritePromptTokens =
+            (cacheWritePromptTokens ?? 0) + finish.usage.cacheWritePromptTokens;
+        }
       }
     }
   }
 
+  // Everything the prompt actually cost, cached and uncached: the three
+  // counts are disjoint on Anthropic, so this is the real prompt size.
+  const totalPromptTokens =
+    promptTokens + (cachedPromptTokens ?? 0) + (cacheWritePromptTokens ?? 0);
+
   const modelId = options.runtime.specFor("narrative").modelId;
-  const cost = costUsd(modelId, { promptTokens, completionTokens });
+  const cost = costUsd(modelId, {
+    promptTokens,
+    completionTokens,
+    ...(cachedPromptTokens === null ? {} : { cachedPromptTokens }),
+    ...(cacheWritePromptTokens === null ? {} : { cacheWritePromptTokens }),
+  });
   // Divided by the samples that actually produced a narration, never by
   // `samples.length`: an errored sample contributes nothing to `cost` (its
   // usage, if any, is excluded from `promptTokens`/`completionTokens`
@@ -484,10 +520,21 @@ export async function runNarrativeBenchmark(
     usage: {
       promptTokens,
       completionTokens,
+      cachedPromptTokens,
+      cacheWritePromptTokens,
       costUsd: cost,
       costPerNarrationUsd,
       costIsUnderreported: attemptsMissingUsage > 0,
-      cachedTokenShare: null,
+      // Of every prompt token this run sent, the share the provider served
+      // from cache. Null when there is nothing to divide (every sample
+      // errored) or when the provider reported no cache accounting at all —
+      // never as a stand-in for "unmeasurable", which it no longer is. The
+      // null guard is load-bearing: `null / n` is 0 in JS, so omitting it
+      // prints a measured cache miss for a provider that said nothing.
+      cachedTokenShare:
+        cachedPromptTokens === null || totalPromptTokens === 0
+          ? null
+          : cachedPromptTokens / totalPromptTokens,
     },
   };
 }

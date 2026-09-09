@@ -50,33 +50,83 @@ function report(overrides: Partial<NarrativeRunReport> = {}): NarrativeRunReport
     usage: {
       promptTokens: 900,
       completionTokens: 40,
+      cachedPromptTokens: 1800,
+      cacheWritePromptTokens: 0,
       costUsd: 0.0022,
       costPerNarrationUsd: 0.0022,
       costIsUnderreported: false,
-      cachedTokenShare: null,
+      cachedTokenShare: 0.9,
     },
     ...overrides,
   };
 }
 
 describe("renderNarrativeMarkdown", () => {
-  it("declares the cached-token-share gap unconditionally, even on a healthy run", () => {
-    // This sentence must not live only inside the costIsUnderreported branch,
-    // which does not fire here (costIsUnderreported: false) — that would leave
-    // the healthy-run markdown saying nothing about the gap at all.
+  // This used to assert the opposite — that the markdown declared the share
+  // as unmeasurable — because no adapter surfaced a cache-read count. It does
+  // now, so the report states the measured share instead of the gap.
+  it("reports the measured cached-token share on a healthy run", () => {
     const markdown = renderNarrativeMarkdown(
       report({ usage: { ...report().usage, costIsUnderreported: false } }),
     );
-    expect(markdown).toContain("Cached-token share: not reported");
+    expect(markdown).toContain("Cached-token share: 90.0%");
     expect(markdown).not.toContain("Cost is under-reported");
   });
 
-  it("still declares the cached-token-share gap, alongside the under-reported notice, on an unhealthy run", () => {
+  // Reads and writes bill in opposite directions, so a summed "prompt tokens"
+  // line would make a prefix written on every call look like one being reused.
+  it("breaks cache reads and writes out from the uncached prompt tokens", () => {
+    const markdown = renderNarrativeMarkdown(
+      report({
+        usage: { ...report().usage, cachedPromptTokens: 0, cacheWritePromptTokens: 1800 },
+      }),
+    );
+    expect(markdown).toContain("Cache reads: 0 prompt tokens");
+    expect(markdown).toContain("Cache writes: 1800 prompt tokens");
+    expect(markdown).toContain("Prompt tokens: 900 uncached");
+  });
+
+  // Restores coverage a deleted test took with it. Four tests were removed as
+  // pinning a limitation that no longer exists; three of them did, but one was
+  // the only place rendering a report with `costIsUnderreported: true`, and
+  // that branch is unrelated to the cache work and still matters.
+  it("still shouts when a billed attempt reported no usage at all", () => {
     const markdown = renderNarrativeMarkdown(
       report({ usage: { ...report().usage, costIsUnderreported: true } }),
     );
-    expect(markdown).toContain("Cached-token share: not reported");
     expect(markdown).toContain("Cost is under-reported");
+  });
+
+  // A provider that reports no cache accounting must not read as a measured
+  // cache miss — routing is config, so the narrative role can point at one.
+  it("says the provider reported nothing rather than printing zero cache reads", () => {
+    const markdown = renderNarrativeMarkdown(
+      report({
+        usage: {
+          ...report().usage,
+          cachedPromptTokens: null,
+          cacheWritePromptTokens: null,
+          cachedTokenShare: null,
+        },
+      }),
+    );
+    expect(markdown).toContain("Cache reads: not reported by this provider");
+    expect(markdown).not.toContain("Cache reads: 0 prompt tokens");
+    // The WHOLE line: "n/a" alone matched either parenthetical, so it passed
+    // while the report told the reader the run was empty rather than that the
+    // provider was silent — two opposite meanings behind one prefix.
+    expect(markdown).toContain("Cached-token share: n/a (not reported by this provider)");
+  });
+
+  // The other null cause, and it must not borrow the first one's wording: here
+  // the provider DID report, there was simply nothing to divide.
+  it("distinguishes an empty run from a silent provider, never printing 0%", () => {
+    const markdown = renderNarrativeMarkdown(
+      report({ usage: { ...report().usage, cachedTokenShare: null } }),
+    );
+    expect(markdown).toContain("Cached-token share: n/a (no prompt tokens counted)");
+    expect(markdown).not.toContain("Cached-token share: 0.0%");
+    expect(markdown).not.toContain("not reported by this provider");
   });
 
   it("says nothing about provider errors when there were none", () => {
@@ -100,36 +150,6 @@ describe("renderNarrativeMarkdown", () => {
   it("annotates neither TTFT line when nothing errored", () => {
     const markdown = renderNarrativeMarkdown(report({ erroredSamples: 0 }));
     expect(markdown).not.toContain("errored samples excluded");
-  });
-
-  it("states the cost figure excludes cache-read tokens and is a lower bound, even on a healthy run", () => {
-    // Without this, the markdown says nothing about cache-read exclusion on a
-    // run where costIsUnderreported is false — exactly the run this
-    // benchmark's own cache-stable prompt produces in practice.
-    const markdown = renderNarrativeMarkdown(
-      report({ usage: { ...report().usage, costIsUnderreported: false } }),
-    );
-    expect(markdown).toContain("excludes cache-read tokens");
-    expect(markdown).toContain("lower bound whether or not");
-  });
-
-  it("prints the identical cache-read-exclusion sentence whether or not costIsUnderreported is set", () => {
-    // Asserts the substance (unconditional printing), not a stylistic
-    // marker: the same sentence must appear byte-for-byte in both renders,
-    // not merely contain some shared word, so a change that reworded only
-    // one branch's copy would fail this even if both still mentioned
-    // "cache-read" somewhere.
-    const healthy = renderNarrativeMarkdown(
-      report({ usage: { ...report().usage, costIsUnderreported: false } }),
-    );
-    const unhealthy = renderNarrativeMarkdown(
-      report({ usage: { ...report().usage, costIsUnderreported: true } }),
-    );
-    const sentence =
-      "the cost above excludes cache-read tokens and is a lower bound whether or not " +
-      "the under-reported flag below is set";
-    expect(healthy).toContain(sentence);
-    expect(unhealthy).toContain(sentence);
   });
 
   it("calls out errored samples and excludes them from the discipline denominator", () => {
@@ -157,7 +177,7 @@ describe("writeNarrativeReport", () => {
     dir = undefined;
   });
 
-  it("writes both files, with erroredSamples and cachedTokenShare present in the JSON", () => {
+  it("writes both files, with erroredSamples and the measured cache counts in the JSON", () => {
     dir = mkdtempSync(join(tmpdir(), "ai-dm-sim-narrative-"));
     const { jsonPath, markdownPath } = writeNarrativeReport(
       report({ samples: samplesWithErrors(5, 2), erroredSamples: 2 }),
@@ -169,9 +189,11 @@ describe("writeNarrativeReport", () => {
 
     const parsed = JSON.parse(readFileSync(jsonPath, "utf8")) as {
       erroredSamples: number;
-      usage: { cachedTokenShare: null };
+      usage: { cachedTokenShare: number | null; cachedPromptTokens: number };
     };
     expect(parsed.erroredSamples).toBe(2);
-    expect(parsed.usage.cachedTokenShare).toBeNull();
+    // A measured share, where this used to assert `null` for "unmeasurable".
+    expect(parsed.usage.cachedTokenShare).toBeCloseTo(0.9);
+    expect(parsed.usage.cachedPromptTokens).toBe(1800);
   });
 });

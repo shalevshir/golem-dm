@@ -296,15 +296,56 @@ function toCoreMessages(messages: readonly PromptMessage[]): CoreMessage[] {
   });
 }
 
-function toUsage(usage: {
-  promptTokens: number;
-  completionTokens: number;
-  totalTokens: number;
-}): TokenUsage {
+/**
+ * Anthropic's cache counters, which the SDK hangs off `providerMetadata`
+ * rather than `usage`. Read defensively: `providerMetadata` is typed as an
+ * open record of unknown JSON, it is absent entirely for every other
+ * provider, and the SDK sets either field to `null` when the response omitted
+ * it — which must read as "not reported", not as zero.
+ */
+function anthropicCacheTokens(providerMetadata: unknown): {
+  cachedPromptTokens?: number;
+  cacheWritePromptTokens?: number;
+} {
+  if (typeof providerMetadata !== "object" || providerMetadata === null) return {};
+  const anthropic = (providerMetadata as Record<string, unknown>).anthropic;
+  if (typeof anthropic !== "object" || anthropic === null) return {};
+
+  const fields = anthropic as Record<string, unknown>;
+  const read = fields.cacheReadInputTokens;
+  const write = fields.cacheCreationInputTokens;
+
+  return {
+    ...(typeof read === "number" ? { cachedPromptTokens: read } : {}),
+    ...(typeof write === "number" ? { cacheWritePromptTokens: write } : {}),
+  };
+}
+
+/**
+ * The SDK's usage plus, on Anthropic, the cache counters it reports
+ * separately. Both matter for cost: `usage.promptTokens` is `input_tokens`,
+ * which EXCLUDES cache reads and writes, so a cached call reports a prompt far
+ * smaller than the one that was actually sent — the arc run that prompted this
+ * measured 433 prompt tokens per narration against a fixed system tier of over
+ * a thousand.
+ *
+ * Only the fields the provider actually reported are attached, so a provider
+ * that folds cached tokens into its prompt count (OpenAI does) cannot be
+ * double-counted by a reader that sums all three.
+ */
+function toUsage(
+  usage: {
+    promptTokens: number;
+    completionTokens: number;
+    totalTokens: number;
+  },
+  providerMetadata?: unknown,
+): TokenUsage {
   return {
     promptTokens: usage.promptTokens,
     completionTokens: usage.completionTokens,
     totalTokens: usage.totalTokens,
+    ...anthropicCacheTokens(providerMetadata),
   };
 }
 
@@ -412,7 +453,10 @@ export function createVercelPort(options: VercelPortOptions = {}): LanguageModel
         // zod schema, so a second safeParse can never fail. What we do own is
         // the failure path — turning the SDK's exception into zod issues the
         // step 7 retry can quote back (see schemaFailure).
-        return adapterSuccess({ value: result.object, usage: toUsage(result.usage) });
+        return adapterSuccess({
+          value: result.object,
+          usage: toUsage(result.usage, result.providerMetadata),
+        });
       } catch (error) {
         if (isAborted(request.abortSignal)) {
           return adapterFailure("aborted", "The turn budget was spent mid-call.", { cause: error });
@@ -449,7 +493,10 @@ export function createVercelPort(options: VercelPortOptions = {}): LanguageModel
           ...(request.abortSignal === undefined ? {} : { abortSignal: request.abortSignal }),
         });
 
-        return adapterSuccess({ text: result.text, usage: toUsage(result.usage) });
+        return adapterSuccess({
+          text: result.text,
+          usage: toUsage(result.usage, result.providerMetadata),
+        });
       } catch (error) {
         return { ok: false, error: classifyProviderError(error, request.abortSignal) };
       }
@@ -490,7 +537,7 @@ export function createVercelPort(options: VercelPortOptions = {}): LanguageModel
                 };
                 return;
               } else if (part.type === "finish") {
-                yield { type: "finish", text, usage: toUsage(part.usage) };
+                yield { type: "finish", text, usage: toUsage(part.usage, part.providerMetadata) };
               }
             }
           } catch (error) {

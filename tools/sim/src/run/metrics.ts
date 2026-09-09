@@ -70,6 +70,9 @@ export function summariseLatency(records: readonly TurnRecord[]): LatencySummary
 export interface UsageSummary {
   promptTokens: number;
   completionTokens: number;
+  /** Additive to `promptTokens`; see `TurnRecord`. */
+  cachedPromptTokens: number;
+  cacheWritePromptTokens: number;
   tokensPerTurn: number;
   /** False when any attempt was billed and reported nothing. */
   usageComplete: boolean;
@@ -79,6 +82,11 @@ export interface UsageSummary {
 export function summariseUsage(records: readonly TurnRecord[]): UsageSummary {
   const promptTokens = records.reduce((sum, record) => sum + record.promptTokens, 0);
   const completionTokens = records.reduce((sum, record) => sum + record.completionTokens, 0);
+  const cachedPromptTokens = records.reduce((sum, record) => sum + record.cachedPromptTokens, 0);
+  const cacheWritePromptTokens = records.reduce(
+    (sum, record) => sum + record.cacheWritePromptTokens,
+    0,
+  );
   const attemptsMissingUsage = records.reduce(
     (sum, record) => sum + record.attemptsMissingUsage,
     0,
@@ -87,7 +95,17 @@ export function summariseUsage(records: readonly TurnRecord[]): UsageSummary {
   return {
     promptTokens,
     completionTokens,
-    tokensPerTurn: records.length === 0 ? 0 : (promptTokens + completionTokens) / records.length,
+    cachedPromptTokens,
+    cacheWritePromptTokens,
+    // Cache tokens included, because the cost column beside this one includes
+    // them: leaving them out made the two numbers in a single table row derive
+    // from different prompts, and for an Anthropic arm the token count was the
+    // smaller of the two by an order of magnitude.
+    tokensPerTurn:
+      records.length === 0
+        ? 0
+        : (promptTokens + cachedPromptTokens + cacheWritePromptTokens + completionTokens) /
+          records.length,
     usageComplete: attemptsMissingUsage === 0,
     attemptsMissingUsage,
   };

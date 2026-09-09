@@ -18,6 +18,73 @@ describe("costUsd", () => {
     expect(cost).toBeCloseTo(1.75);
   });
 
+  // Anthropic bills a cache read at a tenth of the input rate and a cache
+  // WRITE at one and a quarter times it. Summing them into `promptTokens`
+  // would price a working cache as if it were a miss, and a miss as if it
+  // were a hit — in opposite directions.
+  it("prices Anthropic cache reads at the discounted rate", () => {
+    // claude-sonnet-5: $2 per M input, $0.20 per M cache read.
+    const cost = costUsd("claude-sonnet-5", {
+      promptTokens: 0,
+      completionTokens: 0,
+      cachedPromptTokens: 1_000_000,
+    });
+
+    expect(cost).toBeCloseTo(0.2);
+  });
+
+  it("prices Anthropic cache writes at the premium rate", () => {
+    const cost = costUsd("claude-sonnet-5", {
+      promptTokens: 0,
+      completionTokens: 0,
+      cacheWritePromptTokens: 1_000_000,
+    });
+
+    expect(cost).toBeCloseTo(2.5);
+  });
+
+  // The bug this whole change exists to fix: a narration whose prefix was
+  // served from cache reported 22 uncached prompt tokens, and pricing only
+  // those understated the call by nearly two orders of magnitude.
+  it("adds cache tokens to the uncached remainder rather than replacing it", () => {
+    const cost = costUsd("claude-sonnet-5", {
+      promptTokens: 1_000_000,
+      completionTokens: 0,
+      cachedPromptTokens: 1_000_000,
+      cacheWritePromptTokens: 1_000_000,
+    });
+
+    expect(cost).toBeCloseTo(2 + 0.2 + 2.5);
+  });
+
+  // The rule one line up in pricing.ts — "an unpriced arm must not read as
+  // free" — applies to a partial figure as much as a missing one. Silently
+  // dropping cache tokens would reintroduce the exact under-report this
+  // pricing exists to fix, the first time someone adds a claude row in the
+  // old two-field shape.
+  it("returns null when a model reports cache tokens the table cannot price", () => {
+    const cost = costUsd("gemini-3-flash", {
+      promptTokens: 1_000_000,
+      completionTokens: 0,
+      cachedPromptTokens: 5_000_000,
+    });
+
+    expect(cost).toBeNull();
+  });
+
+  // Zero cache tokens is not "unpriceable cache tokens": every non-Anthropic
+  // arm reports zero, and those must still price normally.
+  it("prices a model with no cache rates normally when it reports no cache tokens", () => {
+    const cost = costUsd("gemini-3-flash", {
+      promptTokens: 1_000_000,
+      completionTokens: 0,
+      cachedPromptTokens: 0,
+      cacheWritePromptTokens: 0,
+    });
+
+    expect(cost).toBeCloseTo(0.25);
+  });
+
   it("returns null for an unpriced model instead of guessing zero", () => {
     expect(
       costUsd("some-unreleased-model", { promptTokens: 1000, completionTokens: 10 }),

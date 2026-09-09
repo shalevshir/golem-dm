@@ -58,6 +58,51 @@ describe("runNarrativeBenchmark", () => {
     expect(SCRIPTED_BRIEFS.some((brief) => brief.recentNarrations.length > 0)).toBe(true);
   });
 
+  // The one piece of genuinely new arithmetic in this module, and it had no
+  // check behind it: the renderer test hand-sets a share on a fixture whose
+  // own numbers do not produce it, so it validated the print format only.
+  it("sums cache counts across samples and derives the share from the real prompt size", async () => {
+    const cached = { ...USAGE, cachedPromptTokens: 1800, cacheWritePromptTokens: 200 };
+    const report = await runNarrativeBenchmark({
+      runtime: createAgentRuntime({
+        routing: DEFAULT_MODEL_ROUTING,
+        port: createFakePort({
+          stream: SCRIPTED_BRIEFS.map(() => [
+            { type: "text-delta" as const, text: "אלדד נסוג." },
+            { type: "finish" as const, text: "אלדד נסוג.", usage: cached },
+          ]),
+        }),
+      }),
+    });
+
+    const n = SCRIPTED_BRIEFS.length;
+    expect(report.usage.cachedPromptTokens).toBe(1800 * n);
+    expect(report.usage.cacheWritePromptTokens).toBe(200 * n);
+    // Denominator is the REAL prompt: uncached + reads + writes, which are
+    // disjoint on Anthropic. Not `promptTokens` alone, which would exceed 1.
+    expect(report.usage.cachedTokenShare).toBeCloseTo(1800 / (900 + 1800 + 200));
+  });
+
+  // Absent is not zero: routing is config, so the narrative role can point at
+  // a provider that reports no cache accounting at all.
+  it("leaves the cache counts and the share null when no finish reported them", async () => {
+    const report = await runNarrativeBenchmark({
+      runtime: createAgentRuntime({
+        routing: DEFAULT_MODEL_ROUTING,
+        port: createFakePort({
+          stream: SCRIPTED_BRIEFS.map(() => [
+            { type: "text-delta" as const, text: "אלדד נסוג." },
+            { type: "finish" as const, text: "אלדד נסוג.", usage: USAGE },
+          ]),
+        }),
+      }),
+    });
+
+    expect(report.usage.cachedPromptTokens).toBeNull();
+    expect(report.usage.cacheWritePromptTokens).toBeNull();
+    expect(report.usage.cachedTokenShare).toBeNull();
+  });
+
   it("counts a digit in the output as a violation", async () => {
     const report = await runNarrativeBenchmark({
       runtime: createAgentRuntime({
