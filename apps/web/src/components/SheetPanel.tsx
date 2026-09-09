@@ -31,7 +31,11 @@ export interface SheetPanelProps {
    * would show a stale number on exactly the turn it matters.
    */
   currentHp: number | null;
-  /** Live temporary HP, same sourcing as `currentHp`. Absent out of combat. */
+  /**
+   * Live temporary HP, same sourcing as `currentHp`. Absent out of combat,
+   * where no projection carries one — and NOT defaulted from the sheet, for
+   * the reason `currentHp` gives.
+   */
   tempHp?: number;
   /**
    * The fetch failed and nothing retries it. Distinguished from "not yet"
@@ -112,11 +116,16 @@ export function SheetPanel(props: SheetPanelProps): JSX.Element {
     );
   }
 
-  // The projection wins whenever it has an answer: the sheet's `currentHp` is
-  // whatever it was when the campaign loaded, so trusting it after a fight
-  // would show full health to a bleeding player.
-  const currentHp = props.currentHp ?? character.currentHp;
-  const tempHp = props.tempHp ?? character.tempHp;
+  // No fallback to `character.currentHp`. That field is whatever HP the sheet
+  // had when the campaign loaded, and every render of this panel happens with
+  // a projection already in hand, so a null here never means "not yet" — it
+  // means the live row could not be found (`Combatant.characterId` is
+  // optional, so a board can carry a hero row with no id to match on). Showing
+  // the load-time number then would state full health for a bleeding player
+  // with total confidence, which is the exact failure this panel exists to
+  // prevent. An em dash says "unknown" instead.
+  const { currentHp } = props;
+  const tempHp = props.tempHp ?? 0;
 
   return (
     // Collapsed until asked for. The summary carries name, class, level and
@@ -133,7 +142,8 @@ export function SheetPanel(props: SheetPanelProps): JSX.Element {
         {/* Repeated in the summary on purpose: HP is the number the panel
             exists to answer, and it must be readable without opening it. */}
         <span className="sheet-hp">
-          {he.sheet.hp} <Ltr>{`${String(currentHp)}/${String(character.maxHp)}`}</Ltr>
+          {he.sheet.hp}{" "}
+          <Ltr>{`${currentHp === null ? "—" : String(currentHp)}/${String(character.maxHp)}`}</Ltr>
         </span>
       </summary>
 
@@ -198,8 +208,12 @@ export function SheetPanel(props: SheetPanelProps): JSX.Element {
             heading is not gated on a condition that is always true. */}
         <h3>{he.sheet.carried}</h3>
         <ul className="sheet-list">
-          {character.inventory.map((item) => (
-            <InventoryLine key={item.itemId} item={item} />
+          {/* Keyed by position, not by `itemId`: an inventory may legitimately
+              list the same id twice (`attacks.ts`'s `dedupeByWeaponId` exists
+              because it can), and duplicate keys would let React carry the
+              equipped styling onto the wrong row. */}
+          {character.inventory.map((item, index) => (
+            <InventoryLine key={`${item.itemId}:${String(index)}`} item={item} />
           ))}
         </ul>
       </div>

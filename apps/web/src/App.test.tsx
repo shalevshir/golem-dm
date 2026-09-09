@@ -1519,7 +1519,7 @@ describe("App (character sheet)", () => {
         type: "campaign_state",
         sequence: 0,
         snapshot: snapshotWith([
-          combatant("hero", "party", "alive"),
+          combatant("hero", "party", "alive", { characterId: "hero" }),
           combatant("goblin-a", "hostile", "alive"),
         ]),
       });
@@ -1529,6 +1529,10 @@ describe("App (character sheet)", () => {
       expect(screen.getByText("אלדד")).toBeTruthy();
     });
     expect(screen.queryByText(he.sheet.loading)).toBeNull();
+    // The LIVE row's HP, not the sheet's load-time 28/28. Without the
+    // `characterId` on the fixture above this passed against the snapshot and
+    // proved nothing about the matching this commit exists to do.
+    expect(screen.getByText("11/28")).toBeTruthy();
   });
 
   // A combat-only campaign has no scene character server-side (404), so the

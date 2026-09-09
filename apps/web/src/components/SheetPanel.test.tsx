@@ -69,9 +69,34 @@ describe("SheetPanel", () => {
     expect(screen.queryByText("28/28")).toBeNull();
   });
 
-  it("falls back to the sheet's own HP when the projection has none yet", () => {
+  // This used to assert the opposite — that a null live HP fell back to the
+  // sheet's own `currentHp`. It never meant "not yet": the panel only renders
+  // with a projection in hand, so null means the live combatant row could not
+  // be matched, and printing the load-time number there tells a wounded player
+  // they are at full health.
+  it("shows HP as unknown rather than the sheet's load-time value", () => {
     render(<SheetPanel character={character({ currentHp: 28 })} currentHp={null} />);
-    expect(screen.getByText("28/28")).toBeTruthy();
+    expect(screen.getByText("—/28")).toBeTruthy();
+    expect(screen.queryByText("28/28")).toBeNull();
+  });
+
+  it("does not fall back to the sheet's temporary HP either", () => {
+    render(<SheetPanel character={character({ tempHp: 7 })} currentHp={9} />);
+    expect(screen.queryByText(he.sheet.tempHp)).toBeNull();
+  });
+
+  // A sheet may legitimately list the same id twice; duplicate React keys let
+  // the equipped styling land on the wrong row.
+  it("renders both rows when an inventory lists the same item id twice", () => {
+    const twice = character({
+      inventory: [
+        { itemId: "dagger", nameHebrew: "פגיון", quantity: 1, equipped: true },
+        { itemId: "dagger", nameHebrew: "פגיון", quantity: 4, equipped: false },
+      ],
+    });
+    render(<SheetPanel character={twice} currentHp={9} />);
+    expect(screen.getAllByText("פגיון")).toHaveLength(2);
+    expect(screen.getAllByText(he.sheet.equipped)).toHaveLength(1);
   });
 
   it("renders negative modifiers as signed, with a real minus sign", () => {

@@ -70,7 +70,6 @@ export const he = {
     target_behind_full_cover: "המטרה מוסתרת לחלוטין.",
   },
   sheet: {
-    heading: "גיליון הדמות",
     level: "רמה",
     hp: "נקודות חיים",
     tempHp: "חיים זמניים",
@@ -86,7 +85,7 @@ export const he = {
     attacks: "התקפות",
     armor: "שריון גוף",
     carried: "ציוד",
-    equipped: "חבוש",
+    equipped: "מצויד",
     /** Rendered when the derived sheet has not arrived yet. */
     loading: "טוען גיליון…",
     /** Rendered when it is not coming — the fetch failed and nothing retries. */
