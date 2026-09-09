@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import Fastify from "fastify";
 import { createInMemoryEventStore } from "@ai-dm/memory";
 import type { EventStore } from "@ai-dm/memory";
-import { EncounterCatalogue } from "@ai-dm/schemas";
+import { DerivedCharacter, EncounterCatalogue } from "@ai-dm/schemas";
 import { encounterCatalogue } from "../encounters/index.js";
 import { createCampaignRegistry, registerHttpRoutes } from "./http.js";
 import type { CampaignRegistry } from "./http.js";
@@ -356,5 +356,52 @@ describe("GET /encounters/:encounterId — derived characters and Hebrew labels"
     const built = encounterCatalogue("goblin-ambush");
     expect(built.characters).toHaveLength(1);
     expect(built.characters[0]?.characterId).toBe("hero");
+  });
+});
+
+describe("GET /campaigns/:campaignId/character", () => {
+  it("serves the scene campaign's derived sheet, inventory included", async () => {
+    const { app } = appWith();
+    const created = await app.inject({
+      method: "POST",
+      url: "/campaigns",
+      payload: { worldId: "emberfall" },
+    });
+    const { campaignId } = created.json<{ campaignId: string }>();
+
+    const response = await app.inject({ url: `/campaigns/${campaignId}/character` });
+
+    expect(response.statusCode).toBe(200);
+    // Parsed, not shape-guessed: the route's contract is the schema, so a
+    // drift in either direction fails here rather than in the client.
+    const character = DerivedCharacter.parse(response.json());
+    expect(character.characterId).toBe("hero");
+    expect(character.maxHp).toBeGreaterThan(0);
+    expect(character.inventory.length).toBeGreaterThan(0);
+    expect(character.inventory.every((item) => item.quantity >= 1)).toBe(true);
+  });
+
+  it("404s for a campaign id nobody created", async () => {
+    const { app } = appWith();
+    const response = await app.inject({
+      url: "/campaigns/00000000-0000-4000-8000-000000000999/character",
+    });
+    expect(response.statusCode).toBe(404);
+  });
+
+  // Not a server fault: a combat-only campaign legitimately has no scene, and
+  // its character reaches the client in the encounter catalogue instead.
+  it("404s for a combat-only campaign, which has no scene character", async () => {
+    const { app } = appWith();
+    const created = await app.inject({
+      method: "POST",
+      url: "/campaigns",
+      payload: { encounterId: "goblin-ambush" },
+    });
+    const { campaignId } = created.json<{ campaignId: string }>();
+
+    const response = await app.inject({ url: `/campaigns/${campaignId}/character` });
+
+    expect(response.statusCode).toBe(404);
   });
 });

@@ -12,7 +12,7 @@
 // `actionId`/`combatantId` fallback used when a lookup misses is Latin (the
 // SRD itself is still English, ADR 0001).
 import type { z } from "zod";
-import { EncounterCatalogue, CampaignCreated } from "@ai-dm/schemas";
+import { DerivedCharacter, EncounterCatalogue, CampaignCreated } from "@ai-dm/schemas";
 import type { CatalogueAction, CatalogueCombatant } from "@ai-dm/schemas";
 
 // Re-exported so the components can import their prop types from one place
@@ -53,4 +53,26 @@ export async function fetchCatalogue(
   // inbound frame. A cast here would suppress exactly the check that proves
   // the server and client agree about this contract.
   return EncounterCatalogue.parse(await response.json());
+}
+
+/**
+ * The player's derived sheet, for the sheet panel. Scene campaigns only — a
+ * combat-only campaign has no scene character and the server answers 404,
+ * which is why `App.tsx` only calls this once a scene is open rather than on
+ * every campaign.
+ *
+ * Note the sheet's own `currentHp` is a snapshot from when the campaign
+ * loaded and does NOT track damage taken since. Live HP lives in the
+ * projection (`scene.heroHp`, or the hero's combatant row in a fight); the
+ * panel overlays it. Everything else here is stable for the campaign.
+ */
+export async function fetchCharacter(campaignId: string): Promise<DerivedCharacter> {
+  const response = await fetch(`/campaigns/${encodeURIComponent(campaignId)}/character`);
+  if (!response.ok) {
+    throw new Error(
+      `GET /campaigns/${campaignId}/character failed with ${String(response.status)}`,
+    );
+  }
+  // Parsed, never cast — same rule as `fetchCatalogue` above.
+  return DerivedCharacter.parse(await response.json());
 }

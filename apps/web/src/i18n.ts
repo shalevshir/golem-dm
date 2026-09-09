@@ -69,6 +69,62 @@ export const he = {
     target_out_of_reach: "המטרה רחוקה מדי.",
     target_behind_full_cover: "המטרה מוסתרת לחלוטין.",
   },
+  sheet: {
+    level: "רמה",
+    hp: "נקודות חיים",
+    tempHp: "חיים זמניים",
+    armorClass: "שריון",
+    speed: "תנועה",
+    initiative: "יוזמה",
+    passivePerception: "תפיסה פסיבית",
+    proficiency: "מיומנות",
+    hitDice: "קוביות חיים",
+    abilities: "מאפיינים",
+    savingThrows: "הצלות",
+    skills: "כישורים",
+    attacks: "התקפות",
+    armor: "שריון גוף",
+    carried: "ציוד",
+    equipped: "מצויד",
+    /** Rendered when the derived sheet has not arrived yet. */
+    loading: "טוען גיליון…",
+    /** Rendered when it is not coming — the fetch failed and nothing retries. */
+    unavailable: "הגיליון אינו זמין כרגע.",
+  },
+  classes: {
+    fighter: "לוחם",
+    wizard: "קוסם",
+    rogue: "נוכל",
+    cleric: "כומר",
+  },
+  abilities: {
+    str: "כוח",
+    dex: "זריזות",
+    con: "חוסן",
+    int: "תבונה",
+    wis: "חוכמה",
+    cha: "כריזמה",
+  },
+  skills: {
+    acrobatics: "אקרובטיקה",
+    animal_handling: "טיפול בבעלי חיים",
+    arcana: "כישוף",
+    athletics: "אתלטיקה",
+    deception: "הטעיה",
+    history: "היסטוריה",
+    insight: "תובנה",
+    intimidation: "הפחדה",
+    investigation: "חקירה",
+    medicine: "רפואה",
+    nature: "טבע",
+    perception: "תפיסה",
+    performance: "מופע",
+    persuasion: "שכנוע",
+    religion: "דת",
+    sleight_of_hand: "זריזות ידיים",
+    stealth: "התגנבות",
+    survival: "הישרדות",
+  },
   log: {
     heading: "יומן קרב",
     turnOf: "תור",
@@ -105,4 +161,32 @@ const UNIVERSAL_ACTION_LABELS: Record<string, string | undefined> = {
  *  get their name from the catalogue instead, never from this table. */
 export function actionLabel(actionType: string): string | undefined {
   return UNIVERSAL_ACTION_LABELS[actionType];
+}
+
+/**
+ * Hebrew label for an ability / skill / class key, falling back to the raw
+ * key exactly as `errorMessage` and `rejectionMessage` do: these keys come
+ * from `DerivedCharacter`, whose `Skill` and `CharacterClass` unions can
+ * widen server-side, and a sheet row rendering blank is worse than one
+ * rendering `sleight_of_hand`. A caller showing a fallback is showing Latin
+ * text in an RTL page and must wrap it accordingly.
+ */
+export function abilityLabel(key: string): string {
+  const table: Record<string, string | undefined> = he.abilities;
+  return table[key] ?? key;
+}
+
+export function skillLabel(key: string): string {
+  const table: Record<string, string | undefined> = he.skills;
+  return table[key] ?? key;
+}
+
+export function classLabel(key: string): string {
+  const table: Record<string, string | undefined> = he.classes;
+  return table[key] ?? key;
+}
+
+/** True when the label above fell through to the raw Latin key. */
+export function isFallbackLabel(label: string, key: string): boolean {
+  return label === key;
 }

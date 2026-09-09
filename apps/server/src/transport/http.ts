@@ -249,6 +249,42 @@ export function registerHttpRoutes(app: FastifyInstance, registry: CampaignRegis
     return reply.code(201).send({ campaignId: campaign.state.world.campaignId });
   });
 
+  /**
+   * The player's own sheet, for a character-sheet panel in the client.
+   *
+   * A route rather than a projection field: `DerivedCharacter` is derived
+   * data, and `CampaignState` is a fold of the event log (invariant 3), so
+   * putting a re-derivable sheet in it would store a second copy of numbers
+   * that already have one authority. That is the same reasoning
+   * `SceneSnapshot.heroHp` states when it refuses to carry max HP, and the
+   * same shape `GET /encounters/:encounterId` already has for display
+   * metadata no event carries.
+   *
+   * Scene campaigns only. A combat-only campaign's character reaches the
+   * client inside its encounter catalogue already, and a second delivery
+   * path for the same bytes would just be two things to keep in agreement.
+   */
+  app.get<{ Params: { campaignId: string } }>(
+    "/campaigns/:campaignId/character",
+    async (request, reply) => {
+      const campaign = await registry.get(request.params.campaignId);
+      if (campaign === null) {
+        return reply.code(404).send({ error: `Unknown campaign ${request.params.campaignId}` });
+      }
+
+      // `sceneStatics`, not `sceneStaticsOf`: that helper throws when no
+      // scene is open, and "this campaign has no scene" is a 404 here, not a
+      // server fault.
+      const character = campaign.sceneStatics?.character;
+      if (character === undefined) {
+        return reply
+          .code(404)
+          .send({ error: `Campaign ${request.params.campaignId} has no scene character` });
+      }
+      return reply.send(character);
+    },
+  );
+
   app.get<{ Params: { encounterId: string } }>("/encounters/:encounterId", (request, reply) => {
     // `UnknownEncounterError` is the only 404. Everything else
     // `encounterCatalogue` can throw — ENOENT from a missing SRD file, a

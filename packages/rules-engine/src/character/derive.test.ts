@@ -23,6 +23,54 @@ describe("deriveCharacter", () => {
     expect(deriveCharacter(sheet(), GEAR).armorNameEnglish).toBe("Chain Mail");
   });
 
+  // The inventory is display data, but it is still derived: the sheet holds
+  // bare ids, and the Hebrew name has to come off the SRD row here, where the
+  // gear maps are, rather than at the UI boundary (invariant 5).
+  it("resolves every carried item's Hebrew name off its SRD row", () => {
+    const derived = deriveCharacter(sheet(), GEAR);
+    expect(derived.inventory).toEqual([
+      { itemId: "chain_mail", nameHebrew: "שריון שרשראות", quantity: 1, equipped: true },
+      { itemId: "longsword", nameHebrew: "חרב ארוכה", quantity: 1, equipped: true },
+    ]);
+  });
+
+  it("carries unequipped items too, which the equipped-only derivations skip", () => {
+    const packed = sheet({
+      inventory: [
+        { itemId: "chain_mail", quantity: 1, equipped: true },
+        { itemId: "longsword", quantity: 1, equipped: false },
+      ],
+    });
+    const derived = deriveCharacter(packed, GEAR);
+    expect(derived.inventory.map((item) => item.equipped)).toEqual([true, false]);
+    // The unequipped longsword is listed, but contributes no attack: only an
+    // Unarmed Strike is derived.
+    expect(derived.attacks).toHaveLength(1);
+  });
+
+  it("leaves nameHebrew absent for ordinary gear with no weapon or armor row", () => {
+    const packed = sheet({
+      inventory: [
+        { itemId: "chain_mail", quantity: 1, equipped: true },
+        { itemId: "rope_hempen", quantity: 2, equipped: false },
+      ],
+    });
+    const derived = deriveCharacter(packed, GEAR);
+    expect(derived.inventory[1]).toEqual({
+      itemId: "rope_hempen",
+      quantity: 2,
+      equipped: false,
+    });
+    expect(derived.inventory[1]?.nameHebrew).toBeUndefined();
+  });
+
+  it("preserves quantity rather than flattening a stack to one line per item", () => {
+    const packed = sheet({
+      inventory: [{ itemId: "rope_hempen", quantity: 3, equipped: false }],
+    });
+    expect(deriveCharacter(packed, GEAR).inventory[0]?.quantity).toBe(3);
+  });
+
   it("leaves armorNameEnglish absent for an unarmored character", () => {
     const unarmored = sheet({ inventory: [{ itemId: "longsword", quantity: 1, equipped: true }] });
     expect(deriveCharacter(unarmored, GEAR).armorNameEnglish).toBeUndefined();
