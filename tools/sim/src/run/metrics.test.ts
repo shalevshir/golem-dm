@@ -98,6 +98,26 @@ describe("summariseUsage", () => {
     expect(summary.tokensPerTurn).toBeCloseTo(1550);
   });
 
+  // Every record above carries zero cache tokens, so that test cannot tell
+  // whether they are counted. This one can: the cost column beside
+  // `tokensPerTurn` prices cache reads and writes, and a token count that
+  // excluded them would derive the two numbers in one table row from
+  // different prompts.
+  it("counts cache tokens in the per-turn average, as the cost column does", () => {
+    const summary = summariseUsage([
+      record({
+        promptTokens: 100,
+        completionTokens: 0,
+        cachedPromptTokens: 800,
+        cacheWritePromptTokens: 100,
+      }),
+    ]);
+
+    expect(summary.cachedPromptTokens).toBe(800);
+    expect(summary.cacheWritePromptTokens).toBe(100);
+    expect(summary.tokensPerTurn).toBeCloseTo(1000);
+  });
+
   it("declares incompleteness rather than hiding it", () => {
     const summary = summariseUsage([
       record(),
